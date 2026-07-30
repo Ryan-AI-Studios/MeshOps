@@ -1,0 +1,21 @@
+# MeshOps
+work/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+.env
+output/
+
+# Local planning / reference (not published)
+conductor/
+docs/
+
+# large binaries unless LFS policy set
+# fixtures/rogue2/*.stl  # un-ignore when using LFS
+.ledgerful/

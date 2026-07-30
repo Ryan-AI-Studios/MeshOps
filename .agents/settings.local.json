@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(meshops *)",
+      "Bash(pytest *)",
+      "Bash(ruff *)",
+      "Bash(uv *)"
+    ]
+  }
+}
