@@ -15,12 +15,20 @@ from meshops import __version__
 app = typer.Typer(
     name="meshops",
     help=(
-        "MeshOps — triage + guarded T1/T2 repair "
-        "(ingest / triage / render / report / repair / export / diff / accept)."
+        "MeshOps — triage + guarded T1/T2 repair + T7 design "
+        "(ingest / triage / render / report / repair / export / diff / accept / design)."
     ),
     add_completion=False,
     no_args_is_help=True,
 )
+
+design_app = typer.Typer(
+    name="design",
+    help="T7 mechanical design-from-code (build123d harness + absolute validate).",
+    add_completion=False,
+    no_args_is_help=True,
+)
+app.add_typer(design_app, name="design")
 
 
 def _emit_json(payload: dict[str, Any]) -> None:
@@ -370,6 +378,137 @@ def accept_cmd(
             err=not result.ok,
         )
 
+    if not result.ok:
+        raise typer.Exit(1)
+
+
+@design_app.command("run")
+def design_run_cmd(
+    source: Path = typer.Option(..., "--source", help="Path to build123d geometry source (.py)"),
+    work_root: Path = typer.Option(Path("work"), "--work-root", help="Job store root"),
+    timeout: float = typer.Option(60.0, "--timeout", help="Runner timeout seconds"),
+    no_diff: bool = typer.Option(
+        False,
+        "--no-diff",
+        help="Skip F3D; write stub PNG view_paths (still required for success)",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON on stdout"),
+) -> None:
+    """Run geometry source through harness → design job + accept_candidate."""
+    try:
+        from meshops.design import run_design_pipeline
+    except ImportError as exc:
+        _emit_error(
+            RuntimeError(f"design package import failed (install meshops[design]): {exc}"),
+            json_mode=json_out,
+            code=1,
+        )
+
+    try:
+        result = run_design_pipeline(
+            source,
+            work_root=work_root,
+            timeout_s=timeout,
+            no_diff=no_diff,
+        )
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+
+    payload: dict[str, Any] = {
+        "ok": result.ok,
+        "mesh_id": result.mesh_id,
+        "job_dir": str(result.job_dir),
+        "paths": result.paths,
+        "manifest": result.manifest.model_dump(mode="json"),
+        "notes": result.notes,
+        "acceptance": (
+            result.acceptance.model_dump(mode="json") if result.acceptance is not None else None
+        ),
+        "slice": "skipped",
+        "honesty_note": "absolute validate is primary gate; self-baseline safety net only",
+    }
+    if json_out:
+        _emit_json(payload)
+    else:
+        status = "ok" if result.ok else "FAIL"
+        typer.echo(
+            f"design run {status} mesh_id={result.mesh_id} job_dir={result.job_dir}",
+            err=not result.ok,
+        )
+    if not result.ok:
+        raise typer.Exit(1)
+
+
+@design_app.command("from-spec")
+def design_from_spec_cmd(
+    template: str = typer.Option(
+        "bracket_m4",
+        "--template",
+        help="Template id (default: bracket_m4)",
+    ),
+    hole_spacing: float = typer.Option(40.0, "--hole-spacing", help="Hole center spacing mm"),
+    wall: float = typer.Option(3.0, "--wall", help="Wall thickness mm"),
+    thickness: float = typer.Option(4.0, "--thickness", help="Plate thickness mm"),
+    hole_diameter: float = typer.Option(4.2, "--hole-diameter", help="Hole diameter mm"),
+    work_root: Path = typer.Option(Path("work"), "--work-root", help="Job store root"),
+    timeout: float = typer.Option(60.0, "--timeout", help="Runner timeout seconds"),
+    no_diff: bool = typer.Option(
+        False,
+        "--no-diff",
+        help="Skip F3D; write stub PNG view_paths (still required for success)",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON on stdout"),
+) -> None:
+    """Parametric template → design job + accept_candidate (unattended)."""
+    try:
+        from meshops.design import BracketParams, design_from_template
+    except ImportError as exc:
+        _emit_error(
+            RuntimeError(f"design package import failed (install meshops[design]): {exc}"),
+            json_mode=json_out,
+            code=1,
+        )
+
+    try:
+        params = BracketParams(
+            hole_spacing_mm=hole_spacing,
+            wall_mm=wall,
+            thickness_mm=thickness,
+            hole_diameter_mm=hole_diameter,
+        )
+        result = design_from_template(
+            template,
+            params=params,
+            work_root=work_root,
+            timeout_s=timeout,
+            no_diff=no_diff,
+        )
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+
+    payload = {
+        "ok": result.ok,
+        "mesh_id": result.mesh_id,
+        "job_dir": str(result.job_dir),
+        "template": template,
+        "params": params.model_dump(mode="json"),
+        "paths": result.paths,
+        "manifest": result.manifest.model_dump(mode="json"),
+        "notes": result.notes,
+        "acceptance": (
+            result.acceptance.model_dump(mode="json") if result.acceptance is not None else None
+        ),
+        "slice": "skipped",
+        "honesty_note": "absolute validate is primary gate; self-baseline safety net only",
+    }
+    if json_out:
+        _emit_json(payload)
+    else:
+        status = "ok" if result.ok else "FAIL"
+        typer.echo(
+            f"design from-spec {status} template={template} mesh_id={result.mesh_id}",
+            err=not result.ok,
+        )
     if not result.ok:
         raise typer.Exit(1)
 

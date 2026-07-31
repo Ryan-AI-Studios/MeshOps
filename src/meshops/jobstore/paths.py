@@ -101,10 +101,16 @@ class JobPaths:
         """Atomic revision history root (0002+)."""
         return self.job_dir / "revs"
 
+    @property
+    def design_dir(self) -> Path:
+        """Mechanical design-from-code artifacts (0003+): source, STEP, STL copy."""
+        return self.job_dir / "design"
+
 
 def ensure_job_layout(paths: JobPaths) -> None:
-    """Create job directory skeleton (views/, rois/, revs/)."""
+    """Create job directory skeleton (views/, rois/, revs/, design/)."""
     paths.job_dir.mkdir(parents=True, exist_ok=True)
     paths.views_dir.mkdir(exist_ok=True)
     paths.rois_dir.mkdir(exist_ok=True)
     paths.revs_dir.mkdir(exist_ok=True)
+    paths.design_dir.mkdir(exist_ok=True)

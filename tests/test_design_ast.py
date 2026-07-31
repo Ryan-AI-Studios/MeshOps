@@ -1,0 +1,61 @@
+"""AST lint for design geometry sources (DoD-3)."""
+
+from __future__ import annotations
+
+import pytest
+
+from meshops.design.ast_guard import lint_geometry_source
+from meshops.design.errors import DesignError
+
+
+def test_ast__allows_build123d_algebra() -> None:
+    src = """
+from build123d import Box
+result = Box(10, 10, 10)
+"""
+    lint_geometry_source(src)  # no raise
+
+
+def test_ast__forbid_subprocess_import() -> None:
+    src = "import subprocess\nresult = None\n"
+    with pytest.raises(DesignError) as ei:
+        lint_geometry_source(src)
+    assert ei.value.code == "ast_denied"
+    assert "subprocess" in str(ei.value).lower()
+
+
+def test_ast__forbid_socket_import() -> None:
+    with pytest.raises(DesignError) as ei:
+        lint_geometry_source("import socket\n")
+    assert ei.value.code == "ast_denied"
+
+
+def test_ast__forbid_os_system() -> None:
+    src = "import os\nos.system('echo hi')\n"
+    with pytest.raises(DesignError) as ei:
+        lint_geometry_source(src)
+    assert ei.value.code == "ast_denied"
+
+
+def test_ast__forbid_eval() -> None:
+    with pytest.raises(DesignError) as ei:
+        lint_geometry_source("result = eval('1+1')\n")
+    assert ei.value.code == "ast_denied"
+
+
+def test_ast__forbid_open_write() -> None:
+    with pytest.raises(DesignError) as ei:
+        lint_geometry_source("open('/tmp/x', 'w').write('x')\n")
+    assert ei.value.code == "ast_denied"
+
+
+def test_ast__forbid_ctypes() -> None:
+    with pytest.raises(DesignError) as ei:
+        lint_geometry_source("import ctypes\n")
+    assert ei.value.code == "ast_denied"
+
+
+def test_ast__forbid_unknown_module() -> None:
+    with pytest.raises(DesignError) as ei:
+        lint_geometry_source("import requests\n")
+    assert ei.value.code == "ast_denied"
