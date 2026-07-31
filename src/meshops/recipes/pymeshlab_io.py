@@ -35,6 +35,38 @@ def _import_pymeshlab() -> Any:
     return pymeshlab
 
 
+@contextlib.contextmanager
+def _silence_native_stdio() -> Any:
+    """Redirect C-level stdout/stderr so MeshLab plugin warnings do not pollute CLI JSON.
+
+    PyMeshLab may print ``Warning: Unable to load the following plugins`` to fd 1,
+    which breaks ``meshops … --json`` parsers.
+    """
+    import os
+    import sys
+
+    try:
+        devnull = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
+        old_out, old_err = sys.stdout, sys.stderr
+        old_fd_out, old_fd_err = os.dup(1), os.dup(2)
+        os.dup2(devnull.fileno(), 1)
+        os.dup2(devnull.fileno(), 2)
+        sys.stdout = devnull  # type: ignore[assignment]
+        sys.stderr = devnull  # type: ignore[assignment]
+        try:
+            yield
+        finally:
+            sys.stdout, sys.stderr = old_out, old_err
+            os.dup2(old_fd_out, 1)
+            os.dup2(old_fd_err, 2)
+            os.close(old_fd_out)
+            os.close(old_fd_err)
+            devnull.close()
+    except Exception:
+        # Best-effort; never block recipes if redirect fails.
+        yield
+
+
 def pymeshlab_exception_type() -> type[BaseException]:
     pml = _import_pymeshlab()
     return pml.PyMeshLabException  # type: ignore[no-any-return]
@@ -167,15 +199,16 @@ def run_filter_chain(
     Returns aggregated filter_metrics keyed by filter name (with index suffix
     when the same name appears more than once).
     """
-    ms = new_mesh_set()
-    load_mesh_into(ms, input_path, unify_vertices=unify_vertices)
-    metrics: dict[str, Any] = {}
-    for i, (name, kwargs) in enumerate(steps):
-        m = apply_filter(ms, name, **kwargs)
-        key = name if name not in metrics else f"{name}#{i}"
-        metrics[key] = m
-    save_current_mesh(ms, output_path)
-    # Explicit clear for memory hygiene (fresh set already per call).
-    with contextlib.suppress(Exception):
-        ms.clear()
+    with _silence_native_stdio():
+        ms = new_mesh_set()
+        load_mesh_into(ms, input_path, unify_vertices=unify_vertices)
+        metrics: dict[str, Any] = {}
+        for i, (name, kwargs) in enumerate(steps):
+            m = apply_filter(ms, name, **kwargs)
+            key = name if name not in metrics else f"{name}#{i}"
+            metrics[key] = m
+        save_current_mesh(ms, output_path)
+        # Explicit clear for memory hygiene (fresh set already per call).
+        with contextlib.suppress(Exception):
+            ms.clear()
     return metrics
