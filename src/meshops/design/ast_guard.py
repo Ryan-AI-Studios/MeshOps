@@ -350,11 +350,7 @@ class _AstGuardVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Name(self, node: ast.Name) -> None:
-        if (
-            node.id in _DENIED_NAME_IDS
-            or _is_export_name(node.id)
-            or node.id in _DENIED_FS_NAMES
-        ):
+        if node.id in _DENIED_NAME_IDS or _is_export_name(node.id) or node.id in _DENIED_FS_NAMES:
             _deny(f"AST denied name {node.id!r}", node=node, name=node.id)
         self.generic_visit(node)
 
