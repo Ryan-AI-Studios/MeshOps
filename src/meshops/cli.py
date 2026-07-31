@@ -1,4 +1,6 @@
-"""Typer CLI — ingest / triage / render / report / repair / export / diff / accept."""
+"""Typer CLI — ingest / triage / render / report / repair / export / diff /
+accept / design / escalate.
+"""
 
 from __future__ import annotations
 
@@ -15,8 +17,8 @@ from meshops import __version__
 app = typer.Typer(
     name="meshops",
     help=(
-        "MeshOps — triage + guarded T1/T2 repair + T7 design "
-        "(ingest / triage / render / report / repair / export / diff / accept / design)."
+        "MeshOps — triage + guarded T1/T2 repair + T7 design + T3 escalate "
+        "(ingest / triage / render / report / repair / export / diff / accept / design / escalate)."
     ),
     add_completion=False,
     no_args_is_help=True,
@@ -29,6 +31,17 @@ design_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(design_app, name="design")
+
+escalate_app = typer.Typer(
+    name="escalate",
+    help=(
+        "T3 escalation: ROI + preview + Blender 5.2 LTS handoff + import-sculpt. "
+        "Set MESHOPS_BLENDER or install 5.2 LTS (track 0010 for mirror/doctor)."
+    ),
+    add_completion=False,
+    no_args_is_help=True,
+)
+app.add_typer(escalate_app, name="escalate")
 
 
 def _emit_json(payload: dict[str, Any]) -> None:
@@ -507,6 +520,206 @@ def design_from_spec_cmd(
         status = "ok" if result.ok else "FAIL"
         typer.echo(
             f"design from-spec {status} template={template} mesh_id={result.mesh_id}",
+            err=not result.ok,
+        )
+    if not result.ok:
+        raise typer.Exit(1)
+
+
+@escalate_app.command("roi")
+def escalate_roi_cmd(
+    mesh_id: str = typer.Option(..., "--mesh-id", help="Job mesh_id from ingest"),
+    bbox: str | None = typer.Option(
+        None,
+        "--bbox",
+        help="AABB as xmin,ymin,zmin,xmax,ymax,zmax (world coords)",
+    ),
+    from_sheet_heuristic: bool = typer.Option(
+        False,
+        "--from-sheet-heuristic",
+        help="Suggest ROI from mesh/diagnostics heuristic (never sole path)",
+    ),
+    work_root: Path = typer.Option(Path("work"), "--work-root", help="Job store root"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON on stdout"),
+) -> None:
+    """Create ROI package under rois/<roi_id>/ (manual bbox preferred)."""
+    from meshops.escalate.errors import EscalateError
+    from meshops.escalate.roi import create_roi_bbox, create_roi_from_sheet_heuristic
+
+    try:
+        if from_sheet_heuristic and bbox is None:
+            manifest = create_roi_from_sheet_heuristic(mesh_id, work_root=work_root)
+        elif bbox is not None:
+            parts = [p.strip() for p in bbox.split(",")]
+            if len(parts) != 6:
+                raise EscalateError(
+                    "--bbox must be xmin,ymin,zmin,xmax,ymax,zmax (6 floats)",
+                    code="invalid_bbox",
+                )
+            vals = [float(p) for p in parts]
+            manifest = create_roi_bbox(
+                mesh_id,
+                vals[0:3],
+                vals[3:6],
+                work_root=work_root,
+                source="manual",
+            )
+        else:
+            raise EscalateError(
+                "provide --bbox xmin,ymin,zmin,xmax,ymax,zmax or --from-sheet-heuristic",
+                code="invalid_bbox",
+            )
+    except EscalateError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    payload = {
+        "ok": True,
+        "mesh_id": mesh_id,
+        "roi": manifest.model_dump(mode="json"),
+    }
+    if json_out:
+        _emit_json(payload)
+    else:
+        typer.echo(f"roi ok roi_id={manifest.roi_id} source={manifest.source}")
+
+
+@escalate_app.command("preview-t3")
+def escalate_preview_t3_cmd(
+    mesh_id: str = typer.Option(..., "--mesh-id", help="Job mesh_id from ingest"),
+    roi: str | None = typer.Option(None, "--roi", help="ROI id from escalate roi"),
+    work_root: Path = typer.Option(Path("work"), "--work-root", help="Job store root"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON on stdout"),
+) -> None:
+    """Honest T3 preview package (never fixed / never auto-promote)."""
+    from meshops.escalate.errors import EscalateError
+    from meshops.escalate.preview_t3 import preview_t3
+
+    try:
+        result = preview_t3(mesh_id, roi, work_root=work_root)
+    except EscalateError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    payload = {
+        "ok": result.ok,
+        "preview": True,
+        "mesh_id": result.mesh_id,
+        "preview_id": result.preview_id,
+        "roi_id": result.roi_id,
+        "preview_dir": str(result.preview_dir),
+        "notes": result.notes,
+        "honesty_note": result.honesty_note,
+        "may_promote_working": False,
+        "may_claim_fixed": False,
+        "paths": result.paths,
+    }
+    if json_out:
+        _emit_json(payload)
+    else:
+        typer.echo(
+            f"preview-t3 preview_only preview_id={result.preview_id} "
+            f"(NOT fixed — handoff recommended)",
+            err=False,
+        )
+    # Exit 0 for successful package write even though ok=False (preview semantics)
+    # Callers must not treat as fixed.
+
+
+@escalate_app.command("handoff")
+def escalate_handoff_cmd(
+    mesh_id: str = typer.Option(..., "--mesh-id", help="Job mesh_id from ingest"),
+    roi: str = typer.Option(..., "--roi", help="ROI id from escalate roi"),
+    work_root: Path = typer.Option(Path("work"), "--work-root", help="Job store root"),
+    timeout: float = typer.Option(300.0, "--timeout", help="Blender timeout seconds"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON on stdout"),
+) -> None:
+    """Build Blender 5.2 LTS handoff .blend + instructions (MESHOPS_BLENDER / 0010)."""
+    from meshops.escalate.errors import EscalateError
+    from meshops.escalate.handoff import build_handoff
+
+    try:
+        manifest = build_handoff(
+            mesh_id,
+            roi,
+            work_root=work_root,
+            timeout_s=timeout,
+        )
+    except EscalateError as exc:
+        code = 2 if exc.code == "blender_missing" else 1
+        _emit_error(exc, json_mode=json_out, code=code)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    payload = {
+        "ok": True,
+        "mesh_id": mesh_id,
+        "handoff": manifest.model_dump(mode="json"),
+        "honesty_note": "handoff package ready — not autonomous hero fixed (N6)",
+    }
+    if json_out:
+        _emit_json(payload)
+    else:
+        typer.echo(f"handoff ok blend={manifest.blend_path} blender={manifest.blender_version}")
+
+
+@escalate_app.command("import-sculpt")
+def escalate_import_sculpt_cmd(
+    mesh_id: str = typer.Option(..., "--mesh-id", help="Job mesh_id from ingest"),
+    path: Path = typer.Option(..., "--path", help="Path to sculpted STL from Blender"),
+    approve: bool = typer.Option(
+        False,
+        "--approve",
+        help="Required: acknowledge human/agent sculpt responsibility",
+    ),
+    work_root: Path = typer.Option(Path("work"), "--work-root", help="Job store root"),
+    no_diff: bool = typer.Option(
+        False,
+        "--no-diff",
+        help="Skip F3D; write stub PNG view_paths (still required for success)",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON on stdout"),
+) -> None:
+    """Import sculpt STL as rev + sculpt-tier accept (requires --approve)."""
+    from meshops.escalate.errors import EscalateError
+    from meshops.escalate.import_sculpt import import_sculpt
+
+    try:
+        result = import_sculpt(
+            mesh_id,
+            path,
+            approve=approve,
+            work_root=work_root,
+            no_diff=no_diff,
+        )
+    except EscalateError as exc:
+        code = 2 if exc.code == "approve_required" else 1
+        _emit_error(exc, json_mode=json_out, code=code)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    payload: dict[str, Any] = {
+        "ok": result.ok,
+        "mesh_id": result.mesh_id,
+        "rev_id": result.rev_id,
+        "rev_dir": result.rev_dir,
+        "recipe_id": result.recipe_id,
+        "notes": result.notes,
+        "honesty_note": result.honesty_note,
+        "paths": result.paths,
+        "acceptance": (
+            result.acceptance.model_dump(mode="json") if result.acceptance is not None else None
+        ),
+        "promoted_to_working": False,
+    }
+    if json_out:
+        _emit_json(payload)
+    else:
+        status = "ok" if result.ok else "FAIL"
+        typer.echo(
+            f"import-sculpt {status} rev_id={result.rev_id} (not auto-promoted to working)",
             err=not result.ok,
         )
     if not result.ok:

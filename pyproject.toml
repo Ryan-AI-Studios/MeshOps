@@ -60,6 +60,8 @@ known-first-party = ["meshops"]
 [tool.ruff.lint.per-file-ignores]
 # Typer requires Option()/Argument() in defaults (framework pattern).
 "src/meshops/cli.py" = ["B008"]
+# Blender-only script (bpy available only inside Blender process).
+"src/meshops/escalate/scripts/*.py" = ["F401", "F821", "I001", "E402"]
 
 
 [tool.ruff.format]
@@ -77,6 +79,8 @@ exclude = [
     "work",
     "docs",
     "conductor",
+    # bpy scripts run inside Blender only — not importable in meshops venv
+    "src/meshops/escalate/scripts",
 ]
 reportMissingImports = true
 reportMissingTypeStubs = false
@@ -95,4 +99,5 @@ markers = [
     "rogue2: needs Rogue2.stl fixture or MESHOPS_ROGUE2_PATH",
     "slow: long-running (large mesh / soak)",
     "design: needs build123d (meshops[design] extra)",
+    "blender: needs Blender 5.2 LTS binary (MESHOPS_BLENDER or well-known path)",
 ]
