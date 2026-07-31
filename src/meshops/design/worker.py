@@ -107,6 +107,10 @@ def _is_blocked_export_attr(name: str) -> bool:
         "os",
         "sys",
         "pathlib",
+        "Path",  # build123d.Path is pathlib.Path — file write surface
+        "PurePath",
+        "PosixPath",
+        "WindowsPath",
         "io",
         "open",
         "shutil",

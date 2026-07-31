@@ -147,3 +147,15 @@ ExportDXF().write("outside.dxf")
     with pytest.raises(DesignError) as ei:
         lint_geometry_source(src)
     assert ei.value.code == "ast_denied"
+
+
+def test_ast__forbid_build123d_path_write_text() -> None:
+    """build123d.Path is pathlib.Path — obvious file-write surface (Codex)."""
+    src = """
+from build123d import Box, Path
+Path("outside.txt").write_text("agent write")
+result = Box(1, 1, 1)
+"""
+    with pytest.raises(DesignError) as ei:
+        lint_geometry_source(src)
+    assert ei.value.code == "ast_denied"

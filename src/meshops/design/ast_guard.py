@@ -243,6 +243,17 @@ _DENIED_IO_ATTRS: Final[frozenset[str]] = frozenset(
         "write",
         "Write",
         "Write_s",
+        "write_text",
+        "write_bytes",
+        "touch",
+        "mkdir",
+        "makedirs",
+        "unlink",
+        "rmdir",
+        "rename",
+        "replace",
+        "chmod",
+        "open",
         "save",
         "dump",
         "to_file",
@@ -252,6 +263,17 @@ _DENIED_IO_ATTRS: Final[frozenset[str]] = frozenset(
         "TemporaryFile",
         "TemporaryDirectory",
         "mktemp",
+    }
+)
+
+# pathlib / build123d.Path and similar filesystem types.
+_DENIED_FS_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        "Path",
+        "PurePath",
+        "PosixPath",
+        "WindowsPath",
+        "pathlib",
     }
 )
 
