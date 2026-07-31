@@ -54,20 +54,23 @@ def _write_diag(
     paths.diagnostics_json.write_text(diag.model_dump_json(indent=2), encoding="utf-8")
 
 
-def test_remap_view_paths_after_promote() -> None:
+def test_remap_view_paths_after_promote(tmp_path: Path) -> None:
     """Absolute .tmp_* view paths rewrite to promoted rev dir (P2 fix)."""
     from meshops.recipes.orchestrate import _remap_paths_after_promote
 
-    tmp = Path("C:/work/abc/revs/.tmp_r001_t1_clean")
-    success = Path("C:/work/abc/revs/r001_t1_clean")
+    # Use real tmp_path so Path.resolve() is portable (Windows + Linux CI).
+    revs = tmp_path / "revs"
+    tmp = revs / ".tmp_r001_t1_clean"
+    success = revs / "r001_t1_clean"
+    (tmp / "views").mkdir(parents=True)
     views = [
         str(tmp / "views" / "front_before.png"),
         str(tmp / "views" / "front_after.png"),
     ]
     fixed = _remap_paths_after_promote(views, from_root=tmp, to_root=success)
     assert fixed == [
-        str(success / "views" / "front_before.png"),
-        str(success / "views" / "front_after.png"),
+        str((success / "views" / "front_before.png").resolve()),
+        str((success / "views" / "front_after.png").resolve()),
     ]
     assert ".tmp_" not in fixed[0]
 

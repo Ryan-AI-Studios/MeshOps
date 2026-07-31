@@ -56,14 +56,48 @@ def load_mesh_into(
 
     STL default in MeshLab unifies verts; pass unify_vertices=False when
     duplicate-vertex repair must still see dups. Prefer PLY fixtures for T1.
+
+    Some Linux pymeshlab wheels fail to load binary STL with
+    ``Unknown format for load: stl``; fall back to a temporary PLY bridge
+    via trimesh so CI and Windows both succeed.
     """
     pml = _import_pymeshlab()
+    src = Path(path).resolve()
+    if not src.is_file():
+        raise RecipeEngineError(f"load failed: file not found: {src}")
+
+    def _try_load(load_path: Path) -> None:
+        # Prefer absolute path; kwargs order varies slightly across builds.
+        try:
+            ms.load_new_mesh(str(load_path), unify_vertices=unify_vertices)
+        except TypeError:
+            # Older/newer signature without unify_vertices kw.
+            ms.load_new_mesh(str(load_path))
+
     try:
-        ms.load_new_mesh(str(path), unify_vertices=unify_vertices)
+        _try_load(src)
+        return
+    except pml.PyMeshLabException as first_exc:
+        # Bridge via PLY when STL format plugins misbehave (common on Linux CI).
+        if src.suffix.lower() not in {".stl", ".stla", ".stlb"}:
+            raise RecipeEngineError(f"load failed: {first_exc}", cause=first_exc) from first_exc
+    except Exception as first_exc:
+        if src.suffix.lower() not in {".stl", ".stla", ".stlb"}:
+            raise RecipeEngineError(f"load failed: {first_exc}", cause=first_exc) from first_exc
+
+    try:
+        import tempfile
+
+        from meshops.ingest.stats import load_mesh as trimesh_load
+
+        mesh = trimesh_load(src)
+        with tempfile.TemporaryDirectory(prefix="meshops_pml_") as tmp:
+            ply_path = Path(tmp) / "bridge.ply"
+            mesh.export(ply_path)
+            _try_load(ply_path.resolve())
     except pml.PyMeshLabException as exc:
         raise RecipeEngineError(f"load failed: {exc}", cause=exc) from exc
     except Exception as exc:
-        # Some pymeshlab builds may raise other errors
         raise RecipeEngineError(f"load failed: {exc}", cause=exc) from exc
 
 
