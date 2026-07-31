@@ -16,7 +16,7 @@ runner = CliRunner()
 # Core CLI tests always collect; design e2e needs build123d.
 _HAS_B123D = True
 try:
-    import build123d  # noqa: F401
+    import build123d  # noqa: F401  # type: ignore[reportMissingImports]
 except ImportError:
     _HAS_B123D = False
 

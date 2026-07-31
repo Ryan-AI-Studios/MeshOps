@@ -166,9 +166,11 @@ def _stage_and_ingest(
         notes.extend(view_notes)
 
         # 7) accept_candidate only — for_design + topology; no slice
+        # Pass Path (not MeshStats) so resolve_mesh_for_numeric can load the mesh
+        # and evaluate_topology actually runs (self-baseline still OK for design).
         acceptance: AcceptanceResult = accept_candidate(
-            ing.stats,
-            ing.stats,
+            job_paths.original_stl,
+            job_paths.original_stl,
             policy=GuardPolicy.for_design(),
             require_views=True,
             view_paths=view_paths,

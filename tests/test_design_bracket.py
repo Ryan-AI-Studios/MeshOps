@@ -50,6 +50,9 @@ def test_bracket__from_spec_e2e(tmp_work: Path) -> None:
     assert result.acceptance.ok is True
     assert result.acceptance.policy_tier == "design"
     assert result.acceptance.view_paths
+    # Topology gate must actually run (Path → load mesh, not MeshStats silent no-op).
+    assert result.acceptance.metrics.get("pack.degenerate_faces") is not None
+    assert result.acceptance.metrics.get("pack.degenerate_face_ratio") is not None
     # Slice skipped honesty
     assert result.acceptance.slice is not None
     assert result.acceptance.slice.status == "skipped"

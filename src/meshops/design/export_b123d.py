@@ -15,7 +15,8 @@ from meshops.design.models import DEFAULT_EXPORT_STEP_KWARGS, DEFAULT_EXPORT_STL
 
 def _require_build123d() -> Any:
     try:
-        import build123d as b123d
+        # Optional meshops[design] extra — ignore missing for core-CI basedpyright.
+        import build123d as b123d  # type: ignore[reportMissingImports]
     except ImportError as exc:
         raise DesignError(
             "build123d is not installed; install with: uv sync --extra design "

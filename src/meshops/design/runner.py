@@ -116,7 +116,8 @@ def run_geometry_source(
 
     # Ensure build123d present in this env (clear error before subprocess)
     try:
-        import build123d  # noqa: F401
+        # Optional meshops[design] extra — ignore missing for core-CI basedpyright.
+        import build123d  # noqa: F401  # type: ignore[reportMissingImports]
     except ImportError as exc:
         raise DesignError(
             "build123d is not installed; install with: uv sync --extra design "
