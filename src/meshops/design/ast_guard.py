@@ -1,7 +1,8 @@
 """AST lint for agent/template geometry sources (not an OS sandbox).
 
 Deny dangerous modules/calls; allow build123d + pure geometry helpers.
-Defense-in-depth: runner still uses scrubbed subprocess + timeout.
+Defense-in-depth: runner still uses scrubbed subprocess + timeout + worker
+import/export stripping (see worker.py).
 """
 
 from __future__ import annotations
@@ -11,23 +12,20 @@ from typing import Final
 
 from meshops.design.errors import DesignError
 
-# Root module names agents may import.
+# Root module names agents may import (minimal geometry surface).
+# NOTE: operator/functools intentionally excluded (attrgetter / partial escapes).
 _ALLOWED_IMPORT_ROOTS: Final[frozenset[str]] = frozenset(
     {
         "build123d",
         "math",
         "typing",
         "typing_extensions",
-        "collections",
         "dataclasses",
         "enum",
-        "functools",
         "itertools",
-        "operator",
         "numbers",
         "decimal",
         "fractions",
-        "copy",
         "abc",
     }
 )
@@ -76,6 +74,10 @@ _DENIED_IMPORT_ROOTS: Final[frozenset[str]] = frozenset(
         "winreg",
         "nt",
         "posix",
+        "operator",  # attrgetter escapes
+        "functools",  # partial / wraps
+        "collections",  # keep surface small
+        "copy",
     }
 )
 
@@ -89,7 +91,7 @@ _DENIED_CALL_NAMES: Final[frozenset[str]] = frozenset(
         "input",
         "breakpoint",
         "execfile",
-        "help",  # can load modules interactively in some envs
+        "help",
         "getattr",
         "setattr",
         "delattr",
@@ -99,12 +101,12 @@ _DENIED_CALL_NAMES: Final[frozenset[str]] = frozenset(
         "dir",
         "memoryview",
         "bytearray",
-        "bytes",  # often used in polyglot escapes; geometry does not need raw bytes()
+        "bytes",
         "chr",
         "ord",
         "ascii",
         "format",
-        "repr",  # keep string coercion free via f-strings/str if needed — still deny repr()
+        "repr",
     }
 )
 
@@ -226,12 +228,35 @@ _DENIED_EXPORT_CALL_NAMES: Final[frozenset[str]] = frozenset(
         "export_stl_ascii",
         "exporters",
         "export",
+        "ExportDXF",
+        "ExportSVG",
+        "ExportBREP",
+        "ExportGLTF",
+        "ExportSTL",
+        "ExportSTEP",
+    }
+)
+
+# Attribute methods that write files (build123d Export* classes).
+_DENIED_IO_ATTRS: Final[frozenset[str]] = frozenset(
+    {
+        "write",
+        "save",
+        "dump",
+        "to_file",
+        "export",
     }
 )
 
 
 def _root_module(name: str) -> str:
     return name.split(".", 1)[0]
+
+
+def _is_export_name(name: str) -> bool:
+    return (
+        name in _DENIED_EXPORT_CALL_NAMES or name.startswith("export_") or name.startswith("Export")
+    )
 
 
 def _check_import_name(mod: str, *, node: ast.AST) -> None:
@@ -278,10 +303,15 @@ class _AstGuardVisitor(ast.NodeVisitor):
                 details={"lineno": node.lineno},
             )
         _check_import_name(node.module, node=node)
-        # Deny "from build123d import export_stl" etc. (agent must not write files).
         for alias in node.names:
+            if alias.name == "*":
+                _deny(
+                    "AST denied star-import (from … import *)",
+                    node=node,
+                    name="*",
+                )
             base = alias.name.split(".", 1)[0]
-            if base in _DENIED_EXPORT_CALL_NAMES or base.startswith("export_"):
+            if _is_export_name(base):
                 _deny(
                     f"AST denied import of export API {alias.name!r} (MeshOps harness owns export)",
                     node=node,
@@ -290,7 +320,7 @@ class _AstGuardVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Name(self, node: ast.Name) -> None:
-        if node.id in _DENIED_NAME_IDS:
+        if node.id in _DENIED_NAME_IDS or _is_export_name(node.id):
             _deny(f"AST denied name {node.id!r}", node=node, name=node.id)
         self.generic_visit(node)
 
@@ -306,7 +336,7 @@ class _AstGuardVisitor(ast.NodeVisitor):
             )
         # Deny export API references even when assigned to aliases
         # (e.g. writer = build123d.export_stl; writer(...)).
-        if node.attr in _DENIED_EXPORT_CALL_NAMES or node.attr.startswith("export_"):
+        if _is_export_name(node.attr):
             _deny(
                 f"AST denied export attribute .{node.attr} (MeshOps harness owns export)",
                 node=node,
@@ -351,9 +381,7 @@ class _AstGuardVisitor(ast.NodeVisitor):
         func = node.func
         if isinstance(func, ast.Name) and func.id in _DENIED_CALL_NAMES:
             _deny(f"AST denied call to {func.id!r}", node=node, call=func.id)
-        if isinstance(func, ast.Name) and (
-            func.id in _DENIED_EXPORT_CALL_NAMES or func.id.startswith("export_")
-        ):
+        if isinstance(func, ast.Name) and _is_export_name(func.id):
             _deny(
                 f"AST denied export call {func.id!r} (MeshOps harness owns export)",
                 node=node,
@@ -384,10 +412,17 @@ class _AstGuardVisitor(ast.NodeVisitor):
                     node=node,
                     attr=func.attr,
                 )
-            # build123d.export_stl(...) or b123d.exporters...
-            if func.attr in _DENIED_EXPORT_CALL_NAMES or func.attr.startswith("export_"):
+            if _is_export_name(func.attr):
                 _deny(
                     f"AST denied export attribute call .{func.attr} (MeshOps harness owns export)",
+                    node=node,
+                    attr=func.attr,
+                )
+            # ExportDXF().write(...) / .save(...)
+            if func.attr in _DENIED_IO_ATTRS:
+                _deny(
+                    f"AST denied I/O attribute call .{func.attr} "
+                    "(geometry sources must not write files)",
                     node=node,
                     attr=func.attr,
                 )

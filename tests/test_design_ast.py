@@ -124,3 +124,26 @@ writer(result, "outside.stl")
     with pytest.raises(DesignError) as ei:
         lint_geometry_source(src)
     assert ei.value.code == "ast_denied"
+
+
+def test_ast__forbid_star_import() -> None:
+    with pytest.raises(DesignError) as ei:
+        lint_geometry_source("from build123d import *\nresult = Box(1,1,1)\n")
+    assert ei.value.code == "ast_denied"
+
+
+def test_ast__forbid_operator_module() -> None:
+    with pytest.raises(DesignError) as ei:
+        lint_geometry_source("import operator\nresult = operator.attrgetter('x')\n")
+    assert ei.value.code == "ast_denied"
+
+
+def test_ast__forbid_export_dxf_write() -> None:
+    src = """
+from build123d import Box, ExportDXF
+result = Box(1, 1, 1)
+ExportDXF().write("outside.dxf")
+"""
+    with pytest.raises(DesignError) as ei:
+        lint_geometry_source(src)
+    assert ei.value.code == "ast_denied"
