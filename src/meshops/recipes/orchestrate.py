@@ -128,6 +128,16 @@ def _write_stub_views(views_dir: Path) -> list[str]:
     return paths
 
 
+def _prefer_stub_diff() -> bool:
+    """True when F3D in-process is unsafe (CI runners) or explicitly requested."""
+    import os
+
+    if no_diff_env := os.environ.get("MESHOPS_STUB_DIFF", "").strip().lower():
+        return no_diff_env in {"1", "true", "yes", "on"}
+    # GitHub Actions / common CI: F3D Engine.create(offscreen) has segfaulted (exit 139).
+    return bool(os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"))
+
+
 def _try_diff_views(
     paths: JobPaths,
     *,
@@ -139,11 +149,15 @@ def _try_diff_views(
     """Produce rev view evidence. Prefer F3D; always return non-empty paths on success path.
 
     --no-diff skips F3D and writes stub PNGs (explicit headless opt-out).
+    CI defaults to stubs (F3D offscreen has crashed GH runners).
     F3D failure also falls back to stubs with a note (never silent empty success).
     """
     notes: list[str] = []
     if no_diff:
         notes.append("diff_stub_no_diff_flag")
+        return _write_stub_views(views_dir), notes
+    if _prefer_stub_diff():
+        notes.append("diff_stub_ci_or_MESHOPS_STUB_DIFF")
         return _write_stub_views(views_dir), notes
     try:
         from meshops.recipes.diff_views import render_diff_views
