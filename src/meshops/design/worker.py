@@ -109,24 +109,38 @@ def _is_blocked_export_attr(name: str) -> bool:
 
 
 def _filter_build123d_module(real: types.ModuleType) -> types.ModuleType:
-    """Return a module proxy that hides export / file-write APIs."""
+    """Return a module proxy that hides export / file-write APIs.
+
+    The real module is stored under a private name and never exposed via
+    normal attribute access (blocks ``mod._wrapped.export_stl``).
+    """
+    _store_key = "_FilteredBuild123d__real"
 
     class _FilteredBuild123d(types.ModuleType):
         def __init__(self, wrapped: types.ModuleType) -> None:
             super().__init__(wrapped.__name__)
-            object.__setattr__(self, "_wrapped", wrapped)
+            object.__setattr__(self, _store_key, wrapped)
 
-        def __getattr__(self, item: str) -> Any:
+        def __getattribute__(self, item: str) -> Any:
+            # Intercept before ModuleType default lookup so private storage
+            # and dunder escape paths are not agent-reachable.
+            if item in {"__class__", "__dict__", "__getattribute__"}:
+                return object.__getattribute__(self, item)
+            if item.startswith("_"):
+                raise AttributeError(f"{item!r} is blocked by meshops design harness")
             if _is_blocked_export_attr(item):
                 raise AttributeError(
                     f"{item!r} is blocked by meshops design harness "
                     "(MeshOps owns export_stl/export_step)"
                 )
-            return getattr(object.__getattribute__(self, "_wrapped"), item)
+            wrapped = object.__getattribute__(self, _store_key)
+            return getattr(wrapped, item)
 
         def __dir__(self) -> list[str]:
-            wrapped = object.__getattribute__(self, "_wrapped")
-            return [n for n in dir(wrapped) if not _is_blocked_export_attr(n)]
+            wrapped = object.__getattribute__(self, _store_key)
+            return [
+                n for n in dir(wrapped) if not n.startswith("_") and not _is_blocked_export_attr(n)
+            ]
 
     return _FilteredBuild123d(real)
 
@@ -177,6 +191,7 @@ def _restricted_builtins() -> dict[str, Any]:
 
 
 def _run(source_path: Path, stl_path: Path, step_path: Path) -> int:
+    from meshops.design.ast_guard import lint_geometry_source
     from meshops.design.errors import DesignError
     from meshops.design.export_b123d import export_shape
 
@@ -186,13 +201,21 @@ def _run(source_path: Path, stl_path: Path, step_path: Path) -> int:
         print(f"MESHOPS_DESIGN_ERR:read_source:{exc}", file=sys.stderr)
         return 2
 
+    # Fail-closed: re-lint inside the worker even if the parent skipped AST.
+    try:
+        lint_geometry_source(text, filename=str(source_path))
+    except DesignError as exc:
+        print(f"MESHOPS_DESIGN_ERR:{exc.code}:{exc}", file=sys.stderr)
+        return 3
+
     ns: dict[str, Any] = {
         "__name__": "__meshops_design_source__",
         "__builtins__": _restricted_builtins(),
     }
     try:
         code = compile(text, str(source_path), "exec")
-        # Intentional: AST-linted geometry source executed under restricted builtins.
+        # Intentional: AST-linted geometry source under restricted builtins +
+        # filtered build123d import (export APIs stripped).
         exec(code, ns, ns)
     except DesignError as exc:
         print(f"MESHOPS_DESIGN_ERR:{exc.code}:{exc}", file=sys.stderr)
