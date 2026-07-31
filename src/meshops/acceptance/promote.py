@@ -78,6 +78,20 @@ def promote_working(
             acceptance=result,
         )
 
+    # 0004: never promote T3 preview artifacts to working.ply (N6)
+    if man.recipe_id.startswith("t3_preview") or man.recipe_id == "preview":
+        raise PromoteError(
+            f"refuse promote of preview recipe {man.recipe_id!r}",
+            code="preview_refuse_promote",
+            acceptance=result,
+        )
+    if any("preview_only" in n for n in man.notes):
+        raise PromoteError(
+            "refuse promote: revision notes include preview_only",
+            code="preview_refuse_promote",
+            acceptance=result,
+        )
+
     src = rev_mesh_path(rev_dir)
     # Destination is JobPaths.working_ply — must be real PLY (ingest contract).
     # Never copy STL bytes under a .ply name (trimesh/F3D load by extension).

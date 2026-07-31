@@ -106,11 +106,23 @@ class JobPaths:
         """Mechanical design-from-code artifacts (0003+): source, STEP, STL copy."""
         return self.job_dir / "design"
 
+    @property
+    def handoff_dir(self) -> Path:
+        """Blender handoff package (0004+): .blend, instructions, meta."""
+        return self.job_dir / "handoff"
+
+    @property
+    def previews_dir(self) -> Path:
+        """T3 preview artifacts (0004+) — never auto-promote to working."""
+        return self.job_dir / "previews"
+
 
 def ensure_job_layout(paths: JobPaths) -> None:
-    """Create job directory skeleton (views/, rois/, revs/, design/)."""
+    """Create job directory skeleton (views/, rois/, revs/, design/, handoff/, previews/)."""
     paths.job_dir.mkdir(parents=True, exist_ok=True)
     paths.views_dir.mkdir(exist_ok=True)
     paths.rois_dir.mkdir(exist_ok=True)
     paths.revs_dir.mkdir(exist_ok=True)
     paths.design_dir.mkdir(exist_ok=True)
+    paths.handoff_dir.mkdir(exist_ok=True)
+    paths.previews_dir.mkdir(exist_ok=True)

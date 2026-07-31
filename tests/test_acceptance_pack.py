@@ -468,6 +468,81 @@ def test_promote_working__refuses_failed(solid_cylinder_stl: Path, tmp_work: Pat
     assert not (paths.job_dir / "working_manifest.json").is_file()
 
 
+def test_promote_working__refuses_preview_only_notes(
+    solid_cylinder_stl: Path, tmp_work: Path
+) -> None:
+    """0004: promote_working hard-refuses revs tagged preview_only (N6)."""
+    mesh_id, rev_id, paths = _seed_job_with_rev(
+        solid_cylinder_stl,
+        tmp_work,
+        ok=True,
+        notes=["preview_only", "diff_stub_test"],
+    )
+    with pytest.raises(PromoteError) as ei:
+        promote_working(
+            mesh_id,
+            rev_id,
+            work_root=tmp_work,
+            require_views=True,
+            allow_stubs=True,
+        )
+    assert ei.value.code == "preview_refuse_promote"
+    assert not (paths.job_dir / "working_manifest.json").is_file()
+
+
+def test_promote_working__refuses_t3_preview_recipe(
+    solid_cylinder_stl: Path, tmp_work: Path
+) -> None:
+    """0004: promote_working hard-refuses recipe_id t3_preview* (N6)."""
+    ing = ingest_stl(solid_cylinder_stl, work_root=tmp_work)
+    mesh_triage(ing.mesh_id, work_root=tmp_work)
+    paths = JobPaths(work_root=tmp_work, mesh_id=ing.mesh_id)
+    alloc = allocate_rev(paths, "t3_preview")
+    alloc.mesh_path.write_bytes(paths.original_stl.read_bytes())
+    mesh = load_mesh(alloc.mesh_path)
+    stats = compute_stats(
+        mesh,
+        mesh_id=ing.mesh_id,
+        content_sha256_hex=content_sha256(alloc.mesh_path),
+        file_size_bytes=alloc.mesh_path.stat().st_size,
+        source_path=str(alloc.mesh_path),
+    )
+    guard = check_export(ing.stats, stats, policy=GuardPolicy.for_export())
+    views = [str(alloc.success_dir / "views" / f"{name}.png") for name in ("front", "top")]
+    manifest = RevManifest(
+        rev_id=alloc.rev_id,
+        recipe_id="t3_preview_local",
+        created_at="2026-01-01T00:00:00+00:00",
+        ok=True,
+        guard_result=guard,
+        triage_class="T3_escalate",
+        mesh_path=f"revs/{alloc.rev_id}/mesh.stl",
+        n_faces=stats.faces,
+        n_vertices=stats.vertices,
+        file_size_bytes=stats.file_size_bytes,
+        view_paths=views,
+        view_kind="stub",
+        notes=["diff_stub_test"],
+    )
+    write_manifest(alloc, manifest)
+    _write_views(alloc.views_dir)
+    promote_rev(alloc)
+    (alloc.success_dir / "meta.json").write_text(
+        manifest.model_dump_json(indent=2),
+        encoding="utf-8",
+    )
+    with pytest.raises(PromoteError) as ei:
+        promote_working(
+            ing.mesh_id,
+            alloc.rev_id,
+            work_root=tmp_work,
+            require_views=True,
+            allow_stubs=True,
+        )
+    assert ei.value.code == "preview_refuse_promote"
+    assert not (paths.job_dir / "working_manifest.json").is_file()
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------

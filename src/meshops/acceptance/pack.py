@@ -391,13 +391,18 @@ def _baseline_from_job(paths: JobPaths) -> MeshStats:
 
 
 def _default_policy_for_recipe(recipe_id: str) -> GuardPolicy:
-    """Recipe-tier only for known T1/T2; else export tier.
+    """Map recipe_id → default GuardPolicy when accept_revision policy= is omitted.
 
-    **0003/0004 design/sculpt revs must pass explicit policy=** — do not rely on
-    this default against original.stl with 0.90 recipe floors.
+    - Known T1/T2 → for_recipe (tight floors)
+    - blender_sculpt_import → for_sculpt (export-like + wipeout; 0004)
+    - else → for_export
+
+    Design revs (0003) should still pass explicit policy= when possible.
     """
     if recipe_id in _KNOWN_RECIPE_IDS:
         return GuardPolicy.for_recipe(recipe_id)
+    if recipe_id == "blender_sculpt_import":
+        return GuardPolicy.for_sculpt()
     return GuardPolicy.for_export()
 
 
@@ -423,8 +428,8 @@ def accept_revision(
     Failed revs (manifest.ok=False or directory name starts with failed_) always
     return ok=False with failed code ``failed_rev``.
 
-    Default policy uses GuardPolicy.for_recipe only for known T1/T2 recipe ids.
-    Design/sculpt revs (0003/0004) **must** pass explicit policy=.
+    Default policy: known T1/T2 → for_recipe; blender_sculpt_import → for_sculpt;
+    else for_export. Design revs (0003) should still pass explicit policy=.
     """
     paths = JobPaths(work_root=Path(work_root), mesh_id=mesh_id)
     if not paths.job_dir.is_dir():

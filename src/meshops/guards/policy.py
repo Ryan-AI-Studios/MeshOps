@@ -57,7 +57,7 @@ class GuardPolicy(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    tier: Literal["export", "recipe", "design"] = "export"
+    tier: Literal["export", "recipe", "design", "sculpt"] = "export"
     recipe_id: str | None = None
 
     face_floor_ratio: float = EXPORT_FACE_FLOOR_RATIO
@@ -124,4 +124,23 @@ class GuardPolicy(BaseModel):
             size_floor_ratio=EXPORT_SIZE_FLOOR_RATIO,
             size_abs_floor_bytes=None,
             notes=["design_tier", "self_baseline_safety_net_only"],
+        )
+
+    @classmethod
+    def for_sculpt(cls) -> GuardPolicy:
+        """Blender sculpt import tier (0004) — export-like floors + global wipeout.
+
+        Sculpt may change mass carefully; not T1 recipe-tight floors.
+        Prefer explicit policy= on accept_candidate / accept_revision.
+        accept_revision also maps recipe_id ``blender_sculpt_import`` → this tier
+        when policy is omitted.
+        """
+        return cls(
+            tier="sculpt",
+            recipe_id="blender_sculpt_import",
+            face_floor_ratio=EXPORT_FACE_FLOOR_RATIO,
+            size_floor_ratio=EXPORT_SIZE_FLOOR_RATIO,
+            size_abs_floor_bytes=None,
+            enforce_global_wipeout=True,
+            notes=["sculpt_tier"],
         )
