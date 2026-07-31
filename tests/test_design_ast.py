@@ -111,3 +111,16 @@ build123d.export_step(result, "out.step")
     with pytest.raises(DesignError) as ei:
         lint_geometry_source(src)
     assert ei.value.code == "ast_denied"
+
+
+def test_ast__forbid_export_alias_assignment() -> None:
+    """Alias of export_stl must not bypass call-site checks (Codex final gate)."""
+    src = """
+import build123d
+result = build123d.Box(1, 1, 1)
+writer = build123d.export_stl
+writer(result, "outside.stl")
+"""
+    with pytest.raises(DesignError) as ei:
+        lint_geometry_source(src)
+    assert ei.value.code == "ast_denied"

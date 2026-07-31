@@ -304,6 +304,14 @@ class _AstGuardVisitor(ast.NodeVisitor):
                 node=node,
                 attr=node.attr,
             )
+        # Deny export API references even when assigned to aliases
+        # (e.g. writer = build123d.export_stl; writer(...)).
+        if node.attr in _DENIED_EXPORT_CALL_NAMES or node.attr.startswith("export_"):
+            _deny(
+                f"AST denied export attribute .{node.attr} (MeshOps harness owns export)",
+                node=node,
+                attr=node.attr,
+            )
         # os.environ / os.system as value (not only call)
         if (
             isinstance(node.value, ast.Name)
