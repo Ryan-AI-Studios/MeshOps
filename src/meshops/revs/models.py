@@ -6,9 +6,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from meshops.acceptance.models import AcceptanceResult
 from meshops.guards.models import GuardResult
 
 SCHEMA_VERSION: Literal["1.0.0"] = "1.0.0"
+
+ViewKindOpt = Literal["f3d", "workbench", "stub", "mixed", "none"]
 
 
 class RevManifest(BaseModel):
@@ -30,6 +33,8 @@ class RevManifest(BaseModel):
     n_vertices: int = 0
     file_size_bytes: int = 0
     view_paths: list[str] = Field(default_factory=list)
+    # Optional additive (0011): explicit view_kind; default None → infer from notes
+    view_kind: ViewKindOpt | None = None
     error: str | None = None
     filter_metrics: dict[str, Any] = Field(default_factory=dict)
     notes: list[str] = Field(default_factory=list)
@@ -49,3 +54,5 @@ class RecipeResult(BaseModel):
     error_type: str | None = None
     refused: bool = False
     notes: list[str] = Field(default_factory=list)
+    # 0011: pack result from in-hand stats (no second check_export)
+    acceptance: AcceptanceResult | None = None

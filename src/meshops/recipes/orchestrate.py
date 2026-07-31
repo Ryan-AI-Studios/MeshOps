@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from meshops.guards import GuardPolicy, check_export
 from meshops.ingest.stats import compute_stats, load_mesh
@@ -372,6 +372,13 @@ def run_repair(
                 messages=[error],
                 policy_tier=guard.policy_tier,
             )
+            acceptance = _acceptance_from_repair(
+                visual_guard,
+                baseline_stats=baseline_stats,
+                cand_stats=cand_stats,
+                view_paths=view_paths,
+                view_notes=notes,
+            )
             manifest = RevManifest(
                 rev_id=alloc.rev_id,
                 parent_rev=parent_rev,
@@ -386,6 +393,7 @@ def run_repair(
                 n_vertices=cand_stats.vertices,
                 file_size_bytes=cand_stats.file_size_bytes,
                 view_paths=view_paths,
+                view_kind=_view_kind_from_notes(notes),
                 error=error,
                 filter_metrics=filter_metrics,
                 notes=notes,
@@ -401,10 +409,12 @@ def run_repair(
                 error=error,
                 error_type="MissingViews",
                 notes=notes,
+                acceptance=acceptance,
             )
             raise RepairError(error, rev_id=alloc.rev_id, rev_dir=failed_dir, result=result)
 
     rel_mesh = f"revs/{alloc.rev_id}/mesh.stl"
+    view_kind = _view_kind_from_notes(notes) if view_paths else None
     manifest = RevManifest(
         rev_id=alloc.rev_id,
         parent_rev=parent_rev,
@@ -419,12 +429,37 @@ def run_repair(
         n_vertices=cand_stats.vertices,
         file_size_bytes=cand_stats.file_size_bytes,
         view_paths=view_paths,
+        view_kind=view_kind,
         error=None if guard.ok else "; ".join(guard.messages),
         filter_metrics=filter_metrics,
         notes=notes,
     )
 
-    if not guard.ok:
+    # 0011: AcceptanceResult from in-hand stats — single gate, no second check_export.
+    acceptance = _acceptance_from_repair(
+        guard,
+        baseline_stats=baseline_stats,
+        cand_stats=cand_stats,
+        view_paths=view_paths,
+        view_notes=notes,
+    )
+
+    if not guard.ok or not acceptance.ok:
+        if not guard.ok:
+            error = manifest.error or "; ".join(guard.messages) or "guard_fail"
+            error_type = "GuardFail"
+        else:
+            error = f"acceptance pack failed: {'; '.join(acceptance.failed)}"
+            error_type = "AcceptanceFail"
+            notes.append(error)
+            manifest = manifest.model_copy(
+                update={
+                    "ok": False,
+                    "error": error,
+                    "mesh_path": f"revs/failed_{alloc.rev_id}/mesh.stl",
+                    "notes": notes,
+                }
+            )
         write_manifest(alloc, manifest)
         failed_dir = fail_rev(alloc, manifest)
         result = RecipeResult(
@@ -433,11 +468,13 @@ def run_repair(
             rev_id=alloc.rev_id,
             rev_dir=str(failed_dir),
             manifest=manifest,
-            error=manifest.error,
-            error_type="GuardFail",
+            error=error,
+            error_type=error_type,
+            notes=notes,
+            acceptance=acceptance,
         )
         raise RepairError(
-            f"guards failed: {manifest.error}",
+            f"guards/acceptance failed: {error}",
             rev_id=alloc.rev_id,
             rev_dir=failed_dir,
             result=result,
@@ -460,6 +497,14 @@ def run_repair(
                 encoding="utf-8",
             )
             view_paths = fixed_views
+            # Rebuild acceptance with remapped paths (still no second check_export).
+            acceptance = _acceptance_from_repair(
+                guard,
+                baseline_stats=baseline_stats,
+                cand_stats=cand_stats,
+                view_paths=view_paths,
+                view_notes=notes,
+            )
 
     if original_hash_before is not None:
         after = content_sha256(paths.original_stl)
@@ -473,6 +518,7 @@ def run_repair(
         rev_dir=str(success_dir),
         manifest=manifest,
         notes=notes,
+        acceptance=acceptance,
     )
 
 
@@ -495,6 +541,57 @@ def _remap_paths_after_promote(
             # Path was not under tmp — keep as-is
             out.append(p)
     return out
+
+
+def _view_kind_from_notes(notes: list[str]) -> Literal["stub", "f3d"] | None:
+    """Infer view_kind from repair notes (stub markers before any f3d heuristic).
+
+    Stub markers (CI, --no-diff, and F3D-fallback *used_stub*) must win over
+    substring matches on ``diff_views`` so honesty stays guards_and_stub_views
+    (DoD-3 / Difficulty §12).
+    """
+    stub_tokens = ("diff_stub", "used_stub", "_stub")
+    if any(any(tok in n for tok in stub_tokens) for n in notes):
+        return "stub"
+    if any("diff_views" in n or "render" in n for n in notes):
+        return "f3d"
+    # Real F3D success leaves empty/non-stub notes
+    return "f3d"
+
+
+def _acceptance_from_repair(
+    guard: Any,
+    *,
+    baseline_stats: Any,
+    cand_stats: Any,
+    view_paths: list[str],
+    view_notes: list[str],
+) -> Any:
+    """Build AcceptanceResult from in-hand stats (no second check_export)."""
+    from meshops.acceptance.models import AcceptanceResult
+    from meshops.acceptance.pack import build_acceptance_from_guard
+    from meshops.guards.models import GuardResult
+    from meshops.models.diagnostics import MeshStats
+
+    if not isinstance(guard, GuardResult):
+        raise TypeError("guard must be GuardResult")
+    if not isinstance(baseline_stats, MeshStats):
+        raise TypeError("baseline_stats must be MeshStats")
+    if not isinstance(cand_stats, MeshStats):
+        raise TypeError("cand_stats must be MeshStats")
+    view_kind = _view_kind_from_notes(view_notes) if view_paths else None
+    result: AcceptanceResult = build_acceptance_from_guard(
+        guard,
+        baseline_stats=baseline_stats,
+        cand_stats=cand_stats,
+        view_paths=view_paths,
+        require_views=True,
+        view_kind=view_kind,
+        view_notes=view_notes,
+        allow_stubs=True,
+        policy_tier=guard.policy_tier,
+    )
+    return result
 
 
 def available_recipes() -> list[str]:
