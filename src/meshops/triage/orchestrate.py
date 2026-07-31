@@ -63,39 +63,31 @@ def _build_hypotheses(
             )
         )
 
+    # T1 Topology: non-manifold, holes/open boundaries (MeshOps §2)
     if is_manifold is False or (
         non_manifold_edge_count is not None and non_manifold_edge_count > 0
     ):
         conf = 0.7 if non_manifold_edge_count and non_manifold_edge_count > 10 else 0.5
         hyps.append(
             DefectHypothesis(
-                defect_class=DefectClass.T1_NONMANIFOLD,
+                defect_class=DefectClass.T1_TOPOLOGY,
                 confidence=conf,
                 notes="Non-manifold edges detected (topology best-effort)",
                 evidence={"non_manifold_edge_count": non_manifold_edge_count},
             )
         )
-
-    if is_watertight is False and boundary_edge_count is not None and boundary_edge_count > 0:
+    elif is_watertight is False and boundary_edge_count is not None and boundary_edge_count > 0:
         hyps.append(
             DefectHypothesis(
-                defect_class=DefectClass.T2_HOLES,
+                defect_class=DefectClass.T1_TOPOLOGY,
                 confidence=0.5,
-                notes="Open boundary edges; possible holes (detect-only)",
+                notes="Open boundary edges / possible holes (topology detect-only)",
                 evidence={"boundary_edge_count": boundary_edge_count},
             )
         )
 
-    if not hyps:
-        hyps.append(
-            DefectHypothesis(
-                defect_class=DefectClass.T5_OTHER,
-                confidence=0.3,
-                notes="No strong defect signal; review evidence views",
-                evidence={},
-            )
-        )
-
+    # T2/T4/T5 require printability recipes, volume completion, or mechanical CAD —
+    # not invented from silence. Empty hyps + notes when no signal is honest.
     return hyps
 
 

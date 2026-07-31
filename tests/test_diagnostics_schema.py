@@ -79,6 +79,21 @@ def test_reject_invalid_defect_class() -> None:
         DefectHypothesis(defect_class="T9_bogus", confidence=0.5)  # type: ignore[arg-type]
 
 
+def test_defect_class_matches_meshops_taxonomy() -> None:
+    """DoD-2 / MeshOps section 2 - exported labels are T1-T5 product classes."""
+    values = {c.value for c in DefectClass}
+    assert values == {
+        "T1_topology",
+        "T2_printability",
+        "T3_sheet",
+        "T4_missing_volume",
+        "T5_mechanical",
+    }
+    # Reject the pre-alignment mistaken labels if reintroduced
+    for banned in ("T4_intersection", "T5_other", "T1_nonmanifold", "T2_holes"):
+        assert banned not in values
+
+
 def test_auto_action_has_no_delete() -> None:
     names = {a.value for a in AutoAction}
     assert "delete" not in names

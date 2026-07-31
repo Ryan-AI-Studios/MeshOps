@@ -19,6 +19,7 @@ output/
 conductor/
 docs/
 .agents/
+AGENTS.md
 
 # large binaries unless LFS policy set
 # fixtures/rogue2/*.stl  # un-ignore when using LFS

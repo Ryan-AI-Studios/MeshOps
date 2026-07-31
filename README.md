@@ -11,9 +11,7 @@ Local agent-driven OS for 3D-printable meshes (repair + mechanical design + orga
 | [conductor/conductor.md](conductor/conductor.md) | Tracks |
 | [conductor/deferred.md](conductor/deferred.md) | Parking lot (not a work queue) |
 | [conductor/planner-handoff.md](conductor/planner-handoff.md) | Living cold-start for planners |
-| [AGENTS.md](AGENTS.md) | Agent rules (published) |
-
-Local only (gitignored): `conductor/`, `docs/`, `.agents/` (skills including onboarding).
+Local only (gitignored): `conductor/`, `docs/`, `.agents/` (skills including onboarding), `AGENTS.md` (agent rules — Ledgerful-style compact policy).
 
 **Status:** Design + local conductor/skills + quality gates. Product code tracks start at 0001.
 

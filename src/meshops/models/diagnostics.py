@@ -16,13 +16,17 @@ SCHEMA_VERSION: Literal["1.0.0"] = "1.0.0"
 
 
 class DefectClass(StrEnum):
-    """Primary defect hypothesis labels T1-T5 (detect-only in 0001)."""
+    """Primary defect hypothesis labels T1-T5 (MeshOps taxonomy; detect-only in 0001).
 
-    T1_NONMANIFOLD = "T1_nonmanifold"
-    T2_HOLES = "T2_holes"
+    Matches docs/MeshOps.md section 2:
+    T1 Topology | T2 Printability | T3 Sheet/ribbon | T4 Missing volume | T5 Mechanical feature
+    """
+
+    T1_TOPOLOGY = "T1_topology"
+    T2_PRINTABILITY = "T2_printability"
     T3_SHEET = "T3_sheet"
-    T4_INTERSECTION = "T4_intersection"
-    T5_OTHER = "T5_other"
+    T4_MISSING_VOLUME = "T4_missing_volume"
+    T5_MECHANICAL = "T5_mechanical"
 
 
 class AutoAction(StrEnum):
