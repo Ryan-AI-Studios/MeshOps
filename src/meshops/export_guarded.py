@@ -5,7 +5,8 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from meshops.guards import GuardPolicy, check_export
+from meshops.acceptance.pack import build_acceptance_from_guard
+from meshops.guards import GuardPolicy, check_export, resolve_stats
 from meshops.guards.models import GuardResult
 from meshops.ingest.stats import compute_stats, load_mesh
 from meshops.jobstore.paths import JobPaths, content_sha256
@@ -68,15 +69,42 @@ def guarded_export(
     work_root: Path | str = "work",
     rev: str | None = None,
 ) -> dict[str, object]:
-    """Export-tier check_export then copy to out. Fail-closed."""
+    """Export-tier check_export once, wrap AcceptanceResult, then copy. Fail-closed.
+
+    require_views=False for original export (no render tax). Single check_export only.
+    """
     paths = JobPaths(work_root=Path(work_root), mesh_id=mesh_id)
     if not paths.job_dir.is_dir():
         raise ExportError(f"job not found: {paths.job_dir}", code="job_not_found")
 
     src = resolve_export_source(paths, rev)
     baseline = _baseline_stats(paths)
+    # Resolve candidate once so check_export does not re-load on Path alone.
+    cand_stats = resolve_stats(src, mesh_id=mesh_id)
     policy = GuardPolicy.for_export()
-    guard = check_export(baseline, src, policy=policy)
+    guard = check_export(baseline, cand_stats, policy=policy)
+
+    view_paths: list[str] = []
+    view_notes: list[str] | None = None
+    if rev is not None:
+        rev_dir = resolve_rev_dir(paths, rev)
+        man = load_manifest(rev_dir)
+        view_paths = list(man.view_paths)
+        view_notes = list(man.notes)
+
+    acceptance = build_acceptance_from_guard(
+        guard,
+        baseline_stats=baseline,
+        cand_stats=cand_stats,
+        baseline=baseline,
+        candidate=src,
+        view_paths=view_paths,
+        require_views=False,
+        view_notes=view_notes,
+        allow_stubs=True,
+        policy_tier=guard.policy_tier,
+    )
+
     if not guard.ok:
         raise ExportError(
             f"export guards failed: {'; '.join(guard.messages)}",
@@ -94,4 +122,5 @@ def guarded_export(
         "source": str(src),
         "out": str(dest),
         "guard": guard.model_dump(mode="json"),
+        "acceptance": acceptance.model_dump(mode="json"),
     }
