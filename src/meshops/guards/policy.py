@@ -57,7 +57,7 @@ class GuardPolicy(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    tier: Literal["export", "recipe"] = "export"
+    tier: Literal["export", "recipe", "design"] = "export"
     recipe_id: str | None = None
 
     face_floor_ratio: float = EXPORT_FACE_FLOOR_RATIO
@@ -110,4 +110,18 @@ class GuardPolicy(BaseModel):
             size_floor_ratio=RECIPE_SIZE_FLOOR_RATIO,
             size_abs_floor_bytes=None,
             notes=[f"recipe_tier:{recipe_id}"],
+        )
+
+    @classmethod
+    def for_design(cls) -> GuardPolicy:
+        """Design-from-code tier — relative floors are self-baseline safety net only.
+
+        Primary design gate is ``meshops.design.validate`` absolute floors.
+        """
+        return cls(
+            tier="design",
+            face_floor_ratio=EXPORT_FACE_FLOOR_RATIO,
+            size_floor_ratio=EXPORT_SIZE_FLOOR_RATIO,
+            size_abs_floor_bytes=None,
+            notes=["design_tier", "self_baseline_safety_net_only"],
         )

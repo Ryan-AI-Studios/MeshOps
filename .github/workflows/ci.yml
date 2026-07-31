@@ -59,4 +59,46 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: "1"
           GALLIUM_DRIVER: llvmpipe
           MESA_GL_VERSION_OVERRIDE: "3.3"
+          # Prefer stub views for mutator/design acceptance (F3D offscreen flaky on GH).
+          MESHOPS_STUB_DIFF: "1"
         run: uv run pytest
+
+  design:
+    name: design extra · typecheck · pytest -m design
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Sync project (dev + design extras)
+        run: uv sync --extra dev --extra design
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Type check (basedpyright)
+        run: uv run basedpyright
+
+      - name: Pytest design marker
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          GALLIUM_DRIVER: llvmpipe
+          MESA_GL_VERSION_OVERRIDE: "3.3"
+          MESHOPS_STUB_DIFF: "1"
+        run: uv run pytest -m design

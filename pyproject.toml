@@ -27,6 +27,9 @@ dev = [
     "basedpyright==1.39.9",
     "pytest==9.1.1",
 ]
+design = [
+    "build123d==0.11.1",
+]
 
 [project.scripts]
 meshops = "meshops.cli:app"
@@ -91,4 +94,5 @@ markers = [
     "f3d: needs F3D/libf3d offscreen render",
     "rogue2: needs Rogue2.stl fixture or MESHOPS_ROGUE2_PATH",
     "slow: long-running (large mesh / soak)",
+    "design: needs build123d (meshops[design] extra)",
 ]
