@@ -96,9 +96,15 @@ class JobPaths:
     def rois_dir(self) -> Path:
         return self.job_dir / "rois"
 
+    @property
+    def revs_dir(self) -> Path:
+        """Atomic revision history root (0002+)."""
+        return self.job_dir / "revs"
+
 
 def ensure_job_layout(paths: JobPaths) -> None:
-    """Create job directory skeleton (views/, rois/)."""
+    """Create job directory skeleton (views/, rois/, revs/)."""
     paths.job_dir.mkdir(parents=True, exist_ok=True)
     paths.views_dir.mkdir(exist_ok=True)
     paths.rois_dir.mkdir(exist_ok=True)
+    paths.revs_dir.mkdir(exist_ok=True)

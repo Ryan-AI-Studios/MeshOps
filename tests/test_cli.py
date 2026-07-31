@@ -60,8 +60,8 @@ def test_triage_missing_job_json(tmp_work: Path) -> None:
     assert data["ok"] is False
 
 
-def test_no_mutate_verbs() -> None:
-    """Mutate verbs absent from 0001 CLI."""
+def test_core_verbs_present() -> None:
+    """Core CLI verbs present (0002 adds repair/export/diff)."""
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     help_text = result.stdout.lower()
@@ -69,5 +69,9 @@ def test_no_mutate_verbs() -> None:
     assert "triage" in help_text
     assert "render" in help_text
     assert "report" in help_text
-    for banned in ("repair", "mutate", "boolean", "delete-sheet", "remesh"):
+    # 0002 guarded mutation verbs
+    assert "repair" in help_text
+    assert "export" in help_text
+    assert "diff" in help_text
+    for banned in ("delete-sheet", "remesh", "mutate"):
         assert banned not in help_text

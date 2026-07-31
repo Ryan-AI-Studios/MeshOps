@@ -17,6 +17,8 @@ dependencies = [
     "pydantic==2.13.4",
     "typer==0.27.0",
     "f3d==3.5.0",
+    "pymeshlab==2025.7.post1",
+    "manifold3d==3.5.2",
 ]
 
 [project.optional-dependencies]

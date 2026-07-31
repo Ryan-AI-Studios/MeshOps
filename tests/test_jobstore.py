@@ -36,6 +36,7 @@ def test_ingest_creates_layout(solid_cylinder_stl: Path, tmp_work: Path) -> None
     assert paths.working_ply.is_file()
     assert paths.views_dir.is_dir()
     assert paths.rois_dir.is_dir()
+    assert paths.revs_dir.is_dir()
     assert paths.report_md.is_file()
     assert result.stats.faces > 0
     assert result.stats.mesh_id == result.mesh_id
