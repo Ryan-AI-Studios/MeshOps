@@ -54,4 +54,9 @@ jobs:
         run: uv run basedpyright
 
       - name: Pytest
+        env:
+          # Headless-friendly defaults for optional F3D offscreen attempts.
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          GALLIUM_DRIVER: llvmpipe
+          MESA_GL_VERSION_OVERRIDE: "3.3"
         run: uv run pytest

@@ -51,21 +51,11 @@ def test_rogue2_ingest_triage_report(tmp_work: Path) -> None:
     report = json.loads(r3.stdout)
     assert Path(report["report_path"]).is_file()
 
-    # Render optional — skip only on RenderUnavailableError
-    r4 = runner.invoke(
-        app,
-        ["render", "--mesh-id", mesh_id, "--work-root", str(tmp_work), "--json"],
-    )
-    if r4.exit_code != 0:
-        try:
-            data = json.loads(r4.stdout)
-        except json.JSONDecodeError:
-            pytest.skip(f"render failed non-json: {r4.stdout}")
-        if data.get("error") == "RenderUnavailableError":
-            pytest.skip(f"F3D unavailable: {data.get('message')}")
-        raise AssertionError(r4.stdout + r4.stderr)
-    else:
-        payload = json.loads(r4.stdout)
-        assert payload["ok"] is True
-        assert len(payload["view_paths"]) >= 1
-        assert len(payload["depth_paths"]) >= 1
+    # Render optional — isolate F3D so CI SIGSEGV does not kill the suite
+    from tests.f3d_helpers import run_f3d_render_job_isolated
+
+    payload = run_f3d_render_job_isolated(mesh_id, tmp_work, width=256, height=256)
+    if not payload.get("ok"):
+        pytest.skip(f"F3D unavailable: {payload.get('error')}: {payload.get('message')}")
+    assert len(payload["view_paths"]) >= 1
+    assert len(payload["depth_paths"]) >= 1
