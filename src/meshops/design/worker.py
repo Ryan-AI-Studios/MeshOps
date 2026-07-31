@@ -116,9 +116,13 @@ def _is_blocked_export_attr(name: str) -> bool:
     # OCP / OCCT writer helpers (BRepTools.Write_s, StlAPI_Writer, …).
     if "Writer" in name or name.endswith("Write") or "Write_" in name:
         return True
-    if name in {"mkstemp", "NamedTemporaryFile", "TemporaryFile", "mktemp", "TemporaryDirectory"}:
-        return True
-    return False
+    return name in {
+        "mkstemp",
+        "NamedTemporaryFile",
+        "TemporaryFile",
+        "mktemp",
+        "TemporaryDirectory",
+    }
 
 
 def _filter_build123d_module(real: types.ModuleType) -> types.ModuleType:
