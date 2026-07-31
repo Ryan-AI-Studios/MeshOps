@@ -161,8 +161,9 @@ def mesh_triage(
         non_manifold_edge_count=stats.non_manifold_edge_count,
     )
 
-    # Ensure auto_action never delete (enum has no delete)
-    assert sheet.auto_action in {AutoAction.NONE, AutoAction.REVIEW, AutoAction.ESCALATE}
+    # Ensure auto_action never delete (N8) — explicit check survives python -O
+    if sheet.auto_action not in {AutoAction.NONE, AutoAction.REVIEW, AutoAction.ESCALATE}:
+        raise ValueError(f"illegal auto_action for sheet score: {sheet.auto_action!r}")
 
     diagnostics = Diagnostics(
         mesh_id=mesh_id,

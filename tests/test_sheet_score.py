@@ -46,8 +46,15 @@ def test_clothing_never_auto_delete(clothing_cape_stl: Path) -> None:
     assert result.auto_action in {AutoAction.NONE, AutoAction.REVIEW, AutoAction.ESCALATE}
     # Enum has no delete; also ensure value string
     assert result.auto_action.value in {"none", "review", "escalate"}
-    # Clothing penalty path may fire; multi-feature exercised
+    # Multi-feature clothing discrimination (not only stage2_used which is often always true)
     assert result.features is not None
+    multi = (
+        result.features.clothing_penalty > 0
+        or result.features.dihedral_crease > 0
+        or result.features.planarity > 0
+        or result.features.normal_smoothness > 0
+    )
+    assert multi, "clothing fixture should exercise non-PCA multi-feature sheet path"
 
 
 def test_scale_invariance_smoke(arm_sheet_stl: Path) -> None:

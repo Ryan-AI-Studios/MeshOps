@@ -61,21 +61,61 @@ def _select_mesh_file(paths: JobPaths) -> tuple[Path, str]:
 
 
 def _apply_camera(camera: Any, pose: CameraPose) -> None:
-    """Set libf3d 3.5 camera from CameraPose."""
+    """Set libf3d 3.5 camera from CameraPose (position + look-at + up)."""
     camera.position = list(pose.position)
     camera.focal_point = list(pose.focal_point)
     camera.view_up = list(pose.view_up)
+    # Parallel-projection framing: zoom / parallel_scale when available.
+    for attr, value in (
+        ("zoom", pose.ortho_scale),
+        ("parallel_scale", pose.ortho_scale),
+        ("view_angle", 30.0),  # unused when orthographic; harmless fallback
+    ):
+        if hasattr(camera, attr):
+            try:
+                setattr(camera, attr, value)
+                break
+            except Exception:
+                continue
 
 
-def _set_option(options: Any, key: str, value: Any) -> None:
+def _set_option(options: Any, key: str, value: Any) -> bool:
+    """Set an F3D option. Returns True if the assignment succeeded."""
     try:
         options[key] = value
+        return True
     except Exception:
         try:
             if hasattr(options, "update"):
                 options.update({key: value})
+                return True
         except Exception:
-            pass
+            return False
+    return False
+
+
+def _require_option(options: Any, key: str, value: Any) -> None:
+    if not _set_option(options, key, value):
+        raise RenderUnavailableError(f"Failed to set F3D option {key!r}={value!r}")
+
+
+def _merge_render_into_diagnostics(paths: JobPaths, result: RenderResult) -> None:
+    """Update diagnostics.json view evidence when triage already ran (DoD-2 fields)."""
+    if not paths.diagnostics_json.is_file():
+        return
+    try:
+        from meshops.models.diagnostics import Diagnostics
+
+        diag = Diagnostics.model_validate_json(paths.diagnostics_json.read_text(encoding="utf-8"))
+        diag.rendered_from = result.rendered_from
+        diag.view_paths = list(result.view_paths) + list(result.depth_paths)
+        paths.diagnostics_json.write_text(
+            diag.model_dump_json(indent=2),
+            encoding="utf-8",
+        )
+    except Exception:
+        # Non-fatal: report.md still lists views from filesystem.
+        pass
 
 
 class F3DRenderer:
@@ -92,7 +132,11 @@ class F3DRenderer:
         work_root: Path | str = "work",
         include_depth: bool = True,
     ) -> RenderResult:
-        """Render RGB (+ visual depth) for all bbox cameras into views/."""
+        """Render RGB (+ visual depth) for all bbox cameras into views/.
+
+        When ``include_depth`` is True, at least one depth map must be written or
+        ``RenderUnavailableError`` is raised (DoD-6).
+        """
         f3d = _import_f3d()
         paths = JobPaths(work_root=Path(work_root), mesh_id=mesh_id)
         if not paths.job_dir.is_dir():
@@ -129,6 +173,9 @@ class F3DRenderer:
             window.size = (self.width, self.height)
 
             options = engine.options
+            # True orthographic projection (DoD-6 / Difficulty §9).
+            _require_option(options, "scene.camera.orthographic", True)
+
             camera = window.camera
             result = RenderResult(mesh_id=mesh_id, rendered_from=rendered_from)
 
@@ -136,23 +183,29 @@ class F3DRenderer:
                 _apply_camera(camera, pose)
 
                 # RGB
-                _set_option(options, "render.effect.display_depth", False)
+                _require_option(options, "render.effect.display_depth", False)
                 rgb_path = paths.views_dir / f"{pose.name}.png"
                 self._render_to(window, rgb_path)
                 result.view_paths.append(str(rgb_path))
                 result.cameras.append(pose.name)
 
                 if include_depth:
-                    _set_option(options, "render.effect.display_depth", True)
+                    _require_option(options, "render.effect.display_depth", True)
                     depth_path = paths.views_dir / f"{pose.name}_depth.png"
-                    try:
-                        self._render_to(window, depth_path)
-                        result.depth_paths.append(str(depth_path))
-                    except RenderUnavailableError:
-                        # Depth optional if effect fails
-                        pass
-                    _set_option(options, "render.effect.display_depth", False)
+                    self._render_to(window, depth_path)
+                    if not depth_path.is_file() or depth_path.stat().st_size <= 0:
+                        raise RenderUnavailableError(
+                            f"Depth map missing or empty: {depth_path.name}"
+                        )
+                    result.depth_paths.append(str(depth_path))
+                    _require_option(options, "render.effect.display_depth", False)
 
+            if include_depth and not result.depth_paths:
+                raise RenderUnavailableError(
+                    "DoD-6 requires ≥1 visual depth map; none were written"
+                )
+
+            _merge_render_into_diagnostics(paths, result)
             return result
         except RenderUnavailableError:
             raise

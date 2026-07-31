@@ -60,9 +60,11 @@ def test_f3d_render_offscreen(solid_cylinder_stl: Path, tmp_work: Path) -> None:
     for p in rendered.view_paths:
         assert Path(p).is_file()
         assert Path(p).stat().st_size > 0
-    # Depth is visual evidence if produced
+    # DoD-6: ≥1 visual depth map on successful render
+    assert len(rendered.depth_paths) >= 1
     for p in rendered.depth_paths:
         assert Path(p).is_file()
+        assert Path(p).stat().st_size > 0
     assert rendered.rendered_from in {"working", "original", "proxy"}
 
 
@@ -93,3 +95,4 @@ def test_render_cli_json(solid_cylinder_stl: Path, tmp_work: Path) -> None:
     payload = json.loads(r2.stdout)
     assert payload["ok"] is True
     assert payload["depth_semantics"] == "visual_colormap_not_metric"
+    assert len(payload["depth_paths"]) >= 1

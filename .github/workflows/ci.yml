@@ -1,0 +1,57 @@
+# MeshOps CI — mirrors ledgerful verify steps (lint, format, typecheck, test).
+# Tool pins researched 2026-07-30 from PyPI / Node.js / GitHub Actions releases.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Force action JS runtime to Node 24 (Node 20 deprecated on GH runners).
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  UV_VERSION: "0.12.0"
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  quality:
+    name: lint · format · typecheck · test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Node 24 LTS (Krypton). basedpyright also vendors Node via nodejs-wheel;
+      # pin runner Node 24 for Actions + any JS tooling.
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Sync project (dev extras)
+        run: uv sync --extra dev
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Type check (basedpyright)
+        run: uv run basedpyright
+
+      - name: Pytest
+        run: uv run pytest

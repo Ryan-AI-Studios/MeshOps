@@ -68,3 +68,4 @@ def test_rogue2_ingest_triage_report(tmp_work: Path) -> None:
         payload = json.loads(r4.stdout)
         assert payload["ok"] is True
         assert len(payload["view_paths"]) >= 1
+        assert len(payload["depth_paths"]) >= 1

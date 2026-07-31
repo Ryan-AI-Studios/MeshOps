@@ -3,10 +3,21 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import stat
 from pathlib import Path
 
+import pytest
+import trimesh
+
 from meshops.ingest.pipeline import ingest_stl
-from meshops.jobstore.paths import JobPaths, content_sha256, mesh_id_from_path, set_readonly
+from meshops.jobstore.paths import (
+    PROXY_FACE_THRESHOLD,
+    JobPaths,
+    content_sha256,
+    mesh_id_from_path,
+    set_readonly,
+)
 
 
 def test_mesh_id_is_first_12_hex_of_sha256(solid_cylinder_stl: Path) -> None:
@@ -51,13 +62,37 @@ def test_source_never_overwritten(solid_cylinder_stl: Path, tmp_work: Path) -> N
 
 def test_original_readonly_best_effort(solid_cylinder_stl: Path, tmp_work: Path) -> None:
     result = ingest_stl(solid_cylinder_stl, work_root=tmp_work)
-    # Best-effort: set_readonly should not raise; on Windows attribute may be set.
-    set_readonly(result.original_path)
+    # Assert ingest left original read-only (do not re-apply set_readonly here).
     assert result.original_path.is_file()
-    # Writing should fail or be restricted — check not writable by owner bit when possible
     mode = result.original_path.stat().st_mode
-    # At least one of: no user-write bit, or Windows readonly (we only assert file still exists)
-    assert mode is not None
+    if os.name == "nt":
+        import ctypes
+
+        attrs = ctypes.windll.kernel32.GetFileAttributesW(str(result.original_path))  # type: ignore[attr-defined]
+        # FILE_ATTRIBUTE_READONLY = 0x01; INVALID_FILE_ATTRIBUTES = -1
+        assert attrs != -1
+        assert attrs & 0x01, "Windows readonly attribute not set on original.stl"
+    else:
+        assert not (mode & stat.S_IWRITE), "POSIX user-write bit still set on original.stl"
+    # Helper remains available for re-ingest / repair paths
+    set_readonly(result.original_path)
+
+
+def test_proxy_created_when_over_face_threshold(
+    solid_cylinder_stl: Path,
+    tmp_work: Path,
+) -> None:
+    """Proxy policy without requiring Rogue2 (DoD-1)."""
+    mesh = trimesh.load(solid_cylinder_stl, force="mesh")
+    assert isinstance(mesh, trimesh.Trimesh)
+    if len(mesh.faces) <= 10:
+        pytest.skip("synthetic too small even for lowered threshold")
+    # Pass threshold explicitly — default is bound at def time from PROXY_FACE_THRESHOLD.
+    result = ingest_stl(solid_cylinder_stl, work_root=tmp_work, proxy_face_threshold=10)
+    assert result.proxy_path is not None
+    assert Path(result.proxy_path).is_file()
+    assert result.stats.faces > 10
+    assert PROXY_FACE_THRESHOLD == 100_000
 
 
 def test_stats_topology_fields_present(solid_cylinder_stl: Path, tmp_work: Path) -> None:

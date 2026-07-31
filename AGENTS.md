@@ -21,15 +21,18 @@ meshops{
     - read docs/Difficulty.md (binding law)
     - read docs/TechStack.md (binding pins)
     - read conductor/conductor.md
+    - skim conductor/deferred.md (Never/Parked — not a work queue)
   edit:
     - never overwrite original.stl / fixture originals
     - never whole-model voxel remesh hero meshes without explicit user opt-in
     - never full-mesh boolean after solidify
     - classify before mutate — no recipe without triage class
+    - never implement deferred.md items without promoting a track
   after:
     - multi-view renders required before claiming success
     - export guards must pass (face floor, size floor, bbox, components)
-    - pytest for touched gates; Rogue2 must never export wipeout-class "success"
+    - ledgerful verify (or ruff + format + basedpyright + pytest)
+    - Rogue2 must never export wipeout-class "success"
   skip_for:
     - docs-only wording with no acceptance/behavior change
     - explicit user bypass
@@ -69,9 +72,15 @@ ledger{
 verify{
   scope:"targeted during work; full before finalizing a track"
   required_when_code_exists:
-    - ruff check / ruff format --check
+    - ruff check .
+    - ruff format --check .
+    - basedpyright
     - pytest (unit + fixture gates)
-    - Rogue2 wipeout guard test green
+    - Rogue2 wipeout guard test green (when fixtures exist)
+  how:
+    - preferred:"ledgerful verify  # uses .ledgerful/config.toml steps"
+    - ci:".github/workflows/ci.yml mirrors the same four gates"
+    - pins:"docs/TechStack.md §7"
   never:
     - declare track done on numeric mesh stats alone
 }
