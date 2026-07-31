@@ -122,7 +122,6 @@ def save_current_mesh(ms: Any, path: Path | str) -> None:
     Falls back to trimesh export of vertex/face arrays when MeshLab IO plugins
     cannot write STL (same class of failure as load on some Linux wheels).
     """
-    pml = _import_pymeshlab()
     dest = Path(path)
     dest.parent.mkdir(parents=True, exist_ok=True)
     try:
