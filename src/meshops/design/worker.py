@@ -91,21 +91,34 @@ _SAFE_BUILTIN_NAMES: frozenset[str] = frozenset(
 
 
 def _is_blocked_export_attr(name: str) -> bool:
-    return (
-        name.startswith("export_")
-        or name.startswith("Export")
-        or name
-        in {
-            "export",
-            "exporters",
-            "ExportDXF",
-            "ExportSVG",
-            "ExportBREP",
-            "ExportGLTF",
-            "ExportSTL",
-            "ExportSTEP",
-        }
-    )
+    """Block file-write / export surfaces on the build123d module proxy."""
+    if name.startswith("export_") or name.startswith("Export"):
+        return True
+    if name in {
+        "export",
+        "exporters",
+        "ExportDXF",
+        "ExportSVG",
+        "ExportBREP",
+        "ExportGLTF",
+        "ExportSTL",
+        "ExportSTEP",
+        "tempfile",
+        "os",
+        "sys",
+        "pathlib",
+        "io",
+        "open",
+        "shutil",
+        "subprocess",
+    }:
+        return True
+    # OCP / OCCT writer helpers (BRepTools.Write_s, StlAPI_Writer, …).
+    if "Writer" in name or name.endswith("Write") or "Write_" in name:
+        return True
+    if name in {"mkstemp", "NamedTemporaryFile", "TemporaryFile", "mktemp", "TemporaryDirectory"}:
+        return True
+    return False
 
 
 def _filter_build123d_module(real: types.ModuleType) -> types.ModuleType:

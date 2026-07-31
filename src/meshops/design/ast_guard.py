@@ -237,14 +237,21 @@ _DENIED_EXPORT_CALL_NAMES: Final[frozenset[str]] = frozenset(
     }
 )
 
-# Attribute methods that write files (build123d Export* classes).
+# Attribute methods that write files (build123d Export* / OCP writers).
 _DENIED_IO_ATTRS: Final[frozenset[str]] = frozenset(
     {
         "write",
+        "Write",
+        "Write_s",
         "save",
         "dump",
         "to_file",
         "export",
+        "mkstemp",
+        "NamedTemporaryFile",
+        "TemporaryFile",
+        "TemporaryDirectory",
+        "mktemp",
     }
 )
 
@@ -336,9 +343,22 @@ class _AstGuardVisitor(ast.NodeVisitor):
             )
         # Deny export API references even when assigned to aliases
         # (e.g. writer = build123d.export_stl; writer(...)).
-        if _is_export_name(node.attr):
+        if _is_export_name(node.attr) or node.attr in {
+            "tempfile",
+            "Writer",
+            "StlAPI_Writer",
+            "STEPCAFControl_Writer",
+            "BRepTools",
+            "RWStl",
+        }:
             _deny(
-                f"AST denied export attribute .{node.attr} (MeshOps harness owns export)",
+                f"AST denied export/I-O attribute .{node.attr} (MeshOps harness owns export)",
+                node=node,
+                attr=node.attr,
+            )
+        if "Writer" in node.attr or node.attr.endswith("Write") or "Write_" in node.attr:
+            _deny(
+                f"AST denied writer attribute .{node.attr}",
                 node=node,
                 attr=node.attr,
             )
@@ -418,8 +438,8 @@ class _AstGuardVisitor(ast.NodeVisitor):
                     node=node,
                     attr=func.attr,
                 )
-            # ExportDXF().write(...) / .save(...)
-            if func.attr in _DENIED_IO_ATTRS:
+            # ExportDXF().write(...) / OCP *.Write / tempfile.mkstemp(...)
+            if func.attr in _DENIED_IO_ATTRS or "Write" in func.attr or "Writer" in func.attr:
                 _deny(
                     f"AST denied I/O attribute call .{func.attr} "
                     "(geometry sources must not write files)",
