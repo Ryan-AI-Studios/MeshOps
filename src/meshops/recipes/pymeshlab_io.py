@@ -54,47 +54,45 @@ def load_mesh_into(
 ) -> None:
     """Load mesh into MeshSet.
 
-    STL default in MeshLab unifies verts; pass unify_vertices=False when
-    duplicate-vertex repair must still see dups. Prefer PLY fixtures for T1.
+    Prefer ``load_new_mesh`` when format plugins work. On CI/Linux wheels that
+    raise ``Unknown format for load: stl|ply``, build a ``pymeshlab.Mesh`` from
+    numpy arrays via trimesh (no file-format plugin required).
 
-    Some Linux pymeshlab wheels fail to load binary STL with
-    ``Unknown format for load: stl``; fall back to a temporary PLY bridge
-    via trimesh so CI and Windows both succeed.
+    ``unify_vertices`` only applies to the native load path; the numpy bridge
+    preserves the mesh as loaded by trimesh with ``process=False`` (dups kept).
     """
     pml = _import_pymeshlab()
     src = Path(path).resolve()
     if not src.is_file():
         raise RecipeEngineError(f"load failed: file not found: {src}")
 
-    def _try_load(load_path: Path) -> None:
-        # Prefer absolute path; kwargs order varies slightly across builds.
+    # 1) Native file load (preserves unify_vertices for honest T1 when available)
+    try:
         try:
-            ms.load_new_mesh(str(load_path), unify_vertices=unify_vertices)
+            ms.load_new_mesh(str(src), unify_vertices=unify_vertices)
         except TypeError:
-            # Older/newer signature without unify_vertices kw.
-            ms.load_new_mesh(str(load_path))
-
-    try:
-        _try_load(src)
+            ms.load_new_mesh(str(src))
         return
-    except pml.PyMeshLabException as first_exc:
-        # Bridge via PLY when STL format plugins misbehave (common on Linux CI).
-        if src.suffix.lower() not in {".stl", ".stla", ".stlb"}:
-            raise RecipeEngineError(f"load failed: {first_exc}", cause=first_exc) from first_exc
-    except Exception as first_exc:
-        if src.suffix.lower() not in {".stl", ".stla", ".stlb"}:
-            raise RecipeEngineError(f"load failed: {first_exc}", cause=first_exc) from first_exc
+    except Exception:
+        pass  # fall through to numpy bridge
 
+    # 2) Numpy bridge — works when IO plugins are missing/broken
     try:
-        import tempfile
-
         from meshops.ingest.stats import load_mesh as trimesh_load
 
         mesh = trimesh_load(src)
-        with tempfile.TemporaryDirectory(prefix="meshops_pml_") as tmp:
-            ply_path = Path(tmp) / "bridge.ply"
-            mesh.export(ply_path)
-            _try_load(ply_path.resolve())
+        verts = mesh.vertices.astype("float64", copy=False)
+        faces = mesh.faces.astype("int32", copy=False)
+        pml_mesh = pml.Mesh(verts, faces)
+        # add_mesh may take mesh and optional name
+        try:
+            ms.add_mesh(pml_mesh, src.stem)
+        except TypeError:
+            ms.add_mesh(pml_mesh)
+        # Ensure current mesh is the one we added
+        with contextlib.suppress(Exception):
+            if hasattr(ms, "set_current_mesh") and ms.mesh_number() > 0:
+                ms.set_current_mesh(ms.mesh_number() - 1)
     except pml.PyMeshLabException as exc:
         raise RecipeEngineError(f"load failed: {exc}", cause=exc) from exc
     except Exception as exc:
@@ -119,13 +117,31 @@ def apply_filter(ms: Any, name: str, **kwargs: Any) -> dict[str, Any]:
 
 
 def save_current_mesh(ms: Any, path: Path | str) -> None:
-    """Save current mesh as binary STL (MeshLab default for .stl)."""
+    """Save current mesh as binary STL (MeshLab default for .stl).
+
+    Falls back to trimesh export of vertex/face arrays when MeshLab IO plugins
+    cannot write STL (same class of failure as load on some Linux wheels).
+    """
     pml = _import_pymeshlab()
     dest = Path(path)
     dest.parent.mkdir(parents=True, exist_ok=True)
     try:
         ms.save_current_mesh(str(dest))
-    except pml.PyMeshLabException as exc:
+        if dest.is_file() and dest.stat().st_size > 0:
+            return
+    except Exception:
+        pass
+
+    try:
+        import numpy as np
+        import trimesh
+
+        mesh = ms.current_mesh()
+        verts = np.asarray(mesh.vertex_matrix(), dtype=np.float64)
+        faces = np.asarray(mesh.face_matrix(), dtype=np.int64)
+        tmesh = trimesh.Trimesh(vertices=verts, faces=faces, process=False)
+        tmesh.export(dest, file_type="stl")
+    except Exception as exc:
         raise RecipeEngineError(f"save failed: {exc}", cause=exc) from exc
 
 
