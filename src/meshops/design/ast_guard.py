@@ -213,6 +213,22 @@ _DENIED_ATTR_CALLS: Final[frozenset[tuple[str, str]]] = frozenset(
     }
 )
 
+# Agent geometry must not write files — MeshOps owns export (harness-wrapper).
+_DENIED_EXPORT_CALL_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        "export_stl",
+        "export_step",
+        "export_brep",
+        "export_gltf",
+        "export_binary_stl",
+        "export_svg",
+        "export_dxf",
+        "export_stl_ascii",
+        "exporters",
+        "export",
+    }
+)
+
 
 def _root_module(name: str) -> str:
     return name.split(".", 1)[0]
@@ -262,7 +278,15 @@ class _AstGuardVisitor(ast.NodeVisitor):
                 details={"lineno": node.lineno},
             )
         _check_import_name(node.module, node=node)
-        # from os import system style — root already denied for os
+        # Deny "from build123d import export_stl" etc. (agent must not write files).
+        for alias in node.names:
+            base = alias.name.split(".", 1)[0]
+            if base in _DENIED_EXPORT_CALL_NAMES or base.startswith("export_"):
+                _deny(
+                    f"AST denied import of export API {alias.name!r} (MeshOps harness owns export)",
+                    node=node,
+                    name=alias.name,
+                )
         self.generic_visit(node)
 
     def visit_Name(self, node: ast.Name) -> None:
@@ -319,6 +343,14 @@ class _AstGuardVisitor(ast.NodeVisitor):
         func = node.func
         if isinstance(func, ast.Name) and func.id in _DENIED_CALL_NAMES:
             _deny(f"AST denied call to {func.id!r}", node=node, call=func.id)
+        if isinstance(func, ast.Name) and (
+            func.id in _DENIED_EXPORT_CALL_NAMES or func.id.startswith("export_")
+        ):
+            _deny(
+                f"AST denied export call {func.id!r} (MeshOps harness owns export)",
+                node=node,
+                call=func.id,
+            )
         if isinstance(func, ast.Attribute):
             # module.attr(...)
             if isinstance(func.value, ast.Name):
@@ -341,6 +373,13 @@ class _AstGuardVisitor(ast.NodeVisitor):
             }:
                 _deny(
                     f"AST denied attribute call .{func.attr}",
+                    node=node,
+                    attr=func.attr,
+                )
+            # build123d.export_stl(...) or b123d.exporters...
+            if func.attr in _DENIED_EXPORT_CALL_NAMES or func.attr.startswith("export_"):
+                _deny(
+                    f"AST denied export attribute call .{func.attr} (MeshOps harness owns export)",
                     node=node,
                     attr=func.attr,
                 )

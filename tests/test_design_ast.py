@@ -87,3 +87,27 @@ def test_ast__forbid_dunder_class_escape() -> None:
     with pytest.raises(DesignError) as ei:
         lint_geometry_source(src)
     assert ei.value.code == "ast_denied"
+
+
+def test_ast__forbid_build123d_export_stl_import() -> None:
+    """Harness-wrapper: agents must not import/call export_stl (Codex re-review P1)."""
+    src = """
+from build123d import Box, export_stl
+result = Box(10, 10, 10)
+export_stl(result, "C:\\\\outside.stl")
+"""
+    with pytest.raises(DesignError) as ei:
+        lint_geometry_source(src)
+    assert ei.value.code == "ast_denied"
+    assert "export" in str(ei.value).lower()
+
+
+def test_ast__forbid_build123d_export_attr_call() -> None:
+    src = """
+import build123d
+result = build123d.Box(10, 10, 10)
+build123d.export_step(result, "out.step")
+"""
+    with pytest.raises(DesignError) as ei:
+        lint_geometry_source(src)
+    assert ei.value.code == "ast_denied"

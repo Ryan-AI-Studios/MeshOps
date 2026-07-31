@@ -108,12 +108,16 @@ def _assert_exported_stl_single_component(stl_path: Path) -> None:
             details={"path": str(stl_path)},
         )
 
-    # Connected components via face adjacency (bodies).
+    # Connected components via face adjacency (bodies) — fail closed on errors.
     try:
         parts = mesh.split(only_watertight=False)
-        n = len(parts) if parts is not None else 1
-    except Exception:
-        n = 1
+        n = len(parts) if parts is not None else 0
+    except Exception as exc:
+        raise DesignError(
+            f"exported STL component check failed: {type(exc).__name__}: {exc}",
+            code="export_failed",
+            details={"path": str(stl_path)},
+        ) from exc
     if n != 1:
         raise DesignError(
             f"exported STL has {n} mesh components (require 1)",
