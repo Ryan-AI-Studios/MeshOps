@@ -6,15 +6,20 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 *.egg-info/
 dist/
 build/
 .env
 output/
+# uv lock is committed when present; keep caches local
+.uv/
 
-# Local planning / reference (not published)
+# Local planning / reference / agent skills (not published)
 conductor/
 docs/
+.agents/
+AGENTS.md
 
 # large binaries unless LFS policy set
 # fixtures/rogue2/*.stl  # un-ignore when using LFS

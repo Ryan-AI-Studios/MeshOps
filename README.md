@@ -9,9 +9,24 @@ Local agent-driven OS for 3D-printable meshes (repair + mechanical design + orga
 | [docs/TechStack.md](docs/TechStack.md) | Dependency pins |
 | [docs/PRD.md](docs/PRD.md) | Short PRD |
 | [conductor/conductor.md](conductor/conductor.md) | Tracks |
-| [AGENTS.md](AGENTS.md) | Agent rules |
-| [.agents/skills/onboarding](.agents/skills/onboarding/SKILL.md) | Session start |
+| [conductor/deferred.md](conductor/deferred.md) | Parking lot (not a work queue) |
+| [conductor/planner-handoff.md](conductor/planner-handoff.md) | Living cold-start for planners |
+Local only (gitignored): `conductor/`, `docs/`, `.agents/` (skills including onboarding), `AGENTS.md` (agent rules — Ledgerful-style compact policy).
 
-**Status:** Design + conductor sketches + agent onboarding. Implementation not started.
+**Status:** Design + local conductor/skills + quality gates. Product code tracks start at 0001.
+
+### Quality gates (local = CI)
+
+```powershell
+uv sync --extra dev
+uv run ruff check .
+uv run ruff format --check .
+uv run basedpyright
+uv run pytest
+# or all four via:
+ledgerful verify
+```
+
+CI: `.github/workflows/ci.yml` (Python 3.13, Node 24, uv 0.12.0). Pins: `docs/TechStack.md` §7.
 
 Blender manual epub under `docs/blender_manual_v520_en.epub` is reference only.
