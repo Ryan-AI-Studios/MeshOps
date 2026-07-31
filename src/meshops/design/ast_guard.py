@@ -90,6 +90,80 @@ _DENIED_CALL_NAMES: Final[frozenset[str]] = frozenset(
         "breakpoint",
         "execfile",
         "help",  # can load modules interactively in some envs
+        "getattr",
+        "setattr",
+        "delattr",
+        "globals",
+        "locals",
+        "vars",
+        "dir",
+        "memoryview",
+        "bytearray",
+        "bytes",  # often used in polyglot escapes; geometry does not need raw bytes()
+        "chr",
+        "ord",
+        "ascii",
+        "format",
+        "repr",  # keep string coercion free via f-strings/str if needed — still deny repr()
+    }
+)
+
+# Names that must never appear unbound (sandbox escape surface).
+_DENIED_NAME_IDS: Final[frozenset[str]] = frozenset(
+    {
+        "__builtins__",
+        "__builtin__",
+        "__import__",
+        "__loader__",
+        "__spec__",
+        "__package__",
+        "builtins",
+        "getattr",
+        "setattr",
+        "delattr",
+        "globals",
+        "locals",
+        "vars",
+        "eval",
+        "exec",
+        "compile",
+        "open",
+        "input",
+        "breakpoint",
+        "__class__",
+        "__bases__",
+        "__subclasses__",
+        "__mro__",
+        "__globals__",
+        "__code__",
+        "__dict__",
+        "__reduce__",
+        "__reduce_ex__",
+    }
+)
+
+# Dunder attributes used in classic sandbox escapes (geometry never needs these).
+_DENIED_DUNDER_ATTRS: Final[frozenset[str]] = frozenset(
+    {
+        "__builtins__",
+        "__class__",
+        "__bases__",
+        "__subclasses__",
+        "__mro__",
+        "__globals__",
+        "__code__",
+        "__dict__",
+        "__getattribute__",
+        "__getattr__",
+        "__setattr__",
+        "__delattr__",
+        "__reduce__",
+        "__reduce_ex__",
+        "__import__",
+        "__loader__",
+        "__spec__",
+        "__init_subclass__",
+        "__subclasshook__",
     }
 )
 
@@ -160,6 +234,14 @@ def _check_import_name(mod: str, *, node: ast.AST) -> None:
         )
 
 
+def _deny(msg: str, *, node: ast.AST, **details: object) -> None:
+    raise DesignError(
+        msg,
+        code="ast_denied",
+        details={"lineno": getattr(node, "lineno", None), **details},
+    )
+
+
 class _AstGuardVisitor(ast.NodeVisitor):
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
@@ -183,33 +265,21 @@ class _AstGuardVisitor(ast.NodeVisitor):
         # from os import system style — root already denied for os
         self.generic_visit(node)
 
-    def visit_Call(self, node: ast.Call) -> None:
-        func = node.func
-        if isinstance(func, ast.Name) and func.id in _DENIED_CALL_NAMES:
-            raise DesignError(
-                f"AST denied call to {func.id!r}",
-                code="ast_denied",
-                details={"call": func.id, "lineno": node.lineno},
-            )
-        if isinstance(func, ast.Attribute):
-            # module.attr(...)
-            if isinstance(func.value, ast.Name):
-                pair = (func.value.id, func.attr)
-                if pair in _DENIED_ATTR_CALLS:
-                    raise DesignError(
-                        f"AST denied call to {func.value.id}.{func.attr}",
-                        code="ast_denied",
-                        details={"call": f"{func.value.id}.{func.attr}", "lineno": node.lineno},
-                    )
-            if func.attr in {"system", "popen", "execv", "execve", "execl", "Popen"}:
-                raise DesignError(
-                    f"AST denied attribute call .{func.attr}",
-                    code="ast_denied",
-                    details={"attr": func.attr, "lineno": node.lineno},
-                )
+    def visit_Name(self, node: ast.Name) -> None:
+        if node.id in _DENIED_NAME_IDS:
+            _deny(f"AST denied name {node.id!r}", node=node, name=node.id)
         self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
+        # Block dunder escape surfaces (__class__, __subclasses__, …).
+        if node.attr in _DENIED_DUNDER_ATTRS or (
+            node.attr.startswith("__") and node.attr.endswith("__") and node.attr != "__doc__"
+        ):
+            _deny(
+                f"AST denied dunder attribute .{node.attr}",
+                node=node,
+                attr=node.attr,
+            )
         # os.environ / os.system as value (not only call)
         if (
             isinstance(node.value, ast.Name)
@@ -228,11 +298,55 @@ class _AstGuardVisitor(ast.NodeVisitor):
                 "execvp",
             }
         ):
-            raise DesignError(
-                f"AST denied attribute os.{node.attr}",
-                code="ast_denied",
-                details={"attr": f"os.{node.attr}", "lineno": node.lineno},
+            _deny(f"AST denied attribute os.{node.attr}", node=node, attr=f"os.{node.attr}")
+        self.generic_visit(node)
+
+    def visit_Subscript(self, node: ast.Subscript) -> None:
+        # __builtins__["open"] / builtins["__import__"] style bypasses.
+        if isinstance(node.value, ast.Name) and node.value.id in {
+            "__builtins__",
+            "__builtin__",
+            "builtins",
+        }:
+            _deny(
+                f"AST denied subscript of {node.value.id}",
+                node=node,
+                target=node.value.id,
             )
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        func = node.func
+        if isinstance(func, ast.Name) and func.id in _DENIED_CALL_NAMES:
+            _deny(f"AST denied call to {func.id!r}", node=node, call=func.id)
+        if isinstance(func, ast.Attribute):
+            # module.attr(...)
+            if isinstance(func.value, ast.Name):
+                pair = (func.value.id, func.attr)
+                if pair in _DENIED_ATTR_CALLS:
+                    _deny(
+                        f"AST denied call to {func.value.id}.{func.attr}",
+                        node=node,
+                        call=f"{func.value.id}.{func.attr}",
+                    )
+            if func.attr in {
+                "system",
+                "popen",
+                "execv",
+                "execve",
+                "execl",
+                "Popen",
+                "open",
+                "__import__",
+            }:
+                _deny(
+                    f"AST denied attribute call .{func.attr}",
+                    node=node,
+                    attr=func.attr,
+                )
+        # Deny calls whose callee is a subscript (__builtins__["open"](...)).
+        if isinstance(func, ast.Subscript):
+            _deny("AST denied call via subscript (possible builtins bypass)", node=node)
         self.generic_visit(node)
 
 

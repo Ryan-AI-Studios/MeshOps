@@ -78,6 +78,50 @@ def ensure_single_solid(shape: Any) -> Any:
         ) from exc
 
 
+def _assert_exported_stl_single_component(stl_path: Path) -> None:
+    """Post-export mesh backup: components == 1 (plan A1-BS5)."""
+    try:
+        import trimesh
+    except ImportError:
+        return  # should never happen in meshops core; skip if stripped
+
+    loaded = trimesh.load(stl_path, force="mesh")
+    if isinstance(loaded, list):
+        meshes = loaded
+    elif isinstance(loaded, trimesh.Scene):
+        meshes = [g for g in loaded.geometry.values() if isinstance(g, trimesh.Trimesh)]
+    else:
+        meshes = [loaded] if isinstance(loaded, trimesh.Trimesh) else []
+
+    if not meshes:
+        raise DesignError(
+            f"exported STL not loadable as mesh: {stl_path}",
+            code="export_failed",
+            details={"path": str(stl_path)},
+        )
+
+    mesh = meshes[0] if len(meshes) == 1 else trimesh.util.concatenate(meshes)
+    if not isinstance(mesh, trimesh.Trimesh):
+        raise DesignError(
+            "exported STL did not resolve to a Trimesh",
+            code="export_failed",
+            details={"path": str(stl_path)},
+        )
+
+    # Connected components via face adjacency (bodies).
+    try:
+        parts = mesh.split(only_watertight=False)
+        n = len(parts) if parts is not None else 1
+    except Exception:
+        n = 1
+    if n != 1:
+        raise DesignError(
+            f"exported STL has {n} mesh components (require 1)",
+            code="multi_solid",
+            details={"components": n, "path": str(stl_path)},
+        )
+
+
 def export_shape(
     shape: Any,
     *,
@@ -173,6 +217,9 @@ def export_shape(
             code="export_failed",
             details={"path": str(step_p)},
         )
+
+    # Mesh-stats backup: exported STL should be a single connected component (A1-BS5).
+    _assert_exported_stl_single_component(stl_p)
 
     return {
         "export_stl": {

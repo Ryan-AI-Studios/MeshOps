@@ -153,11 +153,23 @@ def _stage_and_ingest(
         # Pass original.stl so volume can recheck with process=True (STL vertex soup).
         validate_design_mesh(ing.stats, mesh_path=job_paths.original_stl)
 
-        # 5) Triage
+        # 5) Triage — fail closed (ingest → triage → accept is required)
         try:
             mesh_triage(mesh_id, work_root=work_root)
+        except DesignError:
+            raise
         except Exception as exc:
-            notes.append(f"triage_warning: {type(exc).__name__}: {exc}")
+            raise DesignError(
+                f"triage failed for design job {mesh_id}: {type(exc).__name__}: {exc}",
+                code="triage_failed",
+                details={"mesh_id": mesh_id, "error": str(exc)},
+            ) from exc
+        if not job_paths.diagnostics_json.is_file():
+            raise DesignError(
+                f"triage did not write diagnostics.json for {mesh_id}",
+                code="triage_failed",
+                details={"mesh_id": mesh_id, "path": str(job_paths.diagnostics_json)},
+            )
 
         # 6) Views (honest stubs OK)
         view_paths, view_kind, view_notes = _render_design_views(

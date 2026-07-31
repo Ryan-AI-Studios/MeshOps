@@ -92,3 +92,29 @@ def test_bracket__golden_dimensions(tmp_work: Path) -> None:
     # Source documents spacing for review
     src = Path(result.paths["source"]).read_text(encoding="utf-8")
     assert f"spacing={params.hole_spacing_mm}" in src or "_half_span" in src
+
+    # Geometry-level hole placement via midplane section (no rtree/contains required).
+    # Hole boundaries appear as circles of radius hole_diameter/2 centered at ±half_span.
+    import numpy as np
+
+    half = params.hole_spacing_mm / 2.0
+    radius = params.hole_diameter_mm / 2.0
+    segs = trimesh.intersections.mesh_plane(
+        mesh, plane_normal=[0.0, 0.0, 1.0], plane_origin=[0.0, 0.0, 0.0]
+    )
+    assert segs is not None and len(segs) > 0, "midplane section empty"
+    pts2 = np.asarray(segs, dtype=float).reshape(-1, 3)[:, :2]
+    hole_centers: list[np.ndarray] = []
+    for cx in (-half, half):
+        near = pts2[(np.abs(pts2[:, 0] - cx) < radius * 3.0) & (np.abs(pts2[:, 1]) < radius * 3.0)]
+        assert len(near) > 8, f"expected hole boundary near x={cx}"
+        d = np.linalg.norm(near - np.array([cx, 0.0], dtype=float), axis=1)
+        # Min distance from nominal center to cut points ≈ radius (void interior).
+        assert float(d.min()) == pytest.approx(radius, abs=TOL_MM)
+        # Centroid of near-boundary points ≈ hole center (actual placement).
+        hole_centers.append(near.mean(axis=0))
+    # Tessellated circle centroids drift slightly; ±0.25 mm still catches spacing regressions.
+    assert float(hole_centers[0][0]) == pytest.approx(-half, abs=0.25)
+    assert float(hole_centers[1][0]) == pytest.approx(half, abs=0.25)
+    measured_spacing = float(hole_centers[1][0] - hole_centers[0][0])
+    assert measured_spacing == pytest.approx(params.hole_spacing_mm, abs=0.25)

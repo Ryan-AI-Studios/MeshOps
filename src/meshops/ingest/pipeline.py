@@ -87,10 +87,18 @@ def ingest_stl(
     ensure_job_layout(paths)
 
     # Copy original if missing; never write to source.
+    # On reuse, require byte-identical original (content_sha256 integrity).
     if not paths.original_stl.is_file():
         shutil.copy2(source, paths.original_stl)
         set_readonly(paths.original_stl)
     else:
+        existing_hash = content_sha256(paths.original_stl)
+        if existing_hash != digest:
+            raise ValueError(
+                f"ingest integrity: existing original.stl hash {existing_hash[:16]}… "
+                f"!= source {digest[:16]}… for mesh_id={mesh_id} "
+                f"(refuse silent reuse of mismatched canonical mesh)"
+            )
         # Ensure read-only even on re-ingest.
         set_readonly(paths.original_stl)
 

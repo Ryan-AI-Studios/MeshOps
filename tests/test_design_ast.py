@@ -59,3 +59,31 @@ def test_ast__forbid_unknown_module() -> None:
     with pytest.raises(DesignError) as ei:
         lint_geometry_source("import requests\n")
     assert ei.value.code == "ast_denied"
+
+
+def test_ast__forbid_builtins_subscript_open() -> None:
+    """Codex P1: __builtins__['open'] must not bypass Name-level open deny."""
+    src = 'result = __builtins__["open"]\n'
+    with pytest.raises(DesignError) as ei:
+        lint_geometry_source(src)
+    assert ei.value.code == "ast_denied"
+
+
+def test_ast__forbid_builtins_import_bypass() -> None:
+    src = 'result = __builtins__["__import__"]("subprocess")\n'
+    with pytest.raises(DesignError) as ei:
+        lint_geometry_source(src)
+    assert ei.value.code == "ast_denied"
+
+
+def test_ast__forbid_getattr() -> None:
+    with pytest.raises(DesignError) as ei:
+        lint_geometry_source("result = getattr(object, '__class__')\n")
+    assert ei.value.code == "ast_denied"
+
+
+def test_ast__forbid_dunder_class_escape() -> None:
+    src = "result = ().__class__.__bases__[0].__subclasses__()\n"
+    with pytest.raises(DesignError) as ei:
+        lint_geometry_source(src)
+    assert ei.value.code == "ast_denied"
