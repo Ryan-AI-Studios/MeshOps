@@ -66,6 +66,7 @@ known-first-party = ["meshops"]
 "src/meshops/cli.py" = ["B008"]
 # Blender-only script (bpy available only inside Blender process).
 "src/meshops/escalate/scripts/*.py" = ["F401", "F821", "I001", "E402"]
+"src/meshops/organic/scripts/*.py" = ["F401", "F821", "I001", "E402", "E501", "RUF003"]
 
 
 [tool.ruff.format]
@@ -85,6 +86,7 @@ exclude = [
     "conductor",
     # bpy scripts run inside Blender only — not importable in meshops venv
     "src/meshops/escalate/scripts",
+    "src/meshops/organic/scripts",
 ]
 reportMissingImports = true
 reportMissingTypeStubs = false
