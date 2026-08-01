@@ -98,6 +98,48 @@ ENV_CATALOG: Final[tuple[EnvCatalogEntry, ...]] = (
         "consumer": "meshops.organic.pass_runner",
     },
     {
+        "name": "MESHOPS_HOSTED_API_KEY",
+        "description": (
+            "Primary API key for hosted multi-view generator (Meshy v1 default; "
+            "presence-only — never remote-validated by doctor)"
+        ),
+        "example": "(secret — never commit)",
+        "consumer": "meshops.hosted.orchestrate",
+    },
+    {
+        "name": "MESHOPS_MESHY_API_KEY",
+        "description": (
+            "Optional Meshy-specific key override (takes precedence over "
+            "MESHOPS_HOSTED_API_KEY when provider=meshy)"
+        ),
+        "example": "(secret — never commit)",
+        "consumer": "meshops.hosted.orchestrate",
+    },
+    {
+        "name": "MESHOPS_TRIPO_API_KEY",
+        "description": "Optional Tripo key for future adapter (not v1 primary)",
+        "example": "(secret — never commit)",
+        "consumer": "meshops.hosted.orchestrate",
+    },
+    {
+        "name": "MESHOPS_HOSTED_POLL_INTERVAL_S",
+        "description": "Seconds between hosted provider status polls (default 5)",
+        "example": "5",
+        "consumer": "meshops.hosted.orchestrate",
+    },
+    {
+        "name": "MESHOPS_HOSTED_TIMEOUT_S",
+        "description": "Overall hosted poll deadline seconds (default 300)",
+        "example": "300",
+        "consumer": "meshops.hosted.orchestrate",
+    },
+    {
+        "name": "MESHOPS_HOSTED_MAX_HTTP_RETRIES",
+        "description": "Max HTTP retries for 429/503 hosted provider calls (default 3)",
+        "example": "3",
+        "consumer": "meshops.hosted.providers.meshy",
+    },
+    {
         "name": "MESHOPS_BLENDER_MIRROR",
         "description": (
             "Preferred Blender zip URL for bootstrap only — never read by find_blender"

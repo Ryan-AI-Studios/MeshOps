@@ -1,5 +1,5 @@
 """Typer CLI — ingest / triage / render / report / repair / export / diff /
-accept / design / escalate / organic / slice / doctor.
+accept / design / escalate / organic / hosted / slice / doctor.
 """
 
 from __future__ import annotations
@@ -18,8 +18,8 @@ app = typer.Typer(
     name="meshops",
     help=(
         "MeshOps — triage + guarded T1/T2 repair + T7 design + T3 escalate + T6 organic + "
-        "Orca slice + doctor (ingest / triage / render / report / repair / export / diff / "
-        "accept / design / escalate / organic / slice / doctor)."
+        "hosted multi-view fallback + Orca slice + doctor (ingest / triage / render / report / "
+        "repair / export / diff / accept / design / escalate / organic / hosted / slice / doctor)."
     ),
     add_completion=False,
     no_args_is_help=True,
@@ -49,12 +49,25 @@ organic_app = typer.Typer(
     help=(
         "T6 organic agent-first: SessionPaths session + Blender metaball recipes + "
         "F3D pass evidence + plateau + untrusted finalize. "
-        "MESHOPS_ORGANIC_TIMEOUT_S default 300 (use 600+ for high-res). No hosted API."
+        "MESHOPS_ORGANIC_TIMEOUT_S default 300 (use 600+ for high-res). "
+        "Hosted multi-view fallback is `meshops hosted` after plateau gate."
     ),
     add_completion=False,
     no_args_is_help=True,
 )
 app.add_typer(organic_app, name="organic")
+
+hosted_app = typer.Typer(
+    name="hosted",
+    help=(
+        "Hosted multi-view image-to-3D fallback (post-plateau only). "
+        "Requires plateau.json with allows_hosted_fallback=true. Never default organic path. "
+        "Env: MESHOPS_HOSTED_API_KEY (or MESHOPS_MESHY_API_KEY); mock provider for offline."
+    ),
+    add_completion=False,
+    no_args_is_help=True,
+)
+app.add_typer(hosted_app, name="hosted")
 
 
 def _emit_json(payload: dict[str, Any]) -> None:
@@ -1212,6 +1225,161 @@ def organic_finalize_cmd(
         )
     if not result.ok:
         raise typer.Exit(1)
+
+
+# --- hosted (track 0007 multi-view fallback) ----------------------------------
+
+
+@hosted_app.command("providers")
+def hosted_providers_cmd(
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON on stdout"),
+) -> None:
+    """List hosted provider adapters (no secrets)."""
+    from meshops.hosted.providers import DEFAULT_PROVIDER_NAME, list_providers
+
+    rows = list_providers()
+    payload = {
+        "ok": True,
+        "default": DEFAULT_PROVIDER_NAME,
+        "providers": rows,
+    }
+    if json_out:
+        _emit_json(payload)
+    else:
+        for row in rows:
+            mark = " (default)" if row.get("default") else ""
+            offline = " offline" if row.get("offline") else ""
+            typer.echo(f"{row['name']}{mark}{offline}")
+
+
+@hosted_app.command("run")
+def hosted_run_cmd(
+    session_id: str | None = typer.Option(
+        None,
+        "--session-id",
+        help="Organic session id (o + 11 hex); used with --work-root for plateau path",
+    ),
+    work_root: Path = typer.Option(Path("work"), "--work-root", help="Session/job store root"),
+    plateau: Path | None = typer.Option(
+        None,
+        "--plateau",
+        help="Absolute path to plateau.json (out-of-tree sessions OK)",
+    ),
+    views_from: str = typer.Option(
+        "latest",
+        "--views-from",
+        help="View source: latest|pass|explicit (default latest successful pass)",
+    ),
+    view: list[Path] | None = typer.Option(
+        None,
+        "--view",
+        help="Explicit view image path (repeatable; ≥2 required if used)",
+    ),
+    prompt: str = typer.Option("", "--prompt", help="Optional prompt (else session manifest)"),
+    justify: str = typer.Option(
+        ...,
+        "--justify",
+        help="Operator justification (≥15 chars; not filler; same rules as plateau reason)",
+    ),
+    provider: str = typer.Option(
+        "meshy",
+        "--provider",
+        help="Provider adapter (default meshy; use mock for offline)",
+    ),
+    accept: bool = typer.Option(
+        False,
+        "--accept/--no-accept",
+        help="Optional 0011 accept_candidate compose after triage",
+    ),
+    accept_policy: str = typer.Option(
+        "export",
+        "--accept-policy",
+        help="When --accept: export|sculpt|design (default export; not hard-wired sculpt)",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON on stdout"),
+) -> None:
+    """Run hosted multi-view fallback after a valid 0006 plateau gate."""
+    from meshops.hosted import HostedError, run_hosted_fallback
+    from meshops.hosted.views import ViewsFrom
+
+    vf: ViewsFrom
+    if views_from not in ("latest", "pass", "explicit"):
+        _emit_error(
+            HostedError(
+                f"invalid --views-from: {views_from!r}",
+                code="multiview_required",
+            ),
+            json_mode=json_out,
+            code=1,
+        )
+        return  # pragma: no cover
+    vf = views_from  # type: ignore[assignment]
+
+    try:
+        result = run_hosted_fallback(
+            session_id=session_id,
+            work_root=work_root,
+            plateau=plateau,
+            views_from=vf,
+            view_paths=list(view) if view else None,
+            prompt=prompt,
+            justify=justify,
+            provider=provider,
+            accept=accept,
+            accept_policy=accept_policy,
+        )
+    except HostedError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    payload = result.model_dump(mode="json")
+    if json_out:
+        _emit_json(payload)
+    else:
+        status = "ok" if result.ok else "FAIL"
+        typer.echo(
+            f"hosted run {status} mesh_id={result.mesh_id} provider={result.provider} "
+            f"task={result.provider_task_id}",
+            err=not result.ok,
+        )
+    if not result.ok:
+        raise typer.Exit(1)
+
+
+@hosted_app.command("status")
+def hosted_status_cmd(
+    mesh_id: str = typer.Option(..., "--mesh-id", help="Job mesh_id with hosted/ artifacts"),
+    work_root: Path = typer.Option(Path("work"), "--work-root", help="Job store root"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON on stdout"),
+) -> None:
+    """Show last hosted run_manifest under work/<mesh_id>/hosted/ (if present)."""
+    from meshops.jobstore.paths import JobPaths
+
+    job = JobPaths(work_root=work_root, mesh_id=mesh_id)
+    manifest = job.hosted_dir / "run_manifest.json"
+    if not manifest.is_file():
+        payload = {
+            "ok": False,
+            "mesh_id": mesh_id,
+            "error": "hosted_manifest_missing",
+            "path": str(manifest),
+        }
+        if json_out:
+            _emit_json(payload)
+        else:
+            typer.echo(f"no hosted run_manifest at {manifest}", err=True)
+        raise typer.Exit(1)
+
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    payload = {"ok": True, "mesh_id": mesh_id, "manifest": data, "path": str(manifest)}
+    if json_out:
+        _emit_json(payload)
+    else:
+        typer.echo(
+            f"hosted status mesh_id={mesh_id} provider={data.get('provider')} "
+            f"task={data.get('provider_task_id')}"
+        )
 
 
 @app.command("diff")

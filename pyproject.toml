@@ -33,6 +33,8 @@ design = [
 mcp = [
     "mcp==2.0.0",
 ]
+# Feature gate / future SDK slot — no extra runtime deps for v1 (stdlib urllib).
+hosted = []
 
 [project.scripts]
 meshops = "meshops.cli:app"
@@ -114,4 +116,5 @@ markers = [
     "blender: needs Blender 5.2 LTS binary (MESHOPS_BLENDER or well-known path)",
     "orcaslicer: needs OrcaSlicer binary (MESHOPS_ORCA or well-known path)",
     "mcp: needs meshops[mcp] extra (mcp==2.0.0)",
+    "hosted: needs MESHOPS_HOSTED_API_KEY + network (live provider call)",
 ]

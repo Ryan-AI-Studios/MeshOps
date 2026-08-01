@@ -121,9 +121,14 @@ class JobPaths:
         """Orca printability oracle runs (0005+): slice/<run_id>/."""
         return self.job_dir / "slice"
 
+    @property
+    def hosted_dir(self) -> Path:
+        """Hosted multi-view generator artifacts (0007+): hosted/."""
+        return self.job_dir / "hosted"
+
 
 def ensure_job_layout(paths: JobPaths) -> None:
-    """Create job directory skeleton (views/rois/revs/design/handoff/previews/slice)."""
+    """Create job directory skeleton (views/rois/revs/design/handoff/previews/slice/hosted)."""
     paths.job_dir.mkdir(parents=True, exist_ok=True)
     paths.views_dir.mkdir(exist_ok=True)
     paths.rois_dir.mkdir(exist_ok=True)
@@ -132,3 +137,4 @@ def ensure_job_layout(paths: JobPaths) -> None:
     paths.handoff_dir.mkdir(exist_ok=True)
     paths.previews_dir.mkdir(exist_ok=True)
     paths.slice_dir.mkdir(exist_ok=True)
+    paths.hosted_dir.mkdir(exist_ok=True)

@@ -1,7 +1,7 @@
 """Organic design agent-first (T6 primary / track 0006).
 
 Harness-driven Blender metaball recipes + F3D pass evidence + plateau + untrusted ingest.
-No hosted multi-view API (that is 0007 after plateau).
+Hosted multi-view fallback is meshops.hosted after plateau gate (track 0007).
 """
 
 from __future__ import annotations
