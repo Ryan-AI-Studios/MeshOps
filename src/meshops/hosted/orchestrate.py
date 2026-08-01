@@ -432,7 +432,56 @@ def run_hosted_fallback(
             except HostedError:
                 raise
             except Exception as exc:
+                # Mirror organic finalize: accept requested but crashed → not ok
                 messages.append(f"accept_candidate failed: {exc}")
+                write_run_manifest(
+                    job.hosted_dir,
+                    {
+                        "schema_version": HOSTED_SCHEMA_VERSION,
+                        "session_id": sid,
+                        "mesh_id": mesh_id,
+                        "job_dir": str(job.job_dir),
+                        "provider": provider_name,
+                        "provider_task_id": task_id,
+                        "justification": justification.model_dump(mode="json"),
+                        "view_paths": view_path_strs,
+                        "prompt": run_prompt,
+                        "created_at": _now_iso(),
+                        "honesty": honesty,
+                        "diagnostics": diagnostics,
+                        "accept_requested": True,
+                        "accept_policy": policy_name,
+                        "accepted": False,
+                        "accept_error": str(exc),
+                    },
+                )
+                write_hosted_report(
+                    job.hosted_dir,
+                    session_id=sid,
+                    plateau_reason=justification.plateau_reason,
+                    operator_justify=justification.operator_justify,
+                    view_paths=view_path_strs,
+                    provider=provider_name,
+                    provider_task_id=task_id,
+                    mesh_id=mesh_id,
+                    triage_summary=diagnostics,
+                    honesty=honesty,
+                )
+                return HostedRunResult(
+                    ok=False,
+                    session_id=sid,
+                    mesh_id=mesh_id,
+                    job_dir=str(job.job_dir),
+                    provider=provider_name,
+                    provider_task_id=task_id,
+                    justification=justification,
+                    view_paths=view_path_strs,
+                    diagnostics=diagnostics,
+                    acceptance=None,
+                    honesty=honesty,
+                    error_code="ingest_failed",
+                    messages=messages,
+                )
 
         # 11) Artifacts under JobPaths.hosted_dir
         manifest_payload: dict[str, Any] = {
@@ -469,9 +518,8 @@ def run_hosted_fallback(
             honesty=honesty,
         )
 
-        ok = True
-        if accept and acceptance is not None:
-            ok = bool(acceptance.ok)
+        # Success requires triage; if accept was requested, acceptance must exist and ok.
+        ok = bool(acceptance is not None and acceptance.ok) if accept else True
 
         return HostedRunResult(
             ok=ok,

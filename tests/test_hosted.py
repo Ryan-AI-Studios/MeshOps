@@ -485,6 +485,32 @@ def test_get_provider_unknown() -> None:
         get_provider("not-a-real-provider")
 
 
+def test_accept_exception_returns_not_ok(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When --accept is requested and accept_candidate crashes → ok=False (no false success)."""
+    import meshops.hosted.orchestrate as orch
+
+    def _boom(*_a, **_k):  # type: ignore[no-untyped-def]
+        raise RuntimeError("simulated accept crash")
+
+    monkeypatch.setattr(orch, "accept_candidate", _boom)
+    work = tmp_path / "work"
+    work.mkdir()
+    plateau = _seed_organic_tree(tmp_path / "sessions")
+    result = run_hosted_fallback(
+        plateau=plateau,
+        work_root=work,
+        justify=JUSTIFY_OK,
+        provider="mock",
+        fixture_stl=MOCK_STL,
+        accept=True,
+        accept_policy="export",
+    )
+    assert result.ok is False
+    assert result.mesh_id is not None
+    assert result.error_code == "ingest_failed"
+    assert any("accept_candidate failed" in m for m in result.messages)
+
+
 def test_accept_policy_selectable_not_hard_sculpt(tmp_path: Path) -> None:
     """R25: accept uses operator policy (default export), not hard-wired for_sculpt."""
     from meshops.hosted.orchestrate import resolve_accept_policy
