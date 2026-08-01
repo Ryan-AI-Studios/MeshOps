@@ -1,5 +1,5 @@
 """Typer CLI — ingest / triage / render / report / repair / export / diff /
-accept / design / escalate / organic / slice.
+accept / design / escalate / organic / slice / doctor.
 """
 
 from __future__ import annotations
@@ -18,8 +18,8 @@ app = typer.Typer(
     name="meshops",
     help=(
         "MeshOps — triage + guarded T1/T2 repair + T7 design + T3 escalate + T6 organic + "
-        "Orca slice (ingest / triage / render / report / repair / export / diff / accept / "
-        "design / escalate / organic / slice)."
+        "Orca slice + doctor (ingest / triage / render / report / repair / export / diff / "
+        "accept / design / escalate / organic / slice / doctor)."
     ),
     add_completion=False,
     no_args_is_help=True,
@@ -102,6 +102,92 @@ def version_cmd(
         _emit_json({"ok": True, "version": __version__})
     else:
         typer.echo(__version__)
+
+
+@app.command("doctor")
+def doctor_cmd(
+    json_out: bool = typer.Option(False, "--json", help="Emit DoctorReport JSON on stdout"),
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help="Require core + Blender 5.2 + Orca path (print/organic-ready box)",
+    ),
+    require: list[str] | None = typer.Option(
+        None,
+        "--require",
+        help=("Repeatable required check: core|blender|orca|f3d|design|all (default: core only)"),
+    ),
+) -> None:
+    """Diagnose Python env, core packages, Blender, Orca, F3D (ops health).
+
+    Default exit 0 when core is healthy even if Blender/Orca are missing.
+    Cold-start may take multiple seconds (native imports: pymeshlab, f3d, …).
+    """
+    from meshops.ops.doctor import expand_require, run_doctor
+
+    tokens: list[str] = list(require or [])
+    if strict:
+        tokens.extend(["core", "blender", "orca"])
+    try:
+        req = expand_require(tokens if tokens else None)
+    except ValueError as exc:
+        _emit_error(exc, json_mode=json_out, code=2)
+
+    report = run_doctor(require=req, cwd=Path.cwd())
+    payload = report.model_dump(mode="json")
+
+    if json_out:
+        _emit_json(payload)
+    else:
+        status = "OK" if report.ok else "FAIL"
+        typer.echo(f"meshops doctor [{status}]  required={','.join(report.required)}")
+        typer.echo(
+            f"  python {report.python.version}  pin_ok={report.python.pin_ok}  "
+            f"exe={report.python.executable}"
+        )
+        typer.echo("  packages:")
+        for name, pkg in sorted(report.packages.items()):
+            flag = "ok" if pkg.import_ok else "MISSING"
+            opt = " (optional)" if pkg.optional else ""
+            ver = pkg.version or "?"
+            typer.echo(f"    {name}: {flag} {ver}{opt}")
+        b = report.tools.blender
+        typer.echo(
+            f"  blender: status={b.status} pin_ok={b.pin_ok} source={b.source} "
+            f"version={b.version or '-'} path={b.path or '-'}"
+        )
+        o = report.tools.orca
+        typer.echo(
+            f"  orca: status={o.status} source={o.source} "
+            f"version_source={o.version_source} version={o.version or '-'} "
+            f"path={o.path or '-'}"
+        )
+        f3 = report.tools.f3d
+        typer.echo(f"  f3d: import_ok={f3.import_ok} version={f3.version or '-'}")
+        uv = report.tooling
+        typer.echo(f"  uv: version={uv.version or '-'} uv_lock_present={uv.uv_lock_present}")
+        disk = report.disk
+        mb = disk.pymeshlab_approx_mb
+        mb_s = f"{mb} MB" if mb is not None else "unknown"
+        typer.echo(f"  disk: pymeshlab ≈ {mb_s} ({disk.note})")
+        typer.echo("  licenses:")
+        for line in report.licenses:
+            typer.echo(f"    - {line}")
+        n = report.vram.nvidia
+        typer.echo(
+            f"  vram: nvidia status={n.status} free_mib={n.free_mib} total_mib={n.total_mib}"
+        )
+        typer.echo(f"         {report.vram.ritual}")
+        if report.hints:
+            typer.echo("  hints:")
+            for h in report.hints:
+                typer.echo(f"    - {h}")
+        if report.notes:
+            typer.echo("  notes:")
+            for note in report.notes:
+                typer.echo(f"    - {note}")
+
+    raise typer.Exit(0 if report.ok else 1)
 
 
 @app.command("ingest")

@@ -61,7 +61,7 @@ def test_triage_missing_job_json(tmp_work: Path) -> None:
 
 
 def test_core_verbs_present() -> None:
-    """Core CLI verbs present (0002 adds repair/export/diff)."""
+    """Core CLI verbs present (0002 adds repair/export/diff; 0010 doctor)."""
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     help_text = result.stdout.lower()
@@ -73,5 +73,7 @@ def test_core_verbs_present() -> None:
     assert "repair" in help_text
     assert "export" in help_text
     assert "diff" in help_text
+    # 0010 ops
+    assert "doctor" in help_text
     for banned in ("delete-sheet", "remesh", "mutate"):
         assert banned not in help_text
