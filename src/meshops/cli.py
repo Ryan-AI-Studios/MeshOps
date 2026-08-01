@@ -1,5 +1,5 @@
 """Typer CLI — ingest / triage / render / report / repair / export / diff /
-accept / design / escalate.
+accept / design / escalate / slice.
 """
 
 from __future__ import annotations
@@ -17,8 +17,9 @@ from meshops import __version__
 app = typer.Typer(
     name="meshops",
     help=(
-        "MeshOps — triage + guarded T1/T2 repair + T7 design + T3 escalate "
-        "(ingest / triage / render / report / repair / export / diff / accept / design / escalate)."
+        "MeshOps — triage + guarded T1/T2 repair + T7 design + T3 escalate + Orca slice "
+        "(ingest / triage / render / report / repair / export / diff / accept / design / "
+        "escalate / slice)."
     ),
     add_completion=False,
     no_args_is_help=True,
@@ -298,7 +299,7 @@ def accept_cmd(
     require_slice: bool = typer.Option(
         False,
         "--require-slice",
-        help="Fail if no slice hook configured (default: false)",
+        help="Require Orca printability oracle (fail closed if Orca missing)",
     ),
     promote: bool = typer.Option(
         False,
@@ -312,11 +313,25 @@ def accept_cmd(
     Without --rev: original self-check is export-style (require_views=False,
     honesty=guards_only) — original has no mutator view_paths. With --rev:
     require_views defaults True (mutator honesty).
+
+    With --require-slice: attach live Orca hook when binary is present at invoke
+    time; if missing, fail closed (slice_not_configured / orca_not_found) — never
+    skip-as-pass.
     """
     from meshops.acceptance import accept_candidate, accept_revision, promote_working
     from meshops.acceptance.promote import PromoteError
     from meshops.export_guarded import _baseline_stats
     from meshops.jobstore.paths import JobPaths
+
+    slice_hook = None
+    if require_slice:
+        from meshops.slice import find_orca, make_orca_hook
+
+        # Fail closed at attach if Orca absent — pack still gets require_slice=True
+        # with no hook → slice_not_configured. Prefer live hook when present;
+        # hook re-checks find_orca on every call.
+        if find_orca(require=False) is not None:
+            slice_hook = make_orca_hook(mesh_id=mesh_id, work_root=work_root)
 
     try:
         if rev is not None:
@@ -327,6 +342,7 @@ def accept_cmd(
                 require_views=require_views,
                 allow_stubs=allow_stubs,
                 require_slice=require_slice,
+                slice_hook=slice_hook,
             )
         else:
             # Original self-check: always guards_only (no mutator views on original).
@@ -342,6 +358,7 @@ def accept_cmd(
                 require_views=False,
                 allow_stubs=allow_stubs,
                 require_slice=require_slice,
+                slice_hook=slice_hook,
             )
 
         promote_info: dict[str, Any] | None = None
@@ -723,6 +740,124 @@ def escalate_import_sculpt_cmd(
             err=not result.ok,
         )
     if not result.ok:
+        raise typer.Exit(1)
+
+
+@app.command("slice")
+def slice_cmd(
+    mesh_id: str = typer.Option(..., "--mesh-id", help="Job mesh_id from ingest"),
+    rev: str | None = typer.Option(
+        None,
+        "--rev",
+        help="Revision id mesh to slice (default: working.ply if present, else original.stl)",
+    ),
+    profile: str = typer.Option(
+        "default",
+        "--profile",
+        help="Slice profile name or absolute dir with machine/process/filament.json",
+    ),
+    orient: bool = typer.Option(
+        False,
+        "--orient/--no-orient",
+        help="Pass --orient 1 to Orca (default: false → 0)",
+    ),
+    arrange: bool = typer.Option(
+        False,
+        "--arrange/--no-arrange",
+        help="Pass --arrange 1 to Orca (default: false → 0 for determinism)",
+    ),
+    allow_reorient_retry: bool = typer.Option(
+        False,
+        "--allow-reorient-retry",
+        help="On filament_anomaly_high, retry once with --orient 1",
+    ),
+    work_root: Path = typer.Option(Path("work"), "--work-root", help="Job store root"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON on stdout"),
+) -> None:
+    """Run OrcaSlicer printability oracle on a job candidate. Exit 0 only on pass.
+
+    Candidate priority: --rev mesh → working.ply if present → original.stl.
+    Always writes slice_report.md under work/<id>/slice/<run_id>/ (even on fail).
+    """
+    from meshops.jobstore.paths import JobPaths
+    from meshops.revs.store import resolve_rev_dir
+    from meshops.slice import find_orca, run_slice
+    from meshops.slice.errors import SliceError
+
+    try:
+        if find_orca(require=False) is None:
+            raise SliceError(
+                "OrcaSlicer not found (set MESHOPS_ORCA or install 2.4.x)",
+                code="orca_not_found",
+            )
+        paths = JobPaths(work_root=work_root, mesh_id=mesh_id)
+        if not paths.job_dir.is_dir():
+            raise SliceError(
+                f"job not found: {paths.job_dir}",
+                code="job_not_found",
+                details={"mesh_id": mesh_id},
+            )
+
+        if rev is not None:
+            rev_dir = resolve_rev_dir(paths, rev)
+            cand: Path | None = None
+            for name in ("mesh.stl", "mesh.ply", "result.stl"):
+                p = rev_dir / name
+                if p.is_file():
+                    cand = p
+                    break
+            if cand is None:
+                # Fall back to any .stl/.ply in rev dir
+                stls = sorted(rev_dir.glob("*.stl")) + sorted(rev_dir.glob("*.ply"))
+                if stls:
+                    cand = stls[0]
+            if cand is None:
+                raise SliceError(
+                    f"no mesh in rev {rev}: {rev_dir}",
+                    code="missing_candidate",
+                )
+        elif paths.working_ply.is_file():
+            cand = paths.working_ply
+        elif paths.original_stl.is_file():
+            cand = paths.original_stl
+        else:
+            raise SliceError(
+                f"no candidate mesh under {paths.job_dir}",
+                code="missing_candidate",
+            )
+
+        result = run_slice(
+            cand,
+            mesh_id=mesh_id,
+            work_root=work_root,
+            slice_profile=profile,
+            orient=1 if orient else 0,
+            arrange=1 if arrange else 0,
+            allow_reorient_retry=allow_reorient_retry,
+        )
+    except SliceError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    payload: dict[str, Any] = {
+        "ok": result.status == "pass"
+        and result.accept is not None
+        and result.accept.status == "pass",
+        "mesh_id": mesh_id,
+        "slice": result.model_dump(mode="json"),
+    }
+    if json_out:
+        _emit_json(payload)
+    else:
+        status = "ok" if payload["ok"] else "FAIL"
+        typer.echo(
+            f"slice {status} run_id={result.run_id} "
+            f"accept={result.accept.status if result.accept else None} "
+            f"error={result.error_code}",
+            err=not payload["ok"],
+        )
+    if not payload["ok"]:
         raise typer.Exit(1)
 
 

@@ -37,6 +37,10 @@ meshops = "meshops.cli:app"
 [tool.hatch.build.targets.wheel]
 packages = ["src/meshops"]
 
+# Flattened Orca default profiles (JSON) — not discovered as package data by default.
+[tool.hatch.build.targets.wheel.force-include]
+"src/meshops/slice/profiles" = "meshops/slice/profiles"
+
 [tool.ruff]
 target-version = "py313"
 line-length = 100
@@ -100,4 +104,5 @@ markers = [
     "slow: long-running (large mesh / soak)",
     "design: needs build123d (meshops[design] extra)",
     "blender: needs Blender 5.2 LTS binary (MESHOPS_BLENDER or well-known path)",
+    "orcaslicer: needs OrcaSlicer binary (MESHOPS_ORCA or well-known path)",
 ]

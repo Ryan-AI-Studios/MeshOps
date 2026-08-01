@@ -116,9 +116,14 @@ class JobPaths:
         """T3 preview artifacts (0004+) — never auto-promote to working."""
         return self.job_dir / "previews"
 
+    @property
+    def slice_dir(self) -> Path:
+        """Orca printability oracle runs (0005+): slice/<run_id>/."""
+        return self.job_dir / "slice"
+
 
 def ensure_job_layout(paths: JobPaths) -> None:
-    """Create job directory skeleton (views/, rois/, revs/, design/, handoff/, previews/)."""
+    """Create job directory skeleton (views/rois/revs/design/handoff/previews/slice)."""
     paths.job_dir.mkdir(parents=True, exist_ok=True)
     paths.views_dir.mkdir(exist_ok=True)
     paths.rois_dir.mkdir(exist_ok=True)
@@ -126,3 +131,4 @@ def ensure_job_layout(paths: JobPaths) -> None:
     paths.design_dir.mkdir(exist_ok=True)
     paths.handoff_dir.mkdir(exist_ok=True)
     paths.previews_dir.mkdir(exist_ok=True)
+    paths.slice_dir.mkdir(exist_ok=True)
