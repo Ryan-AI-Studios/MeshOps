@@ -35,6 +35,12 @@ mcp = [
 ]
 # Feature gate / future SDK slot — no extra runtime deps for v1 (stdlib urllib).
 hosted = []
+# Optional RSS for size-ladder benches (MIT; never required core — C1).
+bench = [
+    "psutil==7.2.2",
+]
+# Open3D prove-or-reject (P19) — fill pin only if PROVED; never required core.
+open3d = []
 
 [project.scripts]
 meshops = "meshops.cli:app"
@@ -117,4 +123,5 @@ markers = [
     "orcaslicer: needs OrcaSlicer binary (MESHOPS_ORCA or well-known path)",
     "mcp: needs meshops[mcp] extra (mcp==2.0.0)",
     "hosted: needs MESHOPS_HOSTED_API_KEY + network (live provider call)",
+    "open3d: needs Open3D + meshops[open3d]",
 ]

@@ -1,5 +1,5 @@
 """Typer CLI — ingest / triage / render / report / repair / export / diff /
-accept / design / escalate / organic / hosted / slice / doctor.
+accept / design / escalate / organic / hosted / slice / doctor / bench.
 """
 
 from __future__ import annotations
@@ -18,8 +18,9 @@ app = typer.Typer(
     name="meshops",
     help=(
         "MeshOps — triage + guarded T1/T2 repair + T7 design + T3 escalate + T6 organic + "
-        "hosted multi-view fallback + Orca slice + doctor (ingest / triage / render / report / "
-        "repair / export / diff / accept / design / escalate / organic / hosted / slice / doctor)."
+        "hosted multi-view fallback + Orca slice + doctor + bench (ingest / triage / render / "
+        "report / repair / export / diff / accept / design / escalate / organic / hosted / "
+        "slice / doctor / bench)."
     ),
     add_completion=False,
     no_args_is_help=True,
@@ -68,6 +69,18 @@ hosted_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(hosted_app, name="hosted")
+
+bench_app = typer.Typer(
+    name="bench",
+    help=(
+        "Read-only size-ladder benchmarks (ingest / triage / optional F3D). "
+        "No --approve / GuardPolicy. Writes work/bench/bench_results.json. "
+        "Env: MESHOPS_BENCH_SIZES, MESHOPS_BENCH_WORK_ROOT; soak tests need MESHOPS_BENCH_SOAK=1."
+    ),
+    add_completion=False,
+    no_args_is_help=True,
+)
+app.add_typer(bench_app, name="bench")
 
 
 def _emit_json(payload: dict[str, Any]) -> None:
@@ -1431,6 +1444,140 @@ def diff_cmd(
         typer.echo(
             f"diff ok views={len(payload.get('view_paths', []))} baseline={payload.get('baseline')}"
         )
+
+
+_BENCH_SIZES_DEFAULT = "S,M,L,XL"
+
+
+@bench_app.command("run")
+def bench_run_cmd(
+    sizes: str = typer.Option(
+        _BENCH_SIZES_DEFAULT,
+        "--sizes",
+        help=(
+            "Comma-separated size labels (S,M,L,XL). "
+            "Env MESHOPS_BENCH_SIZES overrides when this flag is left at default."
+        ),
+    ),
+    work_root: Path | None = typer.Option(
+        None,
+        "--work-root",
+        help="Results/jobs root (default: MESHOPS_BENCH_WORK_ROOT or work/bench)",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit Envelope JSON on stdout"),
+    no_render: bool = typer.Option(
+        False,
+        "--no-render",
+        help="Skip F3D timing (ingest+triage only)",
+    ),
+) -> None:
+    """Run deterministic size ladder; write bench_results.json + .md under work root.
+
+    Read-only: no mutators, no --approve, no GuardPolicy. Per-case failures continue
+    the ladder. L/XL may skip with skipped_insufficient_ram when available RAM < ~4 GiB.
+    """
+    import os
+
+    from meshops.bench.report import resolve_work_root, write_results
+    from meshops.bench.runner import run_ladder
+    from meshops.bench.sizes import parse_sizes
+
+    # Prefer MESHOPS_BENCH_SIZES when --sizes left at typer default.
+    size_spec = sizes
+    if sizes.strip().upper() == _BENCH_SIZES_DEFAULT:
+        env_sizes = os.environ.get("MESHOPS_BENCH_SIZES", "").strip()
+        if env_sizes:
+            size_spec = env_sizes
+
+    try:
+        label_list = parse_sizes(size_spec)
+    except ValueError as exc:
+        _emit_error(exc, json_mode=json_out, code=2)
+
+    # Single resolved root for ladder cases + results JSON (env when flag omitted).
+    resolved_root = resolve_work_root(work_root)
+
+    try:
+        envelope = run_ladder(
+            label_list,
+            work_root=resolved_root,
+            include_render=not no_render,
+        )
+        json_path, md_path = write_results(envelope, work_root=resolved_root)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    payload = envelope.model_dump(mode="json")
+    payload["ok"] = all(c.status != "failed" for c in envelope.cases)
+    payload["results_json"] = str(json_path)
+    payload["results_md"] = str(md_path)
+    payload["work_root"] = str(resolved_root)
+
+    if json_out:
+        _emit_json(payload)
+    else:
+        typer.echo(f"bench run wrote {json_path}")
+        typer.echo(f"  markdown: {md_path}")
+        for c in envelope.cases:
+            extra = ""
+            if c.skipped_reason:
+                extra = f" ({c.skipped_reason})"
+            elif c.error_message:
+                extra = f" ({c.error_code}: {c.error_message[:80]})"
+            typer.echo(
+                f"  {c.label}: {c.status} faces={c.actual_faces}/{c.target_faces} "
+                f"ingest={c.ingest_s} triage={c.triage_s} render={c.render_s}{extra}"
+            )
+    raise typer.Exit(0 if payload["ok"] else 1)
+
+
+@bench_app.command("envelope")
+def bench_envelope_cmd(
+    work_root: Path | None = typer.Option(
+        None,
+        "--work-root",
+        help=(
+            "Search root for newest bench_results.json "
+            "(default: MESHOPS_BENCH_WORK_ROOT or work/bench)"
+        ),
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit Envelope JSON on stdout"),
+) -> None:
+    """Print latest bench envelope (newest bench_results.json by mtime)."""
+    from meshops.bench.report import (
+        default_results_dir,
+        envelope_to_markdown,
+        find_latest_results,
+        load_envelope,
+        resolve_work_root,
+    )
+
+    resolved = resolve_work_root(work_root)
+    search = default_results_dir(resolved)
+    path = find_latest_results(search)
+    if path is None:
+        msg = f"no bench_results.json found under {search} (run: meshops bench run)"
+        if json_out:
+            _emit_json({"ok": False, "error": "bench_results_missing", "message": msg})
+        else:
+            typer.echo(msg, err=True)
+        raise typer.Exit(1)
+
+    try:
+        envelope = load_envelope(path)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    if json_out:
+        payload = envelope.model_dump(mode="json")
+        payload["ok"] = True
+        payload["source_path"] = str(path)
+        payload["work_root"] = str(resolved)
+        _emit_json(payload)
+    else:
+        typer.echo(f"source: {path}")
+        typer.echo(envelope_to_markdown(envelope))
+    raise typer.Exit(0)
 
 
 if __name__ == "__main__":
