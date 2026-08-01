@@ -117,6 +117,44 @@ def test_parse_gcode_3mf_fallback(tmp_path: Path) -> None:
     assert stats.filament_used_g == 12.5
 
 
+def test_parse_gcode_3mf_root_gcode_fallback(tmp_path: Path) -> None:
+    """Codex P2-002: any *.gcode member works, not only Metadata/*."""
+    gcode = (FIXTURES / "plate_1_fallback.gcode").read_text(encoding="utf-8")
+    p = tmp_path / "root.gcode.3mf"
+    with zipfile.ZipFile(p, "w") as zf:
+        zf.writestr("plate.gcode", gcode)
+        zf.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types/>')
+    stats = parse_gcode_3mf(p)
+    assert stats.parse_source == "gcode_comments"
+    assert stats.filament_used_g == 12.5
+
+
+def test_parse_3mf_application_version_fallback(tmp_path: Path) -> None:
+    """Codex P2-003: Application metadata when slice_info header version absent."""
+    xml = """<?xml version="1.0"?>
+<config>
+  <header></header>
+  <plate>
+    <metadata key="index" value="1"/>
+    <metadata key="prediction" value="100"/>
+    <metadata key="outside" value="false"/>
+    <filament id="1" used_m="1" used_g="1.24" type="PLA"/>
+  </plate>
+</config>
+"""
+    p = tmp_path / "appver.gcode.3mf"
+    with zipfile.ZipFile(p, "w") as zf:
+        zf.writestr("Metadata/slice_info.config", xml)
+        zf.writestr(
+            "3D/3dmodel.model",
+            '<?xml version="1.0"?><model Application="OrcaSlicer-2.4.2"/>',
+        )
+        zf.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types/>')
+    stats = parse_gcode_3mf(p)
+    assert stats.parse_source == "slice_info"
+    assert stats.orca_version == "2.4.2"
+
+
 def test_parse_gcode_3mf_missing(tmp_path: Path) -> None:
     missing = tmp_path / "nope.gcode.3mf"
     stats = parse_gcode_3mf(missing)

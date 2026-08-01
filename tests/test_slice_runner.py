@@ -151,6 +151,47 @@ def test_run_slice_mock_success(
     assert re.fullmatch(r"run_\d{8}_\d{6}_[0-9a-f]{8}", result.run_id)
 
 
+def test_run_slice_nonzero_exit_with_3mf_fails(tmp_path: Path, solid_cylinder_stl: Path) -> None:
+    """Codex P1-001: non-zero Orca exit must fail even if a parseable 3mf exists."""
+    fake_orca = tmp_path / "orca.exe"
+    fake_orca.write_bytes(b"x")
+
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        out_idx = argv.index("--export-3mf")
+        Path(argv[out_idx + 1]).write_bytes(_ok_3mf_bytes())
+        return subprocess.CompletedProcess(argv, 2, stdout="partial", stderr="warn")
+
+    result = run_slice(
+        solid_cylinder_stl,
+        mesh_id="nonzeroexit001",
+        work_root=tmp_path / "work",
+        run_orca_fn=fake_run,
+        orca_path=fake_orca,
+        load_volume=False,
+    )
+    assert result.accept is not None
+    assert result.accept.status == "fail"
+    assert result.accept.error_code == "slice_failed"
+    assert result.status in ("fail", "error")
+
+
+def test_invalid_run_id_rejected(tmp_path: Path, solid_cylinder_stl: Path) -> None:
+    """Codex P2-004: reject path traversal / non-canonical run_id."""
+    fake_orca = tmp_path / "orca.exe"
+    fake_orca.write_bytes(b"x")
+    with pytest.raises(SliceError) as ei:
+        run_slice(
+            solid_cylinder_stl,
+            mesh_id="runidbad00001",
+            work_root=tmp_path / "work",
+            run_orca_fn=lambda *a, **k: subprocess.CompletedProcess([], 0, "", ""),
+            orca_path=fake_orca,
+            load_volume=False,
+            run_id="../escape",
+        )
+    assert ei.value.code == "slice_failed"
+
+
 def test_run_slice_missing_3mf_fail(tmp_path: Path, solid_cylinder_stl: Path) -> None:
     fake_orca = tmp_path / "orca.exe"
     fake_orca.write_bytes(b"x")
@@ -337,6 +378,11 @@ def test_allow_reorient_retry_once_max(tmp_path: Path, solid_cylinder_stl: Path)
     assert "--orient" in calls[0] and calls[0][calls[0].index("--orient") + 1] == "0"
     assert "--orient" in calls[1] and calls[1][calls[1].index("--orient") + 1] == "1"
     assert result.metrics.get("slice.reorient_retry_used") is True
+    first = result.metrics.get("slice.reorient_first_attempt")
+    assert isinstance(first, dict)
+    assert first.get("error_code") == "filament_anomaly_high"
+    assert first.get("archive_dir")
+    assert Path(str(first["archive_dir"])).joinpath("manifest.json").is_file()
     # Second pass uses ok fixture → pass
     assert result.accept is not None
     assert result.accept.status == "pass"

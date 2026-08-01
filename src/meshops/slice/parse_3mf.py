@@ -338,14 +338,61 @@ def _read_zip_member(zf: zipfile.ZipFile, names: list[str]) -> str | None:
 
 
 def _gcode_members(zf: zipfile.ZipFile) -> list[str]:
-    names = []
+    """All ``*.gcode`` members; prefer Metadata/plate_1 then any Metadata then root."""
+    names: list[str] = []
     for n in zf.namelist():
         norm = n.replace("\\", "/")
-        if norm.lower().endswith(".gcode") and "metadata" in norm.lower():
+        if norm.lower().endswith(".gcode"):
             names.append(n)
-    # Prefer plate_1
-    names.sort(key=lambda n: (0 if "plate_1" in n.lower() else 1, n.lower()))
+
+    def _rank(n: str) -> tuple[int, int, str]:
+        low = n.replace("\\", "/").lower()
+        in_meta = 0 if "metadata" in low else 1
+        plate1 = 0 if "plate_1" in low else 1
+        return (in_meta, plate1, low)
+
+    names.sort(key=_rank)
     return names
+
+
+def _read_3mf_application_version(zf: zipfile.ZipFile) -> str | None:
+    """Post-slice fallback: 3mf ``Application`` metadata (spec version probe order)."""
+    # Common locations across Bambu/Orca 3mf variants
+    for member in (
+        "Metadata/model_settings.config",
+        "3D/3dmodel.model",
+        "Metadata/project_settings.config",
+    ):
+        text = _read_zip_member(zf, [member])
+        if not text:
+            continue
+        # XML attribute Application="OrcaSlicer-2.4.2" or similar
+        m = re.search(
+            r'Application\s*=\s*["\']([^"\']+)["\']',
+            text,
+            re.IGNORECASE,
+        )
+        if m:
+            val = m.group(1).strip()
+            # Strip product prefix if present
+            ver = re.search(r"(\d+\.\d+(?:\.\d+)?)", val)
+            if ver:
+                return ver.group(1)
+            if val:
+                return val
+        m2 = re.search(
+            r'<metadata[^>]+name=["\']Application["\'][^>]*>([^<]+)</metadata>',
+            text,
+            re.IGNORECASE,
+        )
+        if m2:
+            val = m2.group(1).strip()
+            ver = re.search(r"(\d+\.\d+(?:\.\d+)?)", val)
+            if ver:
+                return ver.group(1)
+            if val:
+                return val
+    return None
 
 
 def parse_gcode_3mf(path: Path | str) -> ParsedSliceStats:
@@ -358,6 +405,7 @@ def parse_gcode_3mf(path: Path | str) -> ParsedSliceStats:
 
     try:
         with zipfile.ZipFile(p, "r") as zf:
+            app_ver = _read_3mf_application_version(zf)
             xml = _read_zip_member(
                 zf,
                 [
@@ -368,6 +416,10 @@ def parse_gcode_3mf(path: Path | str) -> ParsedSliceStats:
             if xml:
                 stats = parse_slice_info_xml(xml)
                 if stats.parse_source == "slice_info":
+                    if not stats.orca_version and app_ver:
+                        stats.orca_version = app_ver
+                        stats.metrics["slice.orca_version"] = app_ver
+                        stats.metrics["slice.orca_version_source"] = "3mf_application"
                     return stats
                 # fall through to gcode if XML unusable
 
@@ -378,11 +430,17 @@ def parse_gcode_3mf(path: Path | str) -> ParsedSliceStats:
                     continue
                 gstats = parse_gcode_comments(text)
                 if gstats.parse_source == "gcode_comments":
+                    if not gstats.orca_version and app_ver:
+                        gstats.orca_version = app_ver
+                        gstats.metrics["slice.orca_version"] = app_ver
+                        gstats.metrics["slice.orca_version_source"] = "3mf_application"
                     return gstats
 
             failed = ParsedSliceStats(parse_source="failed")
             failed.messages.append("no usable slice_info or gcode comments in 3mf")
             failed.metrics["slice.parse_source"] = "failed"
+            if app_ver:
+                failed.orca_version = app_ver
             return failed
     except zipfile.BadZipFile as exc:
         stats = ParsedSliceStats(parse_source="failed")

@@ -119,3 +119,30 @@ def test_thresholds_custom() -> None:
 def test_defaults_match_spec() -> None:
     assert DEFAULT_FAIL_HIGH == 8.0
     assert DEFAULT_LOW_RATIO == 0.05
+
+
+def test_unsliceable_warning_any_level_fails() -> None:
+    """Codex P1-002: unsliceable signal fails even at warning level 1 with filament."""
+    accept = evaluate_printability(
+        _stats(
+            cm3=10.0,
+            warnings=[
+                SliceWarning(msg="geometry unsliceable", level=1, error_code="unsliceable_geometry")
+            ],
+        ),
+        mesh_volume_cm3=10.0,
+    )
+    assert accept.status == "fail"
+    assert accept.error_code == "unsliceable_geometry"
+
+
+def test_subprocess_nonzero_fails_even_with_stats() -> None:
+    """Codex P1-001 companion: evaluate_printability honors subprocess_ok=False."""
+    accept = evaluate_printability(
+        _stats(cm3=10.0),
+        mesh_volume_cm3=10.0,
+        subprocess_ok=False,
+        missing_3mf=False,
+    )
+    assert accept.status == "fail"
+    assert accept.error_code == "slice_failed"

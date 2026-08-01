@@ -13,7 +13,7 @@ from typing import Any
 import trimesh
 
 from meshops.acceptance.models import SliceAcceptResult
-from meshops.slice.models import ParsedSliceStats
+from meshops.slice.models import ParsedSliceStats, SliceWarning
 
 # Default bands (spec §3.6)
 DEFAULT_LOW_RATIO = 0.05
@@ -24,6 +24,16 @@ REORIENT_SUGGESTION = (
     "Filament usage high vs mesh volume (ratio={ratio:.3f}). "
     "Consider re-slice with --orient 1 or lower support settings."
 )
+
+
+def _has_unsliceable_signal(warnings: list[SliceWarning]) -> bool:
+    """True when any warning code/message indicates unsliceable geometry."""
+    for w in warnings:
+        code = (w.error_code or "").lower()
+        msg = (w.msg or "").lower()
+        if "unslice" in code or "unsliceable" in msg:
+            return True
+    return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,19 +147,21 @@ def evaluate_printability(
     if bed:
         return _fail("bed_overflow", "model outside build plate (outside=true)")
 
+    # Unsliceable signals fail closed at any warning level (Codex P1-002).
+    if _has_unsliceable_signal(stats.warnings):
+        return _fail(
+            "unsliceable_geometry",
+            "slice warning indicates unsliceable geometry",
+        )
+
     # Zero filament: cm3 == 0.0 or both g and m zero
     zero_cm3 = filament_cm3 is not None and filament_cm3 == 0.0
     zero_raw = stats.filament_used_g == 0.0 and stats.filament_used_m == 0.0
     if zero_cm3 or zero_raw:
-        code = "filament_zero"
-        # Unsliceable hint if warnings indicate empty
-        if any(
-            (w.error_code or "").lower().find("unslice") >= 0
-            or "unsliceable" in (w.msg or "").lower()
-            for w in stats.warnings
-        ):
-            code = "unsliceable_geometry"
-        return _fail(code, "filament used is zero — empty or unsliceable geometry signal")
+        return _fail(
+            "filament_zero",
+            "filament used is zero — empty or unsliceable geometry signal",
+        )
 
     if stats.warning_max_level >= 2:
         # Prefer warning error_code when present

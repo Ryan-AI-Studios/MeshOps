@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -38,12 +39,27 @@ DEFAULT_TIMEOUT_S = 600.0
 RunOrcaFn = Callable[..., subprocess.CompletedProcess[str]]
 
 
+_RUN_ID_RE = re.compile(r"^run_\d{8}_\d{6}_[0-9a-f]{8}$")
+
+
 def make_run_id(*, when: datetime | None = None) -> str:
     """``run_<UTC yyyymmdd_HHMMSS>_<8 hex>`` — concurrent-safe."""
     ts = when or datetime.now(UTC)
     stamp = ts.strftime("%Y%m%d_%H%M%S")
     suffix = secrets.token_hex(4)
     return f"run_{stamp}_{suffix}"
+
+
+def validate_run_id(run_id: str) -> str:
+    """Reject path traversal / non-canonical run ids (Codex P2-004)."""
+    rid = (run_id or "").strip()
+    if not _RUN_ID_RE.fullmatch(rid):
+        raise SliceError(
+            f"invalid run_id {run_id!r}; expected run_YYYYMMDD_HHMMSS_<8hex>",
+            code="slice_failed",
+            details={"run_id": run_id},
+        )
+    return rid
 
 
 def build_orca_argv(
@@ -198,15 +214,32 @@ def run_slice(
         messages.append(f"warning: Orca version {pre_version} is older than soft pin 2.4.x")
 
     profiles = resolve_profiles(slice_profile)
-    rid = run_id or make_run_id()
+    rid = validate_run_id(run_id) if run_id else make_run_id()
     work_root_p = Path(work_root)
 
     if mesh_id:
         paths = JobPaths(work_root=work_root_p, mesh_id=mesh_id)
         ensure_job_layout(paths)
-        run_dir = paths.slice_dir / rid
+        base_slice = paths.slice_dir.resolve()
     else:
-        run_dir = work_root_p / "_ad_hoc_slice" / rid
+        base_slice = (work_root_p / "_ad_hoc_slice").resolve()
+        base_slice.mkdir(parents=True, exist_ok=True)
+
+    run_dir = (base_slice / rid).resolve()
+    try:
+        run_dir.relative_to(base_slice)
+    except ValueError as exc:
+        raise SliceError(
+            f"run_id escapes slice root: {rid}",
+            code="slice_failed",
+            details={"run_id": rid, "slice_dir": str(base_slice)},
+        ) from exc
+    if run_dir.exists() and any(run_dir.iterdir()):
+        raise SliceError(
+            f"slice run_id already exists with artifacts: {rid}",
+            code="slice_failed",
+            details={"run_dir": str(run_dir)},
+        )
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # Preserve candidate suffix so post-promote working.ply is not mislabeled as .stl.
@@ -286,7 +319,34 @@ def run_slice(
         and result.accept.error_code == "filament_anomaly_high"
     ):
         messages.append("allow_reorient_retry: re-invoking with --orient 1")
-        # Clear previous 3mf for clean second attempt
+        # Archive first-pass artifacts so both runs are recorded (Codex P2-001).
+        first_dir = run_dir / "attempt_orient0"
+        first_dir.mkdir(exist_ok=True)
+        for name in (
+            "output.gcode.3mf",
+            "orca_stdout.log",
+            "orca_stderr.log",
+            "manifest.json",
+            "slice_report.md",
+            "slice_info.config",
+            "plate_1.gcode",
+        ):
+            src = run_dir / name
+            if src.is_file():
+                shutil.copy2(src, first_dir / name)
+        # Snapshot first accept summary into metrics
+        first_accept = result.accept
+        first_summary = {
+            "status": first_accept.status,
+            "error_code": first_accept.error_code,
+            "filament_used_cm3": first_accept.filament_used_cm3,
+            "print_time_s": first_accept.print_time_s,
+            "bed_overflow": first_accept.bed_overflow,
+            "filament_ratio": first_accept.metrics.get("slice.filament_ratio"),
+            "argv": list(result.argv),
+            "returncode": result.returncode,
+            "archive_dir": str(first_dir),
+        }
         if output_3mf.is_file():
             output_3mf.unlink()
         argv2, proc2, early2 = _one_pass(1)
@@ -308,7 +368,10 @@ def run_slice(
             thresholds=thresholds,
             messages=[*messages, "reorient_retry_used=true"],
             started=started,
-            extra_metrics={"slice.reorient_retry_used": True},
+            extra_metrics={
+                "slice.reorient_retry_used": True,
+                "slice.reorient_first_attempt": first_summary,
+            },
         )
 
     return result
@@ -421,11 +484,12 @@ def _finalize_run(
     orca_version = stats.orca_version or pre_version
     metrics.update(stats.metrics)
 
+    # Hard-fail non-zero Orca exit regardless of parseable 3mf (Codex P1-001).
     accept = evaluate_printability(
         stats,
         vol,
         thresholds=thresholds,
-        subprocess_ok=subprocess_ok or (not missing_3mf and stats.parse_source != "failed"),
+        subprocess_ok=subprocess_ok,
         missing_3mf=missing_3mf,
     )
 
