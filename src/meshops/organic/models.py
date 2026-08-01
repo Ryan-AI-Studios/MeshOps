@@ -1,4 +1,4 @@
-"""Organic session models — schema_version \"1.0.0\" is **0006-owned**.
+"""Organic session models — schema_version "1.0.0" is **0006-owned**.
 
 Independence (B10): OrganicManifest / PassResult / PlateauRecord schema_version
 strings do **not** share versioning, freeze rules, or compatibility with:
