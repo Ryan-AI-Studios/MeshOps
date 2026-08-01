@@ -1,4 +1,4 @@
-"""Blender discovery + 5.2 version gate (DoD-1)."""
+"""Blender discovery + 5.2 version gate (DoD-1) + portable path (0010 R4)."""
 
 from __future__ import annotations
 
@@ -9,8 +9,11 @@ import pytest
 
 from meshops.escalate.discover import (
     ENV_MESHOPS_BLENDER,
+    WELL_KNOWN_PORTABLE_BLENDER,
     WELL_KNOWN_WINDOWS_BLENDER,
     find_blender,
+    find_blender_with_source,
+    portable_blender_path,
 )
 from meshops.escalate.errors import EscalateError
 from meshops.escalate.version import parse_blender_version, require_blender_52
@@ -92,16 +95,21 @@ def test_find_blender_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
 def test_find_blender_missing_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv(ENV_MESHOPS_BLENDER, raising=False)
-    # Point well-known + which away from real installs
+    # Point well-known + portable + which away from real installs
     monkeypatch.setattr(
         "meshops.escalate.discover.WELL_KNOWN_WINDOWS_BLENDER",
         tmp_path / "nope" / "blender.exe",
+    )
+    monkeypatch.setattr(
+        "meshops.escalate.discover.WELL_KNOWN_PORTABLE_BLENDER",
+        tmp_path / "nope-portable" / "blender.exe",
     )
     monkeypatch.setattr("meshops.escalate.discover.shutil.which", lambda _: None)
     with pytest.raises(EscalateError) as ei:
         find_blender(require=True)
     assert ei.value.code == "blender_missing"
     assert "MESHOPS_BLENDER" in str(ei.value) or "0010" in str(ei.value)
+    assert "bootstrap" in str(ei.value).lower() or "portable" in str(ei.value).lower()
 
 
 def test_find_blender_require_false(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -110,9 +118,76 @@ def test_find_blender_require_false(monkeypatch: pytest.MonkeyPatch, tmp_path: P
         "meshops.escalate.discover.WELL_KNOWN_WINDOWS_BLENDER",
         tmp_path / "nope" / "blender.exe",
     )
+    monkeypatch.setattr(
+        "meshops.escalate.discover.WELL_KNOWN_PORTABLE_BLENDER",
+        tmp_path / "nope-portable" / "blender.exe",
+    )
     monkeypatch.setattr("meshops.escalate.discover.shutil.which", lambda _: None)
     assert find_blender(require=False) is None
 
 
 def test_well_known_path_constant() -> None:
     assert "Blender 5.2" in str(WELL_KNOWN_WINDOWS_BLENDER)
+
+
+def test_portable_blender_path_layout(tmp_path: Path) -> None:
+    p = portable_blender_path(localappdata=str(tmp_path))
+    assert p.name == "blender.exe"
+    assert p.parent.name == "blender-5.2.0"
+    assert "MeshOps" in p.parts
+    assert "tools" in p.parts
+
+
+def test_find_blender_portable_fake(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Portable well-known path is found when env/PATH/Program Files miss (R4)."""
+    monkeypatch.delenv(ENV_MESHOPS_BLENDER, raising=False)
+    monkeypatch.setattr("meshops.escalate.discover.shutil.which", lambda _: None)
+    monkeypatch.setattr(
+        "meshops.escalate.discover.WELL_KNOWN_WINDOWS_BLENDER",
+        tmp_path / "pf" / "blender.exe",
+    )
+    portable = tmp_path / "Local" / "MeshOps" / "tools" / "blender-5.2.0" / "blender.exe"
+    portable.parent.mkdir(parents=True)
+    portable.write_bytes(b"fake-blender")
+    monkeypatch.setattr(
+        "meshops.escalate.discover.WELL_KNOWN_PORTABLE_BLENDER",
+        portable,
+    )
+    # Force portable candidate evaluation even off Windows
+    monkeypatch.setattr("meshops.escalate.discover.os.name", "nt")
+
+    found, source = find_blender_with_source(require=True)
+    assert found is not None
+    assert found.resolve() == portable.resolve()
+    assert source == "portable"
+    assert WELL_KNOWN_PORTABLE_BLENDER  # constant still importable
+
+
+def test_portable_recomputes_when_localappdata_changes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Live LOCALAPPDATA changes must refresh portable candidate (Codex P2).
+
+    Do not monkeypatch ``os.name`` to ``nt`` on Linux CI — that makes
+    ``pathlib.Path`` construct WindowsPath and raises UnsupportedOperation.
+    Non-Windows still evaluates the portable candidate branch.
+    """
+    monkeypatch.delenv(ENV_MESHOPS_BLENDER, raising=False)
+    monkeypatch.setattr("meshops.escalate.discover.shutil.which", lambda _: None)
+    monkeypatch.setattr(
+        "meshops.escalate.discover.WELL_KNOWN_WINDOWS_BLENDER",
+        tmp_path / "pf" / "blender.exe",
+    )
+    # Keep WELL_KNOWN_PORTABLE_BLENDER at import snapshot so live path is used.
+    root_a = tmp_path / "A"
+    root_b = tmp_path / "B"
+    portable_b = root_b / "MeshOps" / "tools" / "blender-5.2.0" / "blender.exe"
+    portable_b.parent.mkdir(parents=True)
+    portable_b.write_bytes(b"fake-b")
+    monkeypatch.setenv("LOCALAPPDATA", str(root_a))
+    assert find_blender(require=False) is None
+    monkeypatch.setenv("LOCALAPPDATA", str(root_b))
+    found, source = find_blender_with_source(require=False)
+    assert found is not None
+    assert found.resolve() == portable_b.resolve()
+    assert source == "portable"

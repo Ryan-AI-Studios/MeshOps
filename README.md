@@ -15,6 +15,32 @@ Local only (gitignored): `conductor/`, `docs/`, `.agents/` (skills including onb
 
 **Status:** Design + local conductor/skills + quality gates. Product code tracks start at 0001.
 
+### Setup (this machine)
+
+```powershell
+# 1. Python env (requires Python >=3.13,<3.14)
+uv sync --extra dev
+# optional T7 design stack:
+# uv sync --extra design
+
+# 2. Diagnose tools (default: core env only — missing Blender/Orca is a warning)
+uv run meshops doctor
+uv run meshops doctor --json
+# print/organic-ready box:
+# uv run meshops doctor --strict
+
+# 3. Bootstrap portable Blender 5.2 LTS if missing (Difficulty §4 mirrors)
+#    Requires a **repo clone** — scripts/ is not shipped in the pip/uv wheel.
+.\scripts\bootstrap-tools.ps1
+# dry-run (no network):
+.\scripts\bootstrap-tools.ps1 -WhatIf
+
+# 4. OrcaSlicer 2.4.2 (manual): GitHub Releases or Microsoft Store, then:
+# $env:MESHOPS_ORCA = 'C:\Program Files\OrcaSlicer\orca-slicer.exe'
+```
+
+`meshops doctor` composes existing Blender/Orca discoverers; bootstrap sets `MESHOPS_BLENDER` (User + current session) and installs under `%LOCALAPPDATA%\MeshOps\tools\blender-5.2.0\`.
+
 ### Quality gates (local = CI)
 
 ```powershell
