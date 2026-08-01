@@ -14,7 +14,7 @@ pytest.importorskip("mcp")
 
 from mcp import Client
 
-from meshops.ingest.pipeline import ingest_stl
+from meshops.ingest.pipeline import ingest_stl  # used for unknown-recipe pre-seed
 from meshops.mcp import TOOL_NAMES, build_server, resolve_work_root
 from meshops.mcp.server import SERVER_INSTRUCTIONS
 
@@ -165,28 +165,74 @@ def test_import_sculpt_approve_required_in_schema() -> None:
     _run(_body())
 
 
-def test_parity_ingest_api_vs_mcp(
+def test_parity_cli_vs_mcp_ingest_triage(
     solid_cylinder_stl: Path,
     tmp_path: Path,
 ) -> None:
-    """Same STL via engine API and MCP mesh_ingest → same mesh_id (content hash)."""
-    work_api = tmp_path / "work_api"
+    """Same STL via CLI and MCP → same mesh_id + matching diagnostics (DoD 10)."""
+    import json
+
+    from typer.testing import CliRunner
+
+    from meshops.cli import app
+
+    work_cli = tmp_path / "work_cli"
     work_mcp = tmp_path / "work_mcp"
-    work_api.mkdir()
+    work_cli.mkdir()
     work_mcp.mkdir()
 
-    api_result = ingest_stl(solid_cylinder_stl, work_root=work_api)
+    runner = CliRunner()
+    r_ing = runner.invoke(
+        app,
+        [
+            "ingest",
+            "--path",
+            str(solid_cylinder_stl),
+            "--work-root",
+            str(work_cli),
+            "--json",
+        ],
+    )
+    assert r_ing.exit_code == 0, r_ing.stdout + r_ing.stderr
+    cli_ingest = json.loads(r_ing.stdout)
+    cli_mesh_id = cli_ingest["mesh_id"]
 
-    async def _body() -> str:
+    r_tri = runner.invoke(
+        app,
+        [
+            "triage",
+            "--mesh-id",
+            cli_mesh_id,
+            "--work-root",
+            str(work_cli),
+            "--json",
+        ],
+    )
+    assert r_tri.exit_code == 0, r_tri.stdout + r_tri.stderr
+    cli_triage = json.loads(r_tri.stdout)
+    cli_diag = cli_triage["diagnostics"]
+
+    async def _body() -> tuple[str, dict[str, Any]]:
         server = build_server(work_root=work_mcp)
         async with Client(server) as client:
-            r = await client.call_tool("mesh_ingest", {"path": str(solid_cylinder_stl)})
-            assert r.is_error is False
-            assert r.structured_content is not None
-            return str(r.structured_content["mesh_id"])
+            ing = await client.call_tool("mesh_ingest", {"path": str(solid_cylinder_stl)})
+            assert ing.is_error is False
+            assert ing.structured_content is not None
+            mesh_id = str(ing.structured_content["mesh_id"])
+            tri = await client.call_tool("mesh_triage", {"mesh_id": mesh_id})
+            assert tri.is_error is False
+            assert tri.structured_content is not None
+            diag = tri.structured_content["diagnostics"]
+            assert isinstance(diag, dict)
+            return mesh_id, diag
 
-    mcp_id = _run(_body())
-    assert mcp_id == api_result.mesh_id
+    mcp_id, mcp_diag = _run(_body())
+    assert mcp_id == cli_mesh_id
+    assert mcp_diag["schema_version"] == cli_diag["schema_version"]
+    assert mcp_diag["mesh_id"] == cli_diag["mesh_id"]
+    assert mcp_diag["sheet_score"]["score"] == cli_diag["sheet_score"]["score"]
+    assert (work_cli / cli_mesh_id / "diagnostics.json").is_file()
+    assert (work_mcp / mcp_id / "diagnostics.json").is_file()
 
 
 def test_entrypoint_missing_mcp_hint() -> None:
