@@ -25,7 +25,12 @@ from meshops.bench.models import (
     HostBlock,
     MethodBlock,
 )
-from meshops.bench.rss import get_available_ram_bytes, get_peak_rss_mb, get_total_ram_mb
+from meshops.bench.rss import (
+    case_peak_rss_mb,
+    get_available_ram_bytes,
+    get_current_rss_mb,
+    get_total_ram_mb,
+)
 from meshops.bench.sizes import FACE_TARGETS, LadderMesh, parse_sizes, write_ladder_stl
 
 # L/XL RAM gate: skip when available < ~4 GiB (R2).
@@ -173,10 +178,15 @@ def run_case(
         if inject_fail:
             raise RuntimeError("injected failure for ladder continue test")
 
+        # Case-scoped RSS: sample current RSS at phase boundaries; take max.
+        # Do NOT use process-lifetime PeakWorkingSet — that bleeds across S/M/L/XL.
+        rss_samples: list[float | None] = [get_current_rss_mb()]
+
         stl_path = meshes_dir / f"{label.upper()}.stl"
         ladder: LadderMesh = write_ladder_stl(label, stl_path, target_faces=target)
         actual = ladder.actual_faces
         verts = ladder.verts
+        rss_samples.append(get_current_rss_mb())
 
         from meshops.ingest.pipeline import ingest_stl
         from meshops.triage.orchestrate import mesh_triage
@@ -201,9 +211,12 @@ def run_case(
         # First ingest seeds mesh_id for triage timing.
         seed = ingest_stl(stl_path, work_root=jobs_dir)
         mesh_id_holder["id"] = seed.mesh_id
+        rss_samples.append(get_current_rss_mb())
 
         ingest_med, ingest_samples = time_median(_ingest_once, warmup=warmup, iters=timed_iters)
+        rss_samples.append(get_current_rss_mb())
         triage_med, triage_samples = time_median(_triage_once, warmup=warmup, iters=timed_iters)
+        rss_samples.append(get_current_rss_mb())
 
         render_med: float | None = None
         render_samples: list[float] = []
@@ -215,8 +228,9 @@ def run_case(
                 warmup=warmup,
                 timed_iters=timed_iters,
             )
+            rss_samples.append(get_current_rss_mb())
 
-        rss = get_peak_rss_mb()
+        rss = case_peak_rss_mb(rss_samples)
         return BenchCaseResult(
             label=label.upper(),
             target_faces=ladder.target_faces,
@@ -248,7 +262,7 @@ def run_case(
             python_version=py_ver,
             deps=dict(deps),
             created_at=_iso_now(),
-            rss_peak_mb=get_peak_rss_mb(),
+            rss_peak_mb=get_current_rss_mb(),
         )
 
 

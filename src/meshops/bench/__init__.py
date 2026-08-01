@@ -21,7 +21,12 @@ from meshops.bench.report import (
     resolve_work_root,
     write_results,
 )
-from meshops.bench.rss import get_available_ram_bytes, get_peak_rss_mb
+from meshops.bench.rss import (
+    case_peak_rss_mb,
+    get_available_ram_bytes,
+    get_current_rss_mb,
+    get_peak_rss_mb,
+)
 from meshops.bench.runner import collect_deps, profile_load_vs_ingest, run_ladder, time_median
 from meshops.bench.sizes import FACE_TARGETS, FACE_TOLERANCE_FRAC, generate_ladder_mesh, parse_sizes
 
@@ -34,11 +39,13 @@ __all__ = [
     "Envelope",
     "HostBlock",
     "MethodBlock",
+    "case_peak_rss_mb",
     "collect_deps",
     "envelope_to_markdown",
     "find_latest_results",
     "generate_ladder_mesh",
     "get_available_ram_bytes",
+    "get_current_rss_mb",
     "get_peak_rss_mb",
     "load_envelope",
     "parse_sizes",

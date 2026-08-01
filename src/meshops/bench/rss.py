@@ -9,33 +9,43 @@ import sys
 from typing import Any
 
 
-def get_peak_rss_mb() -> float | None:
-    """Return process **peak** RSS in MiB when the OS exposes it, else None.
+def get_current_rss_mb() -> float | None:
+    """Return **current** process RSS in MiB, or None if unavailable.
 
-    Order (true peak first — DoD honesty for ``rss_peak_mb``):
-    1. Windows: ``GetProcessMemoryInfo`` → **PeakWorkingSetSize**
-    2. Unix: ``resource.getrusage(RUSAGE_SELF).ru_maxrss`` (peak high-water mark)
-    3. Optional ``psutil``: ``memory_info().peak_wset`` (Windows) or ``rss`` only as
-       last-resort approximate when no peak field exists (documented in return path)
-    4. ``None``
-
-    Prefer OS peak counters over psutil current RSS so envelope numbers match the
-    field name ``rss_peak_mb``.
+    Prefer current working set (not process-lifetime high-water) so callers can
+    compute **case-scoped** peaks by sampling during a ladder case.
     """
-    if sys.platform == "win32":
-        via_win = _rss_via_windows_ctypes()
-        if via_win is not None:
-            return via_win
-    else:
-        via_res = _rss_via_resource()
-        if via_res is not None:
-            return via_res
-
-    via_psutil = _rss_via_psutil_peak_or_current()
+    via_psutil = _rss_via_psutil_current()
     if via_psutil is not None:
         return via_psutil
 
+    if sys.platform == "win32":
+        via_win = _rss_via_windows_ctypes_current()
+        if via_win is not None:
+            return via_win
+    else:
+        # Unix ru_maxrss is lifetime peak — not suitable as "current".
+        # Leave None when psutil missing on Unix.
+        pass
+
     return None
+
+
+def get_peak_rss_mb() -> float | None:
+    """Backward-compatible alias: current RSS sample (not process-lifetime peak).
+
+    Ladder cases should use :func:`case_peak_rss_mb` with multiple samples so
+    multi-size runs do not publish a single process high-water for every row.
+    """
+    return get_current_rss_mb()
+
+
+def case_peak_rss_mb(samples: list[float | None]) -> float | None:
+    """Max of non-None current-RSS samples collected during one case."""
+    vals = [float(s) for s in samples if s is not None]
+    if not vals:
+        return None
+    return max(vals)
 
 
 def get_available_ram_bytes() -> int | None:
@@ -139,25 +149,19 @@ def get_total_ram_mb() -> float | None:
     return None
 
 
-def _rss_via_psutil_peak_or_current() -> float | None:
-    """psutil path: prefer peak_wset when present; else current rss as last resort."""
+def _rss_via_psutil_current() -> float | None:
+    """psutil current RSS (WorkingSet / resident set) in MiB."""
     try:
         import psutil  # type: ignore[import-untyped]
 
-        info = psutil.Process().memory_info()
-        # Windows pmem may expose peak_wset (bytes); not on all platforms.
-        peak = getattr(info, "peak_wset", None)
-        if peak is not None and int(peak) > 0:
-            return float(peak) / (1024.0 * 1024.0)
-        rss = getattr(info, "rss", None)
-        if rss is not None and int(rss) > 0:
-            return float(rss) / (1024.0 * 1024.0)
-        return None
+        rss = psutil.Process().memory_info().rss
+        return float(rss) / (1024.0 * 1024.0)
     except Exception:
         return None
 
 
-def _rss_via_windows_ctypes() -> float | None:
+def _rss_via_windows_ctypes_current() -> float | None:
+    """Windows current WorkingSetSize via PSAPI (not PeakWorkingSetSize)."""
     try:
         import ctypes
         from ctypes import wintypes
@@ -186,22 +190,9 @@ def _rss_via_windows_ctypes() -> float | None:
         )
         if not ok:
             return None
-        # Prefer peak working set when available.
-        peak: Any = counters.PeakWorkingSetSize or counters.WorkingSetSize
-        return float(peak) / (1024.0 * 1024.0)
-    except Exception:
-        return None
-
-
-def _rss_via_resource() -> float | None:
-    try:
-        import resource
-
-        usage = resource.getrusage(resource.RUSAGE_SELF)
-        # Linux: ru_maxrss in KiB; macOS: bytes.
-        rss = float(usage.ru_maxrss)
-        if sys.platform == "darwin":
-            return rss / (1024.0 * 1024.0)
-        return rss / 1024.0
+        current: Any = counters.WorkingSetSize
+        if not current:
+            return None
+        return float(current) / (1024.0 * 1024.0)
     except Exception:
         return None

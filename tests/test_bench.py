@@ -343,10 +343,14 @@ def test_cli_bench_help() -> None:
 
 
 def test_rss_helper_returns_float_or_none() -> None:
-    from meshops.bench.rss import get_peak_rss_mb
+    from meshops.bench.rss import case_peak_rss_mb, get_current_rss_mb, get_peak_rss_mb
 
     val = get_peak_rss_mb()
     assert val is None or (isinstance(val, float) and val > 0)
+    cur = get_current_rss_mb()
+    assert cur is None or (isinstance(cur, float) and cur > 0)
+    assert case_peak_rss_mb([None, None]) is None
+    assert case_peak_rss_mb([10.0, 40.0, 25.0]) == 40.0
 
 
 def test_collect_deps_has_core_keys() -> None:
