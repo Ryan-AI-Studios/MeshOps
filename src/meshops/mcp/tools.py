@@ -630,3 +630,57 @@ def organic_finalize(
         "error_code": result.error_code,
         "acceptance": _dump_model(result.acceptance),
     }
+
+
+def design_organic_api(
+    work_root: Path,
+    *,
+    justify: str,
+    session_id: str | None = None,
+    plateau: str | None = None,
+    prompt: str = "",
+    provider: str = "meshy",
+    views: list[str] | None = None,
+    views_from: str = "latest",
+    accept: bool = False,
+) -> dict[str, Any]:
+    """Hosted multi-view fallback. Raises HostedError on gate/provider fail (R1)."""
+    from meshops.hosted import HostedError, run_hosted_fallback
+    from meshops.hosted.views import ViewsFrom
+
+    vf_raw = (views_from or "latest").strip().lower()
+    if vf_raw not in ("latest", "pass", "explicit"):
+        raise HostedError(
+            f"invalid views_from: {views_from!r}",
+            code="multiview_required",
+        )
+    vf: ViewsFrom = vf_raw  # type: ignore[assignment]
+
+    result = run_hosted_fallback(
+        session_id=session_id,
+        work_root=work_root,
+        plateau=Path(plateau) if plateau else None,
+        views_from=vf,
+        view_paths=[Path(v) for v in views] if views else None,
+        prompt=prompt,
+        justify=justify,
+        provider=provider,
+        accept=accept,
+    )
+    raise_if_not_ok(result, what="design_organic_api")
+    return {
+        "ok": result.ok,
+        "session_id": result.session_id,
+        "mesh_id": result.mesh_id,
+        "job_dir": result.job_dir,
+        "provider": result.provider,
+        "provider_task_id": result.provider_task_id,
+        "justification": _dump_model(result.justification),
+        "view_paths": result.view_paths,
+        "diagnostics": result.diagnostics,
+        "honesty": result.honesty,
+        "messages": result.messages,
+        "error_code": result.error_code,
+        "acceptance": _dump_model(result.acceptance),
+        "schema_version": result.schema_version,
+    }

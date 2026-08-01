@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0.0",
+  "session_id": "o9ea985cbc14",
+  "reason": "agent metaball loop plateaued without hero quality structure",
+  "pass_count": 5,
+  "max_passes": 8,
+  "criteria_met": [
+    "min_one_pass",
+    "status_plateau"
+  ],
+  "created_at": "2026-08-01T00:00:00+00:00",
+  "allows_hosted_fallback": false
+}

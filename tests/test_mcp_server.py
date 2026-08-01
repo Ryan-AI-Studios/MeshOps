@@ -20,7 +20,8 @@ from meshops.mcp.server import SERVER_INSTRUCTIONS
 
 pytestmark = pytest.mark.mcp
 
-FORBIDDEN_TOOLS = frozenset({"design_organic_api", "design_organic_agent"})
+# design_organic_api is registered by 0007 (post-plateau hosted fallback).
+FORBIDDEN_TOOLS = frozenset({"design_organic_agent"})
 
 
 def _run(coro: Any) -> Any:
@@ -51,6 +52,8 @@ def test_tool_catalog_complete_and_no_forbidden() -> None:
             assert "mesh_accept_candidate" in names
             assert "mesh_promote_working" in names
             assert "mesh_import_sculpt" in names
+            assert "design_organic_api" in names
+            assert len(names) >= 26
 
     _run(_body())
 
@@ -317,3 +320,110 @@ def test_entrypoint_missing_mcp_hint() -> None:
     assert proc.returncode == 1
     assert "uv sync --extra mcp" in proc.stderr
     assert proc.stdout == ""
+
+
+def test_design_organic_api_gate_closed_is_error(tmp_path: Path) -> None:
+    """Closed plateau raises → MCP is_error path (R1)."""
+    import json
+
+    work = tmp_path / "work"
+    work.mkdir()
+    closed = {
+        "schema_version": "1.0.0",
+        "session_id": "o9ea985cbc14",
+        "reason": "agent metaball loop plateaued without hero quality structure",
+        "pass_count": 1,
+        "max_passes": 8,
+        "criteria_met": ["min_one_pass"],
+        "created_at": "2026-08-01T00:00:00+00:00",
+        "allows_hosted_fallback": False,
+    }
+    plateau = tmp_path / "plateau.json"
+    plateau.write_text(json.dumps(closed), encoding="utf-8")
+    fixtures = Path(__file__).resolve().parent / "fixtures" / "hosted" / "views"
+    views = [str(fixtures / "front.png"), str(fixtures / "left.png")]
+
+    async def _body() -> None:
+        server = build_server(work_root=work)
+        async with Client(server) as client:
+            result = await client.call_tool(
+                "design_organic_api",
+                {
+                    "justify": "Agent plateaued; request multi-view hosted structure regen.",
+                    "plateau": str(plateau),
+                    "provider": "mock",
+                    "views": views,
+                    "views_from": "explicit",
+                },
+            )
+            assert result.is_error is True
+
+    _run(_body())
+
+
+def test_design_organic_api_mock_success(tmp_path: Path) -> None:
+    """Mock provider e2e via MCP (offline)."""
+    import json
+
+    work = tmp_path / "work"
+    work.mkdir()
+    session_id = "o9ea985cbc14"
+    organic = tmp_path / "sessions" / session_id / "organic"
+    views_dir = organic / "passes" / "p001_simple_bust" / "views"
+    views_dir.mkdir(parents=True)
+    mini = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00"
+        b"\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    for key in ("front", "left", "three_quarter"):
+        (views_dir / f"{key}.png").write_bytes(mini)
+    open_plateau = {
+        "schema_version": "1.0.0",
+        "session_id": session_id,
+        "reason": "agent metaball loop plateaued without hero quality structure",
+        "pass_count": 1,
+        "max_passes": 8,
+        "criteria_met": [
+            "min_one_pass",
+            "max_passes_or_reason",
+            "all_passes_have_views",
+            "status_plateau",
+        ],
+        "created_at": "2026-08-01T00:00:00+00:00",
+        "allows_hosted_fallback": True,
+    }
+    plateau = organic / "plateau.json"
+    plateau.write_text(json.dumps(open_plateau), encoding="utf-8")
+    (organic / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0.0",
+                "session_id": session_id,
+                "prompt": "test figurine",
+                "status": "plateau",
+                "passes": ["p001_simple_bust"],
+                "max_passes": 8,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    async def _body() -> None:
+        server = build_server(work_root=work)
+        async with Client(server) as client:
+            result = await client.call_tool(
+                "design_organic_api",
+                {
+                    "justify": "Agent plateaued; request multi-view hosted structure regen.",
+                    "plateau": str(plateau),
+                    "provider": "mock",
+                },
+            )
+            assert result.is_error is False, result
+            assert result.structured_content is not None
+            assert result.structured_content.get("ok") is True
+            assert result.structured_content.get("mesh_id")
+            assert result.structured_content.get("provider") == "mock"
+
+    _run(_body())

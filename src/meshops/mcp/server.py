@@ -15,11 +15,11 @@ SERVER_INSTRUCTIONS = (
     "Classify before mutate. Export guards enforce wipeout hard-fail (Difficulty §6). "
     "T3/T4 repair refused. T3 preview never auto-promotes (N6). "
     "Organic finalize is untrusted — re-triage. "
-    "No design_organic_api (0007 only). Hosted generators never default. "
+    "design_organic_api is post-plateau hosted multi-view fallback only — never default. "
     "work_root is server-bound (MESHOPS_WORK or ./work); host must set cwd to repo."
 )
 
-# Catalog of registered MCP tool names (tests + docs). No design_organic_api / mega agent.
+# Catalog of registered MCP tool names (tests + docs). No mega agent.
 TOOL_NAMES: frozenset[str] = frozenset(
     {
         "mesh_version",
@@ -47,6 +47,7 @@ TOOL_NAMES: frozenset[str] = frozenset(
         "organic_status",
         "organic_plateau",
         "organic_finalize",
+        "design_organic_api",
     }
 )
 
@@ -351,7 +352,7 @@ def build_server(work_root: Path | None = None) -> Any:
     ) -> dict[str, Any]:
         """Create T6 organic authoring session under work/<session_id>/organic/.
 
-        No hosted generators (0007 only after plateau). Local Blender recipes only.
+        Local Blender recipes only. Hosted multi-view is design_organic_api after plateau.
         """
         return T.organic_create(
             wr,
@@ -397,5 +398,34 @@ def build_server(work_root: Path | None = None) -> Any:
         PRECONDITION: at least one successful pass. Output is untrusted mesh job.
         """
         return T.organic_finalize(wr, session_id=session_id, accept=accept)
+
+    @mcp.tool()
+    def design_organic_api(
+        justify: str,
+        session_id: str | None = None,
+        plateau: str | None = None,
+        prompt: str = "",
+        provider: str = "meshy",
+        views: list[str] | None = None,
+        views_from: str = "latest",
+        accept: bool = False,
+    ) -> dict[str, Any]:
+        """Hosted multi-view image-to-3D fallback after 0006 plateau gate.
+
+        PRECONDITION: plateau.json with allows_hosted_fallback=true (or session_id
+        with plateau). Requires ≥2 views + operator justify. Never default organic path.
+        Raises on gate/provider fail (is_error path).
+        """
+        return T.design_organic_api(
+            wr,
+            justify=justify,
+            session_id=session_id,
+            plateau=plateau,
+            prompt=prompt,
+            provider=provider,
+            views=views,
+            views_from=views_from,
+            accept=accept,
+        )
 
     return mcp
