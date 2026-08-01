@@ -209,10 +209,16 @@ def run_slice(
         run_dir = work_root_p / "_ad_hoc_slice" / rid
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    input_stl = run_dir / "input.stl"
-    # Copy candidate into run dir (oracle never mutates source)
-    if candidate.resolve() != input_stl.resolve():
-        shutil.copy2(candidate, input_stl)
+    # Preserve candidate suffix so post-promote working.ply is not mislabeled as .stl.
+    # Orca accepts common mesh formats by extension; never mutate the source file.
+    suffix = candidate.suffix.lower() if candidate.suffix else ".stl"
+    if suffix not in {".stl", ".ply", ".obj", ".3mf"}:
+        suffix = ".stl"
+    input_mesh = run_dir / f"input{suffix}"
+    if candidate.resolve() != input_mesh.resolve():
+        shutil.copy2(candidate, input_mesh)
+    # Keep alias name used in logs/docs when path is STL
+    input_stl = input_mesh
     output_3mf = run_dir / "output.gcode.3mf"
 
     vol = mesh_volume_cm3

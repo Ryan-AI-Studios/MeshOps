@@ -39,25 +39,16 @@ def make_orca_hook(
         **kwargs: object,
     ) -> SliceAcceptResult:
         # 1. Re-find Orca every call — fail closed, do not raise
-        orca = Path(orca_path) if orca_path else find_orca(require=False)
-        if orca is None or (orca_path is None and find_orca(require=False) is None):
-            # Double-check when orca_path forced but missing
-            if orca_path is not None and not Path(orca_path).is_file():
-                return SliceAcceptResult(
-                    status="fail",
-                    error_code="orca_not_found",
-                    messages=["OrcaSlicer binary not found (path override missing)"],
-                    metrics={"slice.hook": "make_orca_hook"},
-                )
-            if orca is None:
-                return SliceAcceptResult(
-                    status="fail",
-                    error_code="orca_not_found",
-                    messages=[
-                        "OrcaSlicer not found at hook invoke (set MESHOPS_ORCA or install 2.4.x)"
-                    ],
-                    metrics={"slice.hook": "make_orca_hook"},
-                )
+        orca = Path(orca_path) if orca_path is not None else find_orca(require=False)
+        if orca is None or not Path(orca).is_file():
+            return SliceAcceptResult(
+                status="fail",
+                error_code="orca_not_found",
+                messages=[
+                    "OrcaSlicer not found at hook invoke (set MESHOPS_ORCA or install 2.4.x)"
+                ],
+                metrics={"slice.hook": "make_orca_hook"},
+            )
 
         if not candidate_path:
             return SliceAcceptResult(

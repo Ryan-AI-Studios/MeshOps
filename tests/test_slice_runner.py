@@ -247,6 +247,101 @@ def test_timeout_raises(tmp_path: Path, solid_cylinder_stl: Path) -> None:
     )
 
 
+def test_run_slice_preserves_ply_suffix(tmp_path: Path, solid_cylinder_stl: Path) -> None:
+    """Post-promote working.ply must not be mislabeled as input.stl (P2-001)."""
+    import trimesh
+
+    fake_orca = tmp_path / "orca.exe"
+    fake_orca.write_bytes(b"x")
+    mesh = trimesh.load(str(solid_cylinder_stl), force="mesh")
+    assert isinstance(mesh, trimesh.Trimesh)
+    ply = tmp_path / "working.ply"
+    mesh.export(str(ply))
+
+    staged: list[str] = []
+
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        model = argv[-1]
+        staged.append(model)
+        out_idx = argv.index("--export-3mf")
+        Path(argv[out_idx + 1]).write_bytes(_ok_3mf_bytes())
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    result = run_slice(
+        ply,
+        mesh_id="plysuffix0001",
+        work_root=tmp_path / "work",
+        run_orca_fn=fake_run,
+        orca_path=fake_orca,
+        load_volume=False,
+    )
+    assert result.status == "pass"
+    assert staged
+    assert staged[0].lower().endswith(".ply")
+    assert Path(staged[0]).is_file()
+
+
+def test_allow_reorient_retry_once_max(tmp_path: Path, solid_cylinder_stl: Path) -> None:
+    """allow_reorient_retry re-invokes at most once with --orient 1."""
+    fake_orca = tmp_path / "orca.exe"
+    fake_orca.write_bytes(b"x")
+    calls: list[list[str]] = []
+
+    high_xml = """<?xml version="1.0"?>
+<config>
+  <header><header_item key="OrcaSlicer-Version" value="2.4.2"/></header>
+  <plate>
+    <metadata key="index" value="1"/>
+    <metadata key="prediction" value="100"/>
+    <metadata key="weight" value="1000"/>
+    <metadata key="support_used" value="true"/>
+    <metadata key="outside" value="false"/>
+    <filament id="1" used_m="100" used_g="1000" type="PLA"/>
+  </plate>
+</config>
+"""
+    ok_xml = (FIXTURES / "slice_info_ok.config").read_text(encoding="utf-8")
+
+    def _zip_xml(xml: str) -> bytes:
+        import io
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("Metadata/slice_info.config", xml)
+            zf.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types/>')
+        return buf.getvalue()
+
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(argv))
+        out_idx = argv.index("--export-3mf")
+        out_path = Path(argv[out_idx + 1])
+        # First call: high filament → anomaly high; second: ok
+        xml = high_xml if len(calls) == 1 else ok_xml
+        out_path.write_bytes(_zip_xml(xml))
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    # Volume such that high-filament first pass fails high, ok second pass stays under fail_high.
+    # high: (1000/1.24)/2 ≈ 403 >= 8; ok fixture: ~11.46/2 ≈ 5.7 (warn band, still pass).
+    result = run_slice(
+        solid_cylinder_stl,
+        mesh_id="reorient00001",
+        work_root=tmp_path / "work",
+        run_orca_fn=fake_run,
+        orca_path=fake_orca,
+        load_volume=False,
+        mesh_volume_cm3=2.0,
+        allow_reorient_retry=True,
+        orient=0,
+    )
+    assert len(calls) == 2
+    assert "--orient" in calls[0] and calls[0][calls[0].index("--orient") + 1] == "0"
+    assert "--orient" in calls[1] and calls[1][calls[1].index("--orient") + 1] == "1"
+    assert result.metrics.get("slice.reorient_retry_used") is True
+    # Second pass uses ok fixture → pass
+    assert result.accept is not None
+    assert result.accept.status == "pass"
+
+
 def test_mock_magic_unused() -> None:
     # keep import used if needed
     assert MagicMock is not None
