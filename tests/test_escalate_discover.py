@@ -166,7 +166,12 @@ def test_find_blender_portable_fake(monkeypatch: pytest.MonkeyPatch, tmp_path: P
 def test_portable_recomputes_when_localappdata_changes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Live LOCALAPPDATA changes must refresh portable candidate (Codex P2)."""
+    """Live LOCALAPPDATA changes must refresh portable candidate (Codex P2).
+
+    Do not monkeypatch ``os.name`` to ``nt`` on Linux CI — that makes
+    ``pathlib.Path`` construct WindowsPath and raises UnsupportedOperation.
+    Non-Windows still evaluates the portable candidate branch.
+    """
     monkeypatch.delenv(ENV_MESHOPS_BLENDER, raising=False)
     monkeypatch.setattr("meshops.escalate.discover.shutil.which", lambda _: None)
     monkeypatch.setattr(
@@ -180,7 +185,6 @@ def test_portable_recomputes_when_localappdata_changes(
     portable_b.parent.mkdir(parents=True)
     portable_b.write_bytes(b"fake-b")
     monkeypatch.setenv("LOCALAPPDATA", str(root_a))
-    monkeypatch.setattr("meshops.escalate.discover.os.name", "nt")
     assert find_blender(require=False) is None
     monkeypatch.setenv("LOCALAPPDATA", str(root_b))
     found, source = find_blender_with_source(require=False)
