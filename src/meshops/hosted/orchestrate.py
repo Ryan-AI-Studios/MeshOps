@@ -9,7 +9,7 @@ import time
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from meshops.acceptance.honesty import HONESTY_MESSAGE
 from meshops.acceptance.pack import accept_candidate
@@ -34,8 +34,29 @@ DEFAULT_POLL_INTERVAL_S = 5.0
 DEFAULT_TIMEOUT_S = 300.0
 DEFAULT_MAX_HTTP_RETRIES = 3
 
+# Optional 0011 accept — operator-selectable (R25: do not hard-bind for_sculpt).
+# Default export = wipeout/export floors on self-baseline (honest for untrusted generator).
+AcceptPolicyName = Literal["export", "sculpt", "design"]
+DEFAULT_ACCEPT_POLICY: AcceptPolicyName = "export"
+
 _TERMINAL_OK = "SUCCEEDED"
 _TERMINAL_FAIL = frozenset({"FAILED", "CANCELED"})
+
+
+def resolve_accept_policy(name: str | AcceptPolicyName | None) -> GuardPolicy:
+    """Map CLI/MCP accept-policy token → GuardPolicy (never silent for_sculpt-only)."""
+    key = (name or DEFAULT_ACCEPT_POLICY).strip().lower()
+    if key == "export":
+        return GuardPolicy.for_export()
+    if key == "sculpt":
+        return GuardPolicy.for_sculpt()
+    if key == "design":
+        return GuardPolicy.for_design()
+    raise HostedError(
+        f"invalid accept policy {name!r}; expected export|sculpt|design",
+        code="accept_policy_invalid",
+        details={"accept_policy": name},
+    )
 
 
 def _now_iso() -> str:
@@ -208,6 +229,7 @@ def run_hosted_fallback(
     justify: str,
     provider: str = DEFAULT_PROVIDER_NAME,
     accept: bool = False,
+    accept_policy: AcceptPolicyName | str = DEFAULT_ACCEPT_POLICY,
     provider_instance: HostedProvider | None = None,
     fixture_stl: Path | str | None = None,
 ) -> HostedRunResult:
@@ -383,21 +405,32 @@ def run_hosted_fallback(
 
         honesty = f"{HOSTED_HONESTY} {HONESTY_MESSAGE}"
         acceptance = None
+        policy_name = (accept_policy or DEFAULT_ACCEPT_POLICY).strip().lower()
 
-        # 12) Optional 0011 accept
+        # 12) Optional 0011 accept — policy selectable (R25); self-baseline absolute check
+        # on untrusted generator mesh (same pattern as organic finalize for authored STLs).
+        # Multi-view *reference* images satisfy require_views when present (not job F3D).
         if accept:
             try:
+                policy = resolve_accept_policy(policy_name)
                 acceptance = accept_candidate(
                     job.original_stl,
                     job.original_stl,
-                    policy=GuardPolicy.for_sculpt(),
-                    view_paths=[],
-                    require_views=False,
+                    policy=policy,
+                    view_paths=view_path_strs,
+                    require_views=bool(view_path_strs),
                     allow_stubs=True,
-                    view_notes=["hosted_fallback", "untrusted_generator"],
+                    view_notes=[
+                        "hosted_fallback",
+                        "untrusted_generator",
+                        f"accept_policy:{policy_name}",
+                        "self_baseline_absolute_check",
+                    ],
                 )
                 if acceptance.honesty_message:
                     honesty = f"{HOSTED_HONESTY} {acceptance.honesty_message}"
+            except HostedError:
+                raise
             except Exception as exc:
                 messages.append(f"accept_candidate failed: {exc}")
 
@@ -415,6 +448,8 @@ def run_hosted_fallback(
             "created_at": _now_iso(),
             "honesty": honesty,
             "diagnostics": diagnostics,
+            "accept_requested": bool(accept),
+            "accept_policy": policy_name if accept else None,
             "accepted": bool(accept and acceptance is not None and acceptance.ok),
         }
         if acceptance is not None:

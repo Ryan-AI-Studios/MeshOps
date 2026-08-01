@@ -1291,6 +1291,11 @@ def hosted_run_cmd(
         "--accept/--no-accept",
         help="Optional 0011 accept_candidate compose after triage",
     ),
+    accept_policy: str = typer.Option(
+        "export",
+        "--accept-policy",
+        help="When --accept: export|sculpt|design (default export; not hard-wired sculpt)",
+    ),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON on stdout"),
 ) -> None:
     """Run hosted multi-view fallback after a valid 0006 plateau gate."""
@@ -1321,6 +1326,7 @@ def hosted_run_cmd(
             justify=justify,
             provider=provider,
             accept=accept,
+            accept_policy=accept_policy,
         )
     except HostedError as exc:
         _emit_error(exc, json_mode=json_out, code=1)

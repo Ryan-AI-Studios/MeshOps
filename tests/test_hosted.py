@@ -483,3 +483,36 @@ def test_live_hosted_marker_skip_without_key() -> None:
 def test_get_provider_unknown() -> None:
     with pytest.raises(HostedError):
         get_provider("not-a-real-provider")
+
+
+def test_accept_policy_selectable_not_hard_sculpt(tmp_path: Path) -> None:
+    """R25: accept uses operator policy (default export), not hard-wired for_sculpt."""
+    from meshops.hosted.orchestrate import resolve_accept_policy
+
+    assert resolve_accept_policy("export").tier == "export"
+    assert resolve_accept_policy("sculpt").tier == "sculpt"
+    assert resolve_accept_policy("design").tier == "design"
+    with pytest.raises(HostedError) as ei:
+        resolve_accept_policy("recipe")
+    assert ei.value.code == "accept_policy_invalid"
+
+    work = tmp_path / "work"
+    work.mkdir()
+    plateau = _seed_organic_tree(tmp_path / "sessions")
+    result = run_hosted_fallback(
+        plateau=plateau,
+        work_root=work,
+        justify=JUSTIFY_OK,
+        provider="mock",
+        fixture_stl=MOCK_STL,
+        accept=True,
+        accept_policy="export",
+    )
+    assert result.ok is True
+    assert result.mesh_id is not None
+    assert result.acceptance is not None
+    assert result.acceptance.policy_tier == "export"
+    job = JobPaths(work_root=work, mesh_id=result.mesh_id)
+    man = json.loads((job.hosted_dir / "run_manifest.json").read_text(encoding="utf-8"))
+    assert man.get("accept_policy") == "export"
+    assert man.get("accept_requested") is True

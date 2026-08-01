@@ -409,11 +409,13 @@ def build_server(work_root: Path | None = None) -> Any:
         views: list[str] | None = None,
         views_from: str = "latest",
         accept: bool = False,
+        accept_policy: str = "export",
     ) -> dict[str, Any]:
         """Hosted multi-view image-to-3D fallback after 0006 plateau gate.
 
         PRECONDITION: plateau.json with allows_hosted_fallback=true (or session_id
         with plateau). Requires ≥2 views + operator justify. Never default organic path.
+        Optional accept uses accept_policy export|sculpt|design (default export).
         Raises on gate/provider fail (is_error path).
         """
         return T.design_organic_api(
@@ -426,6 +428,7 @@ def build_server(work_root: Path | None = None) -> Any:
             views=views,
             views_from=views_from,
             accept=accept,
+            accept_policy=accept_policy,
         )
 
     return mcp

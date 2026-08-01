@@ -643,6 +643,7 @@ def design_organic_api(
     views: list[str] | None = None,
     views_from: str = "latest",
     accept: bool = False,
+    accept_policy: str = "export",
 ) -> dict[str, Any]:
     """Hosted multi-view fallback. Raises HostedError on gate/provider fail (R1)."""
     from meshops.hosted import HostedError, run_hosted_fallback
@@ -666,6 +667,7 @@ def design_organic_api(
         justify=justify,
         provider=provider,
         accept=accept,
+        accept_policy=accept_policy,
     )
     raise_if_not_ok(result, what="design_organic_api")
     return {
