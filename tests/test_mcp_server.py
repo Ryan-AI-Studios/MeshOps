@@ -235,6 +235,56 @@ def test_parity_cli_vs_mcp_ingest_triage(
     assert (work_mcp / mcp_id / "diagnostics.json").is_file()
 
 
+def test_accept_candidate_require_slice_attaches_hook(
+    solid_cylinder_stl: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """require_slice=True must attach make_orca_hook (Codex P1), not leave slice_hook=None."""
+    from meshops.mcp import tools as mcp_tools
+
+    work = tmp_path / "work"
+    work.mkdir()
+    # Fake Orca present
+    fake_orca = tmp_path / "orca-slicer.exe"
+    fake_orca.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        "meshops.slice.find_orca",
+        lambda require=False: fake_orca,
+    )
+    hooks: list[Any] = []
+
+    def _capture_hook(**kwargs: Any) -> Any:
+        hooks.append(kwargs)
+
+        # Return a callable-compatible stub that always fails closed without invoking Orca
+        def _hook(**_kw: Any) -> Any:
+            from meshops.acceptance.models import SliceAcceptResult
+
+            return SliceAcceptResult(
+                status="fail",
+                error_code="test_stub",
+                messages=["stub"],
+                metrics={},
+            )
+
+        return _hook
+
+    monkeypatch.setattr("meshops.slice.make_orca_hook", _capture_hook)
+
+    # accept will raise because hook returns fail — we only care that hook was built
+    with pytest.raises(RuntimeError):
+        mcp_tools.mesh_accept_candidate(
+            work,
+            baseline_path=str(solid_cylinder_stl),
+            candidate_path=str(solid_cylinder_stl),
+            require_views=False,
+            require_slice=True,
+        )
+    assert hooks, "make_orca_hook must be called when require_slice=True and Orca present"
+    assert "work_root" in hooks[0]
+
+
 def test_entrypoint_missing_mcp_hint() -> None:
     """Friendly ImportError path: simulate missing mcp via stripped sys.path."""
     # Run a small Python snippet that forces ImportError before main import

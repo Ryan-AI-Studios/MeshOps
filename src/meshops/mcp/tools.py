@@ -180,14 +180,22 @@ def mesh_accept_candidate(
 ) -> dict[str, Any]:
     from meshops.acceptance import accept_candidate
 
-    # work_root unused for pure path accept but kept for signature symmetry / future hooks
-    _ = work_root
+    # Attach live Orca hook when require_slice (CLI parity). mesh_id optional —
+    # make_orca_hook accepts mesh_id=None and still runs on candidate_path.
+    slice_hook = None
+    if require_slice:
+        from meshops.slice import find_orca, make_orca_hook
+
+        if find_orca(require=False) is not None:
+            slice_hook = make_orca_hook(work_root=work_root)
+
     result = accept_candidate(
         Path(baseline_path),
         Path(candidate_path),
         require_views=require_views,
         allow_stubs=allow_stubs,
         require_slice=require_slice,
+        slice_hook=slice_hook,
     )
     raise_if_not_ok(
         result,
