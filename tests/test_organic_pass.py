@@ -137,6 +137,42 @@ def test_failed_pass_not_in_manifest(tmp_path: Path) -> None:
     assert manifest.passes == []
     failed = list(paths.organic_dir.glob("failed_p*"))
     assert len(failed) == 1
+    # failed_* is sibling of passes/, not nested under it
+    assert failed[0].parent == paths.organic_dir
+    assert not (paths.passes_dir / failed[0].name).exists()
+
+
+def test_unexpected_exception_renames_to_failed(tmp_path: Path) -> None:
+    """Non-OrganicError inside run_pass still renames to failed_* (no orphan success dir)."""
+    m = create_session(
+        "unexpected exception rename test",
+        work_root=tmp_path,
+        session_id="o0e0ce000001",
+    )
+
+    with (
+        patch("meshops.organic.pass_runner.find_blender", return_value=Path("blender.exe")),
+        patch("meshops.organic.pass_runner.require_blender_52", return_value="5.2.0"),
+        patch(
+            "meshops.organic.pass_runner.subprocess.run",
+            side_effect=RuntimeError("disk full mid-recipe"),
+        ),
+    ):
+        with pytest.raises(OrganicError) as ei:
+            run_pass(m.session_id, work_root=tmp_path)
+        assert ei.value.code == "blender_failed"
+        assert "unexpected" in str(ei.value).lower() or "disk full" in str(ei.value).lower()
+
+    paths, manifest = load_session(m.session_id, work_root=tmp_path)
+    assert manifest.passes == []
+    failed = list(paths.organic_dir.glob("failed_p*"))
+    assert len(failed) == 1
+    assert failed[0].parent == paths.organic_dir
+    # No in-progress pass dir left under passes/
+    leftovers = (
+        [p for p in paths.passes_dir.iterdir() if p.is_dir()] if paths.passes_dir.is_dir() else []
+    )
+    assert leftovers == []
 
 
 def test_pass_success_mock_blender(tmp_path: Path) -> None:

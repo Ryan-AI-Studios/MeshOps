@@ -118,6 +118,48 @@ def test_finalize_accept_for_sculpt(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert kwargs["require_views"] is True
 
 
+def test_finalize_stub_views_ok_when_prefer_stub(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With MESHOPS_STUB_DIFF, finalize may write stub job views and succeed."""
+    monkeypatch.setenv("MESHOPS_STUB_DIFF", "1")
+    sid = _seed_successful_pass(tmp_path, session_id="of1a11ce5001")
+
+    result = finalize_session(sid, work_root=tmp_path, accept=False)
+    assert result.ok is True
+    assert result.mesh_id is not None
+    job = JobPaths(work_root=tmp_path, mesh_id=result.mesh_id)
+    assert len(list(job.views_dir.glob("*.png"))) >= 4
+    assert any("stub" in m.lower() for m in result.messages)
+
+
+def test_finalize_job_views_fail_closed_outside_stub(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without stub prefer, F3D job-view failure must fail finalize (not use pass views)."""
+    monkeypatch.delenv("MESHOPS_STUB_DIFF", raising=False)
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    # Force non-stub even if CI is re-set by the environment
+    monkeypatch.setattr("meshops.organic.finalize._prefer_stub_views", lambda: False)
+
+    sid = _seed_successful_pass(tmp_path, session_id="of1a11cefa11")
+
+    with patch("meshops.render.f3d_renderer.F3DRenderer") as mock_cls:
+        mock_cls.return_value.render_job.side_effect = RuntimeError("f3d unavailable")
+        with pytest.raises(OrganicError) as ei:
+            finalize_session(sid, work_root=tmp_path, accept=False)
+        assert ei.value.code == "ingest_failed"
+        assert "job views" in str(ei.value).lower() or "f3d" in str(ei.value).lower()
+
+    # Session must not be finalized; pass views alone do not satisfy B12
+    paths, manifest = load_session(sid, work_root=tmp_path)
+    assert manifest.status != "finalized"
+    assert manifest.final_mesh_id is None
+    # final.stl may already be copied before views step — ok; status is the gate
+    assert not paths.finalize_json.is_file()
+
+
 def test_render_mesh_to_dir_exists() -> None:
     from meshops.render.f3d_renderer import F3DRenderer
 

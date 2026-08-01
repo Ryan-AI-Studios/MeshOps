@@ -4,7 +4,12 @@ Layout::
 
     work/<session_id>/organic/
       manifest.json, prompt.md, style_notes.md, session_report.md
-      refs/, passes/, failed_pNNN_*/, plateau.json, final.stl, finalize.json
+      refs/, passes/, plateau.json, final.stl, finalize.json
+      failed_<pass_id>/   # failed pass attempts (siblings of passes/, not under it)
+
+Failed passes are renamed from ``passes/<pass_id>/`` to ``organic/failed_<pass_id>/``
+(e.g. ``organic/failed_p001_simple_bust/``). They are siblings of ``passes/``, never
+nested under it, so they cannot be mistaken for successful manifest.passes entries.
 
 Never add organic/ via ensure_job_layout / JobPaths for every triage job.
 """
@@ -17,7 +22,12 @@ from pathlib import Path
 
 @dataclass(frozen=True, slots=True)
 class SessionPaths:
-    """Resolved paths under work/<session_id>/organic/."""
+    """Resolved paths under work/<session_id>/organic/.
+
+    Successful / in-progress pass dirs live at ``organic/passes/<pass_id>/``.
+    Failed attempts are renamed to ``organic/failed_<pass_id>/`` (siblings of
+    ``passes/``, not children of it) so orphan work dirs never pollute success layout.
+    """
 
     work_root: Path
     session_id: str
@@ -71,7 +81,7 @@ class SessionPaths:
         return self.passes_dir / name
 
     def failed_pass_dir(self, name: str) -> Path:
-        """Failed attempt directory at organic/failed_<name>/."""
+        """Failed attempt directory at organic/failed_<name>/ (sibling of passes/)."""
         return self.organic_dir / f"failed_{name}"
 
     def ensure_layout(self) -> None:

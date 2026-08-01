@@ -434,6 +434,34 @@ def run_pass(
             messages=messages,
             scale_mm=parsed.scale_mm,
         )
+    except Exception as exc:
+        # Unexpected failures must still rename work dir so it never looks successful
+        wrapped = OrganicError(
+            f"unexpected pass failure: {exc}",
+            code="blender_failed",
+            details={"cause": type(exc).__name__, "pass_id": pass_id},
+        )
+        try:
+            _fail_pass(
+                paths=paths,
+                manifest=manifest,
+                pass_id=pass_id,
+                pass_dir=pass_dir,
+                recipe=parsed.recipe,
+                params=blender_params,
+                error=wrapped,
+                returncode=returncode,
+                duration_s=duration_s,
+                blender_version=blender_version,
+                messages=messages,
+                scale_mm=parsed.scale_mm,
+            )
+        except OrganicError as fail_exc:
+            raise fail_exc from exc
+        except Exception:
+            # Best-effort rename/notes failed — still surface as OrganicError
+            raise wrapped from exc
+        raise wrapped from exc  # pragma: no cover — _fail_pass always raises
 
 
 def _write_pass_json(pass_dir: Path, result: PassResult) -> None:

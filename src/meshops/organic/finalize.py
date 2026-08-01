@@ -67,6 +67,8 @@ def _render_job_views(
             paths.append(str(dest))
         return paths, notes
 
+    # Outside CI / MESHOPS_STUB_DIFF: fail closed — session pass views must not
+    # satisfy §4.7 job-view evidence (B12).
     try:
         from meshops.render.f3d_renderer import F3DRenderer
 
@@ -75,14 +77,19 @@ def _render_job_views(
         if not paths:
             raise RuntimeError("render_job returned no view paths")
         return paths, notes
+    except OrganicError:
+        raise
     except Exception as exc:
-        notes.append(f"finalize_views_stub: {type(exc).__name__}: {exc}")
-        paths = []
-        for name in ("front", "left", "three_quarter", "three_quarter_depth"):
-            dest = job.views_dir / f"{name}.png"
-            dest.write_bytes(_MIN_PNG)
-            paths.append(str(dest))
-        return paths, notes
+        raise OrganicError(
+            f"job views failed: {exc}",
+            code="ingest_failed",
+            details={
+                "mesh_id": mesh_id,
+                "stage": "job_views",
+                "error": str(exc),
+                "cause": type(exc).__name__,
+            },
+        ) from exc
 
 
 def finalize_session(
@@ -151,7 +158,7 @@ def finalize_session(
     if not any(Path(p).is_file() for p in view_paths):
         raise OrganicError(
             "finalize: job views missing after render",
-            code="pass_no_views",
+            code="ingest_failed",
             details={"mesh_id": mesh_id, "views_dir": str(job.views_dir)},
         )
 
