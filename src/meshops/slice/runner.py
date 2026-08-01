@@ -234,13 +234,14 @@ def run_slice(
             code="slice_failed",
             details={"run_id": rid, "slice_dir": str(base_slice)},
         ) from exc
-    if run_dir.exists() and any(run_dir.iterdir()):
+    # Reject any pre-existing path (empty dir, non-empty dir, or file) — Codex P2-004.
+    if run_dir.exists():
         raise SliceError(
-            f"slice run_id already exists with artifacts: {rid}",
+            f"slice run_id path already exists: {rid}",
             code="slice_failed",
             details={"run_dir": str(run_dir)},
         )
-    run_dir.mkdir(parents=True, exist_ok=True)
+    run_dir.mkdir(parents=True, exist_ok=False)
 
     # Preserve candidate suffix so post-promote working.ply is not mislabeled as .stl.
     # Orca accepts common mesh formats by extension; never mutate the source file.

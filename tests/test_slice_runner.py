@@ -192,6 +192,27 @@ def test_invalid_run_id_rejected(tmp_path: Path, solid_cylinder_stl: Path) -> No
     assert ei.value.code == "slice_failed"
 
 
+def test_run_id_empty_dir_collision(tmp_path: Path, solid_cylinder_stl: Path) -> None:
+    """Codex P2-004 residual: empty pre-existing run_dir must also collide."""
+    fake_orca = tmp_path / "orca.exe"
+    fake_orca.write_bytes(b"x")
+    rid = "run_20260101_000000_abcd1234"
+    pre = tmp_path / "work" / "collide000001" / "slice" / rid
+    pre.mkdir(parents=True)
+    with pytest.raises(SliceError) as ei:
+        run_slice(
+            solid_cylinder_stl,
+            mesh_id="collide000001",
+            work_root=tmp_path / "work",
+            run_orca_fn=lambda *a, **k: subprocess.CompletedProcess([], 0, "", ""),
+            orca_path=fake_orca,
+            load_volume=False,
+            run_id=rid,
+        )
+    assert ei.value.code == "slice_failed"
+    assert "already exists" in str(ei.value).lower()
+
+
 def test_run_slice_missing_3mf_fail(tmp_path: Path, solid_cylinder_stl: Path) -> None:
     fake_orca = tmp_path / "orca.exe"
     fake_orca.write_bytes(b"x")
