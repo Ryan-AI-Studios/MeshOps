@@ -93,6 +93,18 @@ def main() -> None:
     """MeshOps CLI."""
 
 
+@app.command("mcp")
+def mcp_cmd() -> None:
+    """Launch MeshOps MCP stdio server (requires meshops[mcp] / mcp==2.0.0).
+
+    Prefer console script ``meshops-mcp`` or ``python -m meshops.mcp``.
+    Host must set process cwd to the repo; work_root from MESHOPS_WORK or ./work.
+    """
+    from meshops.mcp.__main__ import main as mcp_main
+
+    mcp_main()
+
+
 @app.command("version")
 def version_cmd(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON on stdout"),

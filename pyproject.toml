@@ -30,9 +30,13 @@ dev = [
 design = [
     "build123d==0.11.1",
 ]
+mcp = [
+    "mcp==2.0.0",
+]
 
 [project.scripts]
 meshops = "meshops.cli:app"
+meshops-mcp = "meshops.mcp.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/meshops"]
@@ -99,6 +103,8 @@ filterwarnings = [
     "error",
     # F3D 3.5 may emit DeprecationWarning on some option paths; keep narrow.
     "ignore::DeprecationWarning:f3d.*",
+    # MCP SDK may emit UserWarning on protocol dual-era paths; keep narrow (R10).
+    "ignore::UserWarning:mcp.*",
 ]
 markers = [
     "f3d: needs F3D/libf3d offscreen render",
@@ -107,4 +113,5 @@ markers = [
     "design: needs build123d (meshops[design] extra)",
     "blender: needs Blender 5.2 LTS binary (MESHOPS_BLENDER or well-known path)",
     "orcaslicer: needs OrcaSlicer binary (MESHOPS_ORCA or well-known path)",
+    "mcp: needs meshops[mcp] extra (mcp==2.0.0)",
 ]

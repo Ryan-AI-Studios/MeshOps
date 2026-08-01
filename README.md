@@ -22,6 +22,10 @@ Local only (gitignored): `conductor/`, `docs/`, `.agents/` (skills including onb
 uv sync --extra dev
 # optional T7 design stack:
 # uv sync --extra design
+# optional MCP stdio adapter (Claude Desktop / Cursor / Inspector):
+# uv sync --extra mcp
+# uv run meshops-mcp   # or: python -m meshops.mcp  (set cwd=repo; MESHOPS_WORK optional)
+# docs: docs/mcp/README.md
 
 # 2. Diagnose tools (default: core env only — missing Blender/Orca is a warning)
 uv run meshops doctor
