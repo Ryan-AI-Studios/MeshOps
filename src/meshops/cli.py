@@ -1,5 +1,5 @@
 """Typer CLI — ingest / triage / render / report / repair / export / diff /
-accept / design / escalate / slice.
+accept / design / escalate / organic / slice.
 """
 
 from __future__ import annotations
@@ -17,9 +17,9 @@ from meshops import __version__
 app = typer.Typer(
     name="meshops",
     help=(
-        "MeshOps — triage + guarded T1/T2 repair + T7 design + T3 escalate + Orca slice "
-        "(ingest / triage / render / report / repair / export / diff / accept / design / "
-        "escalate / slice)."
+        "MeshOps — triage + guarded T1/T2 repair + T7 design + T3 escalate + T6 organic + "
+        "Orca slice (ingest / triage / render / report / repair / export / diff / accept / "
+        "design / escalate / organic / slice)."
     ),
     add_completion=False,
     no_args_is_help=True,
@@ -43,6 +43,18 @@ escalate_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(escalate_app, name="escalate")
+
+organic_app = typer.Typer(
+    name="organic",
+    help=(
+        "T6 organic agent-first: SessionPaths session + Blender metaball recipes + "
+        "F3D pass evidence + plateau + untrusted finalize. "
+        "MESHOPS_ORGANIC_TIMEOUT_S default 300 (use 600+ for high-res). No hosted API."
+    ),
+    add_completion=False,
+    no_args_is_help=True,
+)
+app.add_typer(organic_app, name="organic")
 
 
 def _emit_json(payload: dict[str, Any]) -> None:
@@ -858,6 +870,249 @@ def slice_cmd(
             err=not payload["ok"],
         )
     if not payload["ok"]:
+        raise typer.Exit(1)
+
+
+# --- organic (T6 / track 0006) -------------------------------------------------
+
+
+@organic_app.command("create")
+def organic_create_cmd(
+    prompt: str = typer.Option(..., "--prompt", help="Authoring prompt (required, non-empty)"),
+    style: str = typer.Option("", "--style", help="Style notes"),
+    ref: list[Path] | None = typer.Option(
+        None,
+        "--ref",
+        help="Reference image path (repeatable)",
+    ),
+    recipe: str = typer.Option("simple_bust", "--recipe", help="Default recipe id"),
+    session_id: str | None = typer.Option(
+        None,
+        "--session-id",
+        help="Optional o + 11 hex session id",
+    ),
+    work_root: Path = typer.Option(Path("work"), "--work-root", help="Session store root"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON on stdout"),
+) -> None:
+    """Create organic authoring session under work/<session_id>/organic/."""
+    from meshops.organic import OrganicError, create_session
+
+    try:
+        manifest = create_session(
+            prompt,
+            style_notes=style,
+            refs=list(ref) if ref else None,
+            default_recipe=recipe,
+            session_id=session_id,
+            work_root=work_root,
+        )
+    except OrganicError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    payload = {
+        "ok": True,
+        "session_id": manifest.session_id,
+        "status": manifest.status,
+        "default_recipe": manifest.default_recipe,
+        "notes": manifest.notes,
+        "manifest": manifest.model_dump(mode="json"),
+    }
+    if json_out:
+        _emit_json(payload)
+    else:
+        typer.echo(f"organic create ok session_id={manifest.session_id}")
+
+
+@organic_app.command("pass")
+def organic_pass_cmd(
+    session_id: str = typer.Option(..., "--session-id", help="Session id (o + 11 hex)"),
+    recipe: str | None = typer.Option(None, "--recipe", help="Recipe override"),
+    params: str | None = typer.Option(
+        None,
+        "--params",
+        help="JSON object of recipe params, e.g. '{\"resolution\": 0.5}'",
+    ),
+    work_root: Path = typer.Option(Path("work"), "--work-root", help="Session store root"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON on stdout"),
+) -> None:
+    """Run one Blender organic recipe pass + required multi-view evidence."""
+    from meshops.organic import OrganicError, run_pass
+
+    raw_params: dict[str, Any] | None = None
+    if params:
+        try:
+            loaded = json.loads(params)
+        except json.JSONDecodeError as exc:
+            _emit_error(
+                OrganicError(f"invalid --params JSON: {exc}", code="invalid_params"),
+                json_mode=json_out,
+                code=1,
+            )
+            return  # pragma: no cover — _emit_error never returns
+        if not isinstance(loaded, dict):
+            _emit_error(
+                OrganicError("--params must be a JSON object", code="invalid_params"),
+                json_mode=json_out,
+                code=1,
+            )
+            return  # pragma: no cover
+        raw_params = loaded
+
+    try:
+        result = run_pass(
+            session_id,
+            recipe=recipe,
+            params=raw_params,
+            work_root=work_root,
+        )
+    except OrganicError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    payload = {
+        "ok": result.ok,
+        "pass_id": result.pass_id,
+        "recipe": result.recipe,
+        "mesh_path": str(result.mesh_path) if result.mesh_path else None,
+        "view_paths": result.view_paths,
+        "view_kind": result.view_kind,
+        "returncode": result.returncode,
+        "duration_s": result.duration_s,
+        "blender_version": result.blender_version,
+        "messages": result.messages,
+        "error_code": result.error_code,
+    }
+    if json_out:
+        _emit_json(payload)
+    else:
+        typer.echo(
+            f"organic pass ok pass_id={result.pass_id} views={len(result.view_paths)} "
+            f"kind={result.view_kind}"
+        )
+
+
+@organic_app.command("status")
+def organic_status_cmd(
+    session_id: str = typer.Option(..., "--session-id", help="Session id (o + 11 hex)"),
+    work_root: Path = typer.Option(Path("work"), "--work-root", help="Session store root"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON on stdout"),
+) -> None:
+    """Show organic session manifest status."""
+    from meshops.organic import OrganicError, load_session
+
+    try:
+        paths, manifest = load_session(session_id, work_root=work_root)
+    except OrganicError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    payload = {
+        "ok": True,
+        "session_id": manifest.session_id,
+        "status": manifest.status,
+        "passes": manifest.passes,
+        "pass_count": len(manifest.passes),
+        "final_mesh_id": manifest.final_mesh_id,
+        "blender_version": manifest.blender_version,
+        "notes": manifest.notes,
+        "organic_dir": str(paths.organic_dir),
+        "manifest": manifest.model_dump(mode="json"),
+    }
+    if json_out:
+        _emit_json(payload)
+    else:
+        typer.echo(
+            f"organic status session_id={manifest.session_id} status={manifest.status} "
+            f"passes={len(manifest.passes)}"
+        )
+
+
+@organic_app.command("plateau")
+def organic_plateau_cmd(
+    session_id: str = typer.Option(..., "--session-id", help="Session id (o + 11 hex)"),
+    reason: str = typer.Option(
+        ...,
+        "--reason",
+        help="Quality reason (≥15 chars; not filler) for 0007 hosted-fallback gate",
+    ),
+    work_root: Path = typer.Option(Path("work"), "--work-root", help="Session store root"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON on stdout"),
+) -> None:
+    """Mark session plateau (machine-readable criteria_met for 0007)."""
+    from meshops.organic import OrganicError, mark_plateau
+
+    try:
+        record = mark_plateau(session_id, reason, work_root=work_root)
+    except OrganicError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    payload = {
+        "ok": True,
+        "session_id": record.session_id,
+        "allows_hosted_fallback": record.allows_hosted_fallback,
+        "criteria_met": record.criteria_met,
+        "pass_count": record.pass_count,
+        "reason": record.reason,
+        "plateau": record.model_dump(mode="json"),
+    }
+    if json_out:
+        _emit_json(payload)
+    else:
+        typer.echo(
+            f"organic plateau ok allows_hosted_fallback={record.allows_hosted_fallback} "
+            f"criteria={record.criteria_met}"
+        )
+
+
+@organic_app.command("finalize")
+def organic_finalize_cmd(
+    session_id: str = typer.Option(..., "--session-id", help="Session id (o + 11 hex)"),
+    accept: bool = typer.Option(
+        False,
+        "--accept/--no-accept",
+        help="Run accept_candidate with GuardPolicy.for_sculpt() on job views",
+    ),
+    work_root: Path = typer.Option(Path("work"), "--work-root", help="Session store root"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON on stdout"),
+) -> None:
+    """Finalize: final.stl → ingest → triage → job views → optional sculpt accept (B12)."""
+    from meshops.organic import OrganicError, finalize_session
+
+    try:
+        result = finalize_session(session_id, work_root=work_root, accept=accept)
+    except OrganicError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    payload = {
+        "ok": result.ok,
+        "session_id": result.session_id,
+        "mesh_id": result.mesh_id,
+        "job_dir": str(result.job_dir) if result.job_dir else None,
+        "triage_summary": result.triage_summary,
+        "honesty_message": result.honesty_message,
+        "messages": result.messages,
+        "error_code": result.error_code,
+        "acceptance": (
+            result.acceptance.model_dump(mode="json") if result.acceptance is not None else None
+        ),
+    }
+    if json_out:
+        _emit_json(payload)
+    else:
+        status = "ok" if result.ok else "FAIL"
+        typer.echo(
+            f"organic finalize {status} mesh_id={result.mesh_id} job_dir={result.job_dir}",
+            err=not result.ok,
+        )
+    if not result.ok:
         raise typer.Exit(1)
 
 
