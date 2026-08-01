@@ -5,10 +5,14 @@ NOT a metric rangefinder. Numeric thickness uses mesh queries.
 
 F3D 3.5 Python bindings (snake_case): Engine.create(offscreen=True), engine.scene,
 engine.window, engine.options, window.camera, window.render_to_image(), image.save().
+
+Track 0006: ``render_mesh_to_dir`` is the path-based API; ``render_job`` delegates.
+Depth is a *mode* (display_depth), not a camera name — e.g. three_quarter_depth.png.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -125,37 +129,55 @@ class F3DRenderer:
         self.width = width
         self.height = height
 
-    def render_job(
+    def render_mesh_to_dir(
         self,
-        mesh_id: str,
+        mesh_path: Path | str,
+        views_dir: Path | str,
         *,
-        work_root: Path | str = "work",
-        include_depth: bool = True,
+        camera_names: Sequence[str] = ("front", "left", "three_quarter"),
+        include_depth_for: Sequence[str] = ("three_quarter",),
+        width: int | None = None,
+        height: int | None = None,
+        mesh_id: str = "",
+        rendered_from: str = "mesh",
     ) -> RenderResult:
-        """Render RGB (+ visual depth) for all bbox cameras into views/.
+        """Render RGB (+ selective visual depth) for named cameras into views_dir.
 
-        When ``include_depth`` is True, at least one depth map must be written or
-        ``RenderUnavailableError`` is raised (DoD-6).
+        Depth is F3D ``display_depth`` mode on the listed pose names (not a camera).
+        When ``include_depth_for`` is non-empty, at least one depth map must be
+        written or ``RenderUnavailableError`` is raised.
         """
         f3d = _import_f3d()
-        paths = JobPaths(work_root=Path(work_root), mesh_id=mesh_id)
-        if not paths.job_dir.is_dir():
-            raise RenderUnavailableError(f"Job directory not found: {paths.job_dir}")
+        mesh_file = Path(mesh_path)
+        out_dir = Path(views_dir)
+        if not mesh_file.is_file():
+            raise RenderUnavailableError(f"Mesh file not found: {mesh_file}")
+        out_dir.mkdir(parents=True, exist_ok=True)
 
-        mesh_file, rendered_from = _select_mesh_file(paths)
-        paths.views_dir.mkdir(exist_ok=True)
+        w = width if width is not None else self.width
+        h = height if height is not None else self.height
+        depth_set = set(include_depth_for)
+        name_set = set(camera_names)
 
         try:
             mesh = load_mesh(mesh_file)
             bounds = mesh.bounds
             bmin = (float(bounds[0, 0]), float(bounds[0, 1]), float(bounds[0, 2]))
             bmax = (float(bounds[1, 0]), float(bounds[1, 1]), float(bounds[1, 2]))
-            poses = bbox_cameras(bmin, bmax)
+            poses = [p for p in bbox_cameras(bmin, bmax) if p.name in name_set]
+            # Preserve caller order when possible
+            order = {n: i for i, n in enumerate(camera_names)}
+            poses.sort(key=lambda p: order.get(p.name, 999))
         except Exception as exc:
             raise RenderUnavailableError(
                 "Failed to load mesh for camera framing",
                 cause=exc,
             ) from exc
+
+        if not poses:
+            raise RenderUnavailableError(
+                f"No camera poses matched camera_names={list(camera_names)!r}"
+            )
 
         try:
             engine = f3d.Engine.create(offscreen=True)
@@ -170,10 +192,9 @@ class F3DRenderer:
             scene.add(str(mesh_file))
 
             window = engine.window
-            window.size = (self.width, self.height)
+            window.size = (w, h)
 
             options = engine.options
-            # True orthographic projection (DoD-6 / Difficulty §9).
             _require_option(options, "scene.camera.orthographic", True)
 
             camera = window.camera
@@ -182,16 +203,15 @@ class F3DRenderer:
             for pose in poses:
                 _apply_camera(camera, pose)
 
-                # RGB
                 _require_option(options, "render.effect.display_depth", False)
-                rgb_path = paths.views_dir / f"{pose.name}.png"
+                rgb_path = out_dir / f"{pose.name}.png"
                 self._render_to(window, rgb_path)
                 result.view_paths.append(str(rgb_path))
                 result.cameras.append(pose.name)
 
-                if include_depth:
+                if pose.name in depth_set:
                     _require_option(options, "render.effect.display_depth", True)
-                    depth_path = paths.views_dir / f"{pose.name}_depth.png"
+                    depth_path = out_dir / f"{pose.name}_depth.png"
                     self._render_to(window, depth_path)
                     if not depth_path.is_file() or depth_path.stat().st_size <= 0:
                         raise RenderUnavailableError(
@@ -200,17 +220,58 @@ class F3DRenderer:
                     result.depth_paths.append(str(depth_path))
                     _require_option(options, "render.effect.display_depth", False)
 
-            if include_depth and not result.depth_paths:
+            if depth_set and not result.depth_paths:
                 raise RenderUnavailableError(
                     "DoD-6 requires ≥1 visual depth map; none were written"
                 )
 
-            _merge_render_into_diagnostics(paths, result)
             return result
         except RenderUnavailableError:
             raise
         except Exception as exc:
             raise RenderUnavailableError("F3D render failed", cause=exc) from exc
+
+    def render_job(
+        self,
+        mesh_id: str,
+        *,
+        work_root: Path | str = "work",
+        include_depth: bool = True,
+    ) -> RenderResult:
+        """Render RGB (+ visual depth) for all bbox cameras into job views/.
+
+        When ``include_depth`` is True, depth is written for **all** poses
+        (preserves pre-0006 job behavior). Delegates to ``render_mesh_to_dir``.
+        """
+        paths = JobPaths(work_root=Path(work_root), mesh_id=mesh_id)
+        if not paths.job_dir.is_dir():
+            raise RenderUnavailableError(f"Job directory not found: {paths.job_dir}")
+
+        mesh_file, rendered_from = _select_mesh_file(paths)
+        paths.views_dir.mkdir(exist_ok=True)
+
+        # All standard bbox camera names
+        all_names = (
+            "front",
+            "back",
+            "left",
+            "right",
+            "top",
+            "bottom",
+            "three_quarter",
+        )
+        depth_for: Sequence[str] = all_names if include_depth else ()
+
+        result = self.render_mesh_to_dir(
+            mesh_file,
+            paths.views_dir,
+            camera_names=all_names,
+            include_depth_for=depth_for,
+            mesh_id=mesh_id,
+            rendered_from=rendered_from,
+        )
+        _merge_render_into_diagnostics(paths, result)
+        return result
 
     def _render_to(self, window: Any, dest: Path) -> None:
         try:
