@@ -58,6 +58,8 @@ class MethodBlock(BaseModel):
     ram_gate_bytes: int = 4 * 1024**3
     notes: str = (
         "gc.collect before each timed series; 1 untimed warmup; median of 3 timed iters. "
+        "Ingest/triage samples are warm re-ingest after one seed write (idempotent job dir); "
+        "not cold first-touch wall time — see profile_load_vs_ingest for cold load ratio. "
         "F3D RenderUnavailableError → render_s null (case may still be ok). "
         "L/XL skip when available RAM < ~4 GiB → skipped_insufficient_ram."
     )

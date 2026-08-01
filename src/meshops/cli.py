@@ -1446,14 +1446,17 @@ def diff_cmd(
         )
 
 
+_BENCH_SIZES_DEFAULT = "S,M,L,XL"
+
+
 @bench_app.command("run")
 def bench_run_cmd(
     sizes: str = typer.Option(
-        "S,M,L,XL",
+        _BENCH_SIZES_DEFAULT,
         "--sizes",
         help=(
             "Comma-separated size labels (S,M,L,XL). "
-            "Env MESHOPS_BENCH_SIZES overrides default when flag left default."
+            "Env MESHOPS_BENCH_SIZES overrides when this flag is left at default."
         ),
     ),
     work_root: Path | None = typer.Option(
@@ -1473,22 +1476,34 @@ def bench_run_cmd(
     Read-only: no mutators, no --approve, no GuardPolicy. Per-case failures continue
     the ladder. L/XL may skip with skipped_insufficient_ram when available RAM < ~4 GiB.
     """
-    from meshops.bench.report import write_results
+    import os
+
+    from meshops.bench.report import resolve_work_root, write_results
     from meshops.bench.runner import run_ladder
     from meshops.bench.sizes import parse_sizes
 
+    # Prefer MESHOPS_BENCH_SIZES when --sizes left at typer default.
+    size_spec = sizes
+    if sizes.strip().upper() == _BENCH_SIZES_DEFAULT:
+        env_sizes = os.environ.get("MESHOPS_BENCH_SIZES", "").strip()
+        if env_sizes:
+            size_spec = env_sizes
+
     try:
-        label_list = parse_sizes(sizes)
+        label_list = parse_sizes(size_spec)
     except ValueError as exc:
         _emit_error(exc, json_mode=json_out, code=2)
+
+    # Single resolved root for ladder cases + results JSON (env when flag omitted).
+    resolved_root = resolve_work_root(work_root)
 
     try:
         envelope = run_ladder(
             label_list,
-            work_root=work_root,
+            work_root=resolved_root,
             include_render=not no_render,
         )
-        json_path, md_path = write_results(envelope, work_root=work_root)
+        json_path, md_path = write_results(envelope, work_root=resolved_root)
     except Exception as exc:
         _emit_error(exc, json_mode=json_out)
 
@@ -1496,6 +1511,7 @@ def bench_run_cmd(
     payload["ok"] = all(c.status != "failed" for c in envelope.cases)
     payload["results_json"] = str(json_path)
     payload["results_md"] = str(md_path)
+    payload["work_root"] = str(resolved_root)
 
     if json_out:
         _emit_json(payload)
@@ -1520,7 +1536,10 @@ def bench_envelope_cmd(
     work_root: Path | None = typer.Option(
         None,
         "--work-root",
-        help="Search root for newest bench_results.json (default work/bench)",
+        help=(
+            "Search root for newest bench_results.json "
+            "(default: MESHOPS_BENCH_WORK_ROOT or work/bench)"
+        ),
     ),
     json_out: bool = typer.Option(False, "--json", help="Emit Envelope JSON on stdout"),
 ) -> None:
@@ -1530,12 +1549,14 @@ def bench_envelope_cmd(
         envelope_to_markdown,
         find_latest_results,
         load_envelope,
+        resolve_work_root,
     )
 
-    search = default_results_dir(work_root) if work_root is not None else None
+    resolved = resolve_work_root(work_root)
+    search = default_results_dir(resolved)
     path = find_latest_results(search)
     if path is None:
-        msg = "no bench_results.json found under work/bench (run: meshops bench run)"
+        msg = f"no bench_results.json found under {search} (run: meshops bench run)"
         if json_out:
             _emit_json({"ok": False, "error": "bench_results_missing", "message": msg})
         else:
@@ -1551,6 +1572,7 @@ def bench_envelope_cmd(
         payload = envelope.model_dump(mode="json")
         payload["ok"] = True
         payload["source_path"] = str(path)
+        payload["work_root"] = str(resolved)
         _emit_json(payload)
     else:
         typer.echo(f"source: {path}")

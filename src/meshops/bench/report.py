@@ -2,17 +2,37 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from meshops.bench.models import Envelope
 
+# Shared with runner / CLI: flag > MESHOPS_BENCH_WORK_ROOT > work/bench
+_DEFAULT_BENCH_ROOT = Path("work") / "bench"
+
+
+def resolve_work_root(work_root: Path | str | None = None) -> Path:
+    """Resolve bench jobs/results root.
+
+    Precedence: explicit ``work_root`` argument → env ``MESHOPS_BENCH_WORK_ROOT``
+    → ``work/bench``.
+    """
+    if work_root is not None:
+        return Path(work_root)
+    env = os.environ.get("MESHOPS_BENCH_WORK_ROOT", "").strip()
+    if env:
+        return Path(env)
+    return Path(_DEFAULT_BENCH_ROOT)
+
 
 def default_results_dir(work_root: Path | str | None = None) -> Path:
-    """Resolve results directory (work/bench by default)."""
-    if work_root is None:
-        return Path("work") / "bench"
-    root = Path(work_root)
-    # If caller already pointed at …/bench, use it; else nest bench under it.
+    """Resolve results directory (same root used for ladder + JSON write).
+
+    When ``work_root`` is None, honors ``MESHOPS_BENCH_WORK_ROOT`` then
+    ``work/bench``. If the resolved path does not already end with ``bench``,
+    nest a ``bench`` child so callers can pass a generic work tree.
+    """
+    root = resolve_work_root(work_root)
     if root.name.lower() == "bench":
         return root
     return root / "bench"
@@ -39,10 +59,14 @@ def write_results(
 
 
 def find_latest_results(search_root: Path | str | None = None) -> Path | None:
-    """Newest ``bench_results.json`` by mtime under search_root (default work/bench)."""
-    root = Path(search_root) if search_root is not None else Path("work") / "bench"
+    """Newest ``bench_results.json`` by mtime under search_root.
+
+    When ``search_root`` is None, uses ``default_results_dir(None)`` so
+    ``MESHOPS_BENCH_WORK_ROOT`` is honored the same as ``bench run``.
+    """
+    root = default_results_dir(search_root) if search_root is None else Path(search_root)
     if not root.is_dir():
-        # Also search work/ if caller passed work/
+        # Also search nested bench/ if caller passed a parent work tree
         alt = root / "bench" if root.name.lower() != "bench" else None
         if alt is not None and alt.is_dir():
             root = alt

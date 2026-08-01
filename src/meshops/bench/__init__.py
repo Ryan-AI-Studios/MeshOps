@@ -18,6 +18,7 @@ from meshops.bench.report import (
     envelope_to_markdown,
     find_latest_results,
     load_envelope,
+    resolve_work_root,
     write_results,
 )
 from meshops.bench.rss import get_available_ram_bytes, get_peak_rss_mb
@@ -42,6 +43,7 @@ __all__ = [
     "load_envelope",
     "parse_sizes",
     "profile_load_vs_ingest",
+    "resolve_work_root",
     "run_ladder",
     "time_median",
     "write_results",

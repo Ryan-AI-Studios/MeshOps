@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import statistics
 import time
 from pathlib import Path
 from typing import Any
@@ -162,7 +163,10 @@ def test_warmup_median_of_3_recorded(tmp_path: Path, patch_pipeline: None) -> No
     assert case.status == "ok"
     assert len(case.ingest_samples_s) == 3
     assert len(case.triage_samples_s) == 3
-    assert case.ingest_s == sorted(case.ingest_samples_s)[1] or case.ingest_s is not None
+    assert case.ingest_s is not None
+    assert case.ingest_s == statistics.median(case.ingest_samples_s)
+    assert case.triage_s is not None
+    assert case.triage_s == statistics.median(case.triage_samples_s)
 
 
 def test_l_xl_skip_on_low_ram(tmp_path: Path) -> None:
@@ -351,3 +355,58 @@ def test_collect_deps_has_core_keys() -> None:
     deps = collect_deps()
     for key in ("trimesh", "numpy", "scipy", "pymeshlab", "manifold3d", "f3d"):
         assert key in deps
+
+
+def test_resolve_work_root_flag_over_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from meshops.bench.report import resolve_work_root
+
+    env_root = tmp_path / "from_env"
+    flag_root = tmp_path / "from_flag"
+    monkeypatch.setenv("MESHOPS_BENCH_WORK_ROOT", str(env_root))
+    assert resolve_work_root(flag_root) == flag_root
+    assert resolve_work_root(None) == env_root
+    monkeypatch.delenv("MESHOPS_BENCH_WORK_ROOT", raising=False)
+    assert resolve_work_root(None) == Path("work") / "bench"
+
+
+def test_write_results_honors_env_work_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from meshops.bench.report import find_latest_results, load_envelope, write_results
+
+    env_root = tmp_path / "env_bench"
+    env_root.mkdir()
+    monkeypatch.setenv("MESHOPS_BENCH_WORK_ROOT", str(env_root))
+    env = Envelope(
+        created_at="2026-08-01T00:00:00+00:00",
+        host=HostBlock(os="test", python_version="3.13.0", deps={"trimesh": "4.12.2"}),
+        cases=[],
+        notes=["env-root"],
+    )
+    json_path, _md = write_results(env, work_root=None)
+    assert env_root in json_path.parents or json_path.parent == env_root
+    assert json_path.is_file()
+    latest = find_latest_results(None)
+    assert latest is not None
+    assert load_envelope(latest).notes == ["env-root"]
+
+
+def test_cli_sizes_env_overrides_default(
+    tmp_path: Path, patch_pipeline: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MESHOPS_BENCH_SIZES", "S")
+    monkeypatch.setenv("MESHOPS_BENCH_WORK_ROOT", str(tmp_path / "bench"))
+    r = runner.invoke(
+        app,
+        ["bench", "run", "--json", "--no-render"],
+    )
+    assert r.exit_code == 0, r.stdout + r.stderr
+    data = json.loads(r.stdout)
+    assert [c["label"] for c in data["cases"]] == ["S"]
+    assert Path(data["results_json"]).is_file()
+    # envelope CLI finds the env-rooted results
+    r2 = runner.invoke(app, ["bench", "envelope", "--json"])
+    assert r2.exit_code == 0, r2.stdout + r2.stderr
+    env_data = json.loads(r2.stdout)
+    assert env_data["ok"] is True
+    assert len(env_data["cases"]) == 1

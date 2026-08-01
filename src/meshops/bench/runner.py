@@ -105,12 +105,9 @@ def _should_skip_ram(label: str) -> bool:
 
 
 def _resolve_work_root(work_root: Path | str | None) -> Path:
-    if work_root is not None:
-        return Path(work_root)
-    env = os.environ.get("MESHOPS_BENCH_WORK_ROOT", "").strip()
-    if env:
-        return Path(env)
-    return Path("work") / "bench"
+    from meshops.bench.report import resolve_work_root
+
+    return resolve_work_root(work_root)
 
 
 def run_case(
