@@ -10,18 +10,18 @@ from typing import Any
 
 
 def get_peak_rss_mb() -> float | None:
-    """Return current process RSS in MiB, or None if unavailable.
+    """Return process **peak** RSS in MiB when the OS exposes it, else None.
 
-    Order:
-    1. ``psutil.Process().memory_info().rss`` (optional ``meshops[bench]``)
-    2. Windows: ``ctypes`` + ``GetProcessMemoryInfo`` (WorkingSetSize)
-    3. Unix: ``resource.getrusage(RUSAGE_SELF).ru_maxrss`` (KiB on Linux, bytes on macOS)
+    Order (true peak first — DoD honesty for ``rss_peak_mb``):
+    1. Windows: ``GetProcessMemoryInfo`` → **PeakWorkingSetSize**
+    2. Unix: ``resource.getrusage(RUSAGE_SELF).ru_maxrss`` (peak high-water mark)
+    3. Optional ``psutil``: ``memory_info().peak_wset`` (Windows) or ``rss`` only as
+       last-resort approximate when no peak field exists (documented in return path)
     4. ``None``
-    """
-    via_psutil = _rss_via_psutil()
-    if via_psutil is not None:
-        return via_psutil
 
+    Prefer OS peak counters over psutil current RSS so envelope numbers match the
+    field name ``rss_peak_mb``.
+    """
     if sys.platform == "win32":
         via_win = _rss_via_windows_ctypes()
         if via_win is not None:
@@ -30,6 +30,10 @@ def get_peak_rss_mb() -> float | None:
         via_res = _rss_via_resource()
         if via_res is not None:
             return via_res
+
+    via_psutil = _rss_via_psutil_peak_or_current()
+    if via_psutil is not None:
+        return via_psutil
 
     return None
 
@@ -135,12 +139,20 @@ def get_total_ram_mb() -> float | None:
     return None
 
 
-def _rss_via_psutil() -> float | None:
+def _rss_via_psutil_peak_or_current() -> float | None:
+    """psutil path: prefer peak_wset when present; else current rss as last resort."""
     try:
         import psutil  # type: ignore[import-untyped]
 
-        rss = psutil.Process().memory_info().rss
-        return float(rss) / (1024.0 * 1024.0)
+        info = psutil.Process().memory_info()
+        # Windows pmem may expose peak_wset (bytes); not on all platforms.
+        peak = getattr(info, "peak_wset", None)
+        if peak is not None and int(peak) > 0:
+            return float(peak) / (1024.0 * 1024.0)
+        rss = getattr(info, "rss", None)
+        if rss is not None and int(rss) > 0:
+            return float(rss) / (1024.0 * 1024.0)
+        return None
     except Exception:
         return None
 
