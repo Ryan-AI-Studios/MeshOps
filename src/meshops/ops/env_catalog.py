@@ -84,6 +84,14 @@ ENV_CATALOG: Final[tuple[EnvCatalogEntry, ...]] = (
         "consumer": "recipes / design / escalate / organic",
     },
     {
+        "name": "MESHOPS_WORK",
+        "description": (
+            "Job/session store root for MCP server (default ./work; expanduser+resolve)"
+        ),
+        "example": r"C:\dev\stl\work",
+        "consumer": "meshops.mcp.server (server-bound work_root)",
+    },
+    {
         "name": "MESHOPS_ORGANIC_TIMEOUT_S",
         "description": "Organic Blender pass timeout seconds (default 300; 600+ high-res)",
         "example": "600",

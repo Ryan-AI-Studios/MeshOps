@@ -41,8 +41,9 @@ jobs:
           enable-cache: true
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Sync project (dev extras)
-        run: uv sync --extra dev
+      - name: Sync project (dev + mcp extras)
+        # mcp extra required so basedpyright + MCP tests see meshops.mcp (R11).
+        run: uv sync --extra dev --extra mcp
 
       - name: Ruff lint
         run: uv run ruff check .

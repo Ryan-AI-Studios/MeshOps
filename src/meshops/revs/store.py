@@ -15,9 +15,15 @@ import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from meshops.jobstore.paths import JobPaths, ensure_job_layout
-from meshops.revs.models import RevManifest
+
+# NOTE: RevManifest is imported lazily at runtime (TYPE_CHECKING only here).
+# Top-level runtime import creates a cycle: revs.models → acceptance → revs.store → revs.models.
+
+if TYPE_CHECKING:
+    from meshops.revs.models import RevManifest
 
 _REV_DIR_RE = re.compile(r"^(?:\.tmp_|failed_)?r(\d{3,})_(.+)$")
 _META_NAME = "meta.json"
@@ -140,10 +146,12 @@ def rev_mesh_path(rev_dir: Path) -> Path:
 
 
 def load_manifest(rev_dir: Path) -> RevManifest:
+    from meshops.revs.models import RevManifest as _RevManifest
+
     meta = rev_dir / _META_NAME
     if not meta.is_file():
         raise FileNotFoundError(f"meta.json missing in rev: {rev_dir}")
-    return RevManifest.model_validate_json(meta.read_text(encoding="utf-8"))
+    return _RevManifest.model_validate_json(meta.read_text(encoding="utf-8"))
 
 
 def parent_mesh_path(paths: JobPaths, parent_rev: str | None) -> Path:
