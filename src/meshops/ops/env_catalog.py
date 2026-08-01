@@ -156,6 +156,27 @@ ENV_CATALOG: Final[tuple[EnvCatalogEntry, ...]] = (
         "example": r"%LOCALAPPDATA%\MeshOps\tools",
         "consumer": "scripts/bootstrap-tools.ps1 (bootstrap-only)",
     },
+    {
+        "name": "MESHOPS_BENCH_SOAK",
+        "description": (
+            "Truthiness gate for soak tests (1/true/yes/on). Marker @pytest.mark.slow "
+            "alone is insufficient — default pytest never long-soaks (0009 C2)."
+        ),
+        "example": "1",
+        "consumer": "tests/test_bench_soak.py / meshops.bench",
+    },
+    {
+        "name": "MESHOPS_BENCH_SIZES",
+        "description": "Optional default size ladder override for meshops bench run (e.g. S,M)",
+        "example": "S,M",
+        "consumer": "meshops.bench.runner",
+    },
+    {
+        "name": "MESHOPS_BENCH_WORK_ROOT",
+        "description": "Optional results/jobs root for meshops bench (default work/bench)",
+        "example": r"C:\dev\stl\work\bench",
+        "consumer": "meshops.bench.runner / meshops.cli bench",
+    },
 )
 
 ENV_CATALOG_BY_NAME: Final[dict[str, EnvCatalogEntry]] = {e["name"]: e for e in ENV_CATALOG}

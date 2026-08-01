@@ -545,6 +545,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+bench = [
+    { name = "psutil" },
+]
 design = [
     { name = "build123d" },
 ]
@@ -565,6 +568,7 @@ requires-dist = [
     { name = "manifold3d", specifier = "==3.5.2" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = "==2.0.0" },
     { name = "numpy", specifier = "==2.5.1" },
+    { name = "psutil", marker = "extra == 'bench'", specifier = "==7.2.2" },
     { name = "pydantic", specifier = "==2.13.4" },
     { name = "pymeshlab", specifier = "==2025.7.post1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = "==9.1.1" },
@@ -573,7 +577,7 @@ requires-dist = [
     { name = "trimesh", specifier = "==4.12.2" },
     { name = "typer", specifier = "==0.27.0" },
 ]
-provides-extras = ["dev", "design", "mcp", "hosted"]
+provides-extras = ["dev", "design", "mcp", "hosted", "bench", "open3d"]
 
 [[package]]
 name = "mpmath"
