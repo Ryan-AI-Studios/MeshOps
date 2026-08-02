@@ -240,6 +240,38 @@ def test_heatmap__front_right(tmp_path: Path) -> None:
     assert px_front > px_back
 
 
+def test_heatmap__colorbar_at_bottom_of_panel(tmp_path: Path) -> None:
+    """R3.3: per-panel color bar is horizontal at the bottom (not a right-side vertical bar)."""
+    from PIL import Image
+
+    from meshops.proportion.depth_heatmap import COLORBAR_H, MARGIN
+
+    samples_path = _write_samples(
+        tmp_path / "depth_at_landmarks.json",
+        [
+            _sample("chest_front", y_m=0.12, z_frac=0.72),
+            _sample("hip_front", y_m=0.10, z_frac=0.53),
+        ],
+    )
+    out_png = tmp_path / "hm.png"
+    run_depth_heatmap(samples_path, out_png, force=True)
+    with Image.open(out_png) as im:
+        rgba = im.convert("RGBA")
+        w, _h = rgba.size
+        # Color bar sits near bottom of the single panel (above footer).
+        # Sample a horizontal strip in the colorbar band for multi-hue (B→G→R).
+        panel_h = DEFAULT_PANEL_H
+        cb_y = panel_h - COLORBAR_H - 14 + COLORBAR_H // 2
+        xs = [MARGIN + 20, w // 2, w - MARGIN - 20]
+        colors = [rgba.getpixel((x, cb_y))[:3] for x in xs]
+        # Leftish should be more blue-ish than rightish for non-constant colormap
+        assert colors[0] != colors[-1] or colors[0] != colors[1]
+        # Bottom strip of panel must not be blank white-only across full width
+        # (colorbar draws non-white gradients)
+        non_white = sum(1 for c in colors if c != (255, 255, 255))
+        assert non_white >= 1
+
+
 def test_heatmap__invalid_samples(tmp_path: Path) -> None:
     bad = tmp_path / "bad.json"
     bad.write_text('{"not": "valid"}\n', encoding="utf-8")

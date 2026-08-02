@@ -31,7 +31,7 @@ HEATMAP_JSON_BASENAME: Final[str] = "depth_heatmap.json"
 PANEL_GAP_PX: Final[int] = 12
 DEFAULT_PANEL_W: Final[int] = 640
 DEFAULT_PANEL_H: Final[int] = 400
-COLORBAR_W: Final[int] = 28
+COLORBAR_H: Final[int] = 16
 MARGIN: Final[int] = 40
 FOOTER_H: Final[int] = 28
 
@@ -380,14 +380,16 @@ def _draw_colorbar(
     vmin: float,
     vmax: float,
 ) -> None:
-    for i in range(h):
-        t = 1.0 - (i / max(h - 1, 1))  # top = vmax
+    """Horizontal color bar (R3.3: at bottom of each panel). Left=vmin, right=vmax."""
+    for i in range(w):
+        t = i / max(w - 1, 1)  # left = vmin, right = vmax
         color = _blue_green_red(t)
-        draw.line([(x0, y0 + i), (x0 + w - 1, y0 + i)], fill=(*color, 255))
+        draw.line([(x0 + i, y0), (x0 + i, y0 + h - 1)], fill=(*color, 255))
     draw.rectangle((x0, y0, x0 + w - 1, y0 + h - 1), outline=(40, 40, 40, 255))
-    # labels
-    draw.text((x0 + w + 2, y0), f"{vmax:.3g}", fill=(30, 30, 30, 255))
-    draw.text((x0 + w + 2, y0 + h - 12), f"{vmin:.3g}", fill=(30, 30, 30, 255))
+    # labels under bar ends
+    draw.text((x0, y0 + h + 1), f"{vmin:.3g}", fill=(30, 30, 30, 255))
+    vmax_s = f"{vmax:.3g}"
+    draw.text((x0 + w - max(len(vmax_s) * 6, 24), y0 + h + 1), vmax_s, fill=(30, 30, 30, 255))
 
 
 def _draw_panel(
@@ -401,11 +403,16 @@ def _draw_panel(
     panel_h: int,
     title: str,
 ) -> ColorScale:
-    """Draw one abstract panel; return ColorScale for meta."""
+    """Draw one abstract panel; return ColorScale for meta.
+
+    Layout (R3.3): plot area, then horizontal color bar at the **bottom** of the panel.
+    """
+    # Reserve bottom strip for horizontal colorbar + value labels (R3.3 bottom of panel).
+    bottom_reserve = COLORBAR_H + 18
     plot_x0 = panel_x0 + MARGIN
     plot_y0 = panel_y0 + MARGIN
-    plot_w = panel_w - MARGIN * 2 - COLORBAR_W - 36
-    plot_h = panel_h - MARGIN * 2 - 16
+    plot_w = panel_w - MARGIN * 2
+    plot_h = panel_h - MARGIN * 2 - bottom_reserve
     plot_w = max(plot_w, 40)
     plot_h = max(plot_h, 40)
 
@@ -454,8 +461,9 @@ def _draw_panel(
         color = _norm_color(float(p["color_val"]), c_min, c_max)
         _draw_marker(draw, str(p["role"]), px, py, color)
 
-    cb_x = plot_x0 + plot_w + 8
-    _draw_colorbar(draw, x0=cb_x, y0=plot_y0, w=COLORBAR_W, h=plot_h, vmin=c_min, vmax=c_max)
+    # R3.3: color bar at bottom of each panel (horizontal).
+    cb_y = panel_y0 + panel_h - COLORBAR_H - 14
+    _draw_colorbar(draw, x0=plot_x0, y0=cb_y, w=plot_w, h=COLORBAR_H, vmin=c_min, vmax=c_max)
 
     panel_name: ColorScalePanel = (
         "deltas" if mode.startswith("delta") or "delta" in title.lower() else "samples"
