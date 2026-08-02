@@ -512,11 +512,15 @@ def build_server(work_root: Path | None = None) -> Any:
         out: str,
         format: str = "both",
         seeds: bool = False,
+        front_plane_seeds: bool = False,
+        quiet_null_y: bool = False,
         force: bool = False,
     ) -> dict[str, Any]:
         """Emit LM_* guide empties + optional SEED_* from report.
 
         Authoring aids only — not mesh or print success (N6).
+        front_plane_seeds: with seeds, allow limb capsules when y_m null.
+        quiet_null_y: suppress front-plane-only empty messages.
         """
         return T.mesh_proportion_guides(
             wr,
@@ -524,6 +528,8 @@ def build_server(work_root: Path | None = None) -> Any:
             out=out,
             format=format,
             seeds=seeds,
+            front_plane_seeds=front_plane_seeds,
+            quiet_null_y=quiet_null_y,
             force=force,
         )
 

@@ -818,6 +818,8 @@ def mesh_proportion_guides(
     out: str,
     format: str = "both",
     seeds: bool = False,
+    front_plane_seeds: bool = False,
+    quiet_null_y: bool = False,
     force: bool = False,
 ) -> dict[str, Any]:
     """Emit LM_* guides / optional SEED_* from report. Authoring aids only (N6)."""
@@ -831,6 +833,8 @@ def mesh_proportion_guides(
         _resolve_tool_path(out, work_root),
         format=fmt,  # type: ignore[arg-type]
         seeds=seeds,
+        front_plane_seeds=front_plane_seeds,
+        quiet_null_y=quiet_null_y,
         force=force,
     )
 

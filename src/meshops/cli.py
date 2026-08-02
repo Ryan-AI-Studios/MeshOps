@@ -1944,6 +1944,16 @@ def proportion_guides_cmd(
         "--seeds/--no-seeds",
         help="Emit optional SEED_* capsule/ellipsoid primitives (default off)",
     ),
+    front_plane_seeds: bool = typer.Option(
+        False,
+        "--front-plane-seeds/--no-front-plane-seeds",
+        help="With --seeds: allow limb capsules when y_m null (front plane; default off)",
+    ),
+    quiet_null_y: bool = typer.Option(
+        False,
+        "--quiet-null-y/--no-quiet-null-y",
+        help="Suppress front-plane-only (y_m null) empty messages (default off)",
+    ),
     force: bool = typer.Option(
         False,
         "--force",
@@ -1965,6 +1975,8 @@ def proportion_guides_cmd(
             out,
             format=fmt,  # type: ignore[arg-type]
             seeds=seeds,
+            front_plane_seeds=front_plane_seeds,
+            quiet_null_y=quiet_null_y,
             force=force,
         )
     except ProportionError as exc:
@@ -1976,12 +1988,16 @@ def proportion_guides_cmd(
         _emit_json(payload)
     else:
         counts = payload.get("counts", {})
-        typer.echo(
+        line = (
             f"guides format={payload.get('format')} "
             f"empties={counts.get('empties', 0)} "
             f"ladder={counts.get('ladder', 0)} "
             f"seeds={counts.get('seeds', 0)}"
         )
+        sfp = int(counts.get("seeds_front_plane", 0) or 0)
+        if sfp > 0:
+            line = f"{line} seeds_front_plane={sfp}"
+        typer.echo(line)
         for p in payload.get("paths", []):
             typer.echo(f"  {p}")
         for msg in payload.get("messages", []):

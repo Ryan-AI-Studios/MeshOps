@@ -23,7 +23,7 @@ from meshops.proportion.models import (
     ProportionReport,
 )
 
-GUIDE_SCHEMA_VERSION: Final[Literal["1.0.0"]] = "1.0.0"
+GUIDE_SCHEMA_VERSION: Final[Literal["1.0.0", "1.1.0"]] = "1.1.0"
 
 AXIS_NOTES: Final[str] = (
     "Z-up soles=0; +X camera-right; +Y depth toward camera for camera_left; "
@@ -90,6 +90,7 @@ class GuideSeed(BaseModel):
     rz_m: float | None = None
     radius_m: float | None = None
     label: str = ""
+    placement: Literal["full3d", "front_plane"] = "full3d"
 
     @model_validator(mode="after")
     def _label_seed_prefix(self) -> GuideSeed:
@@ -105,11 +106,11 @@ class GuideSeed(BaseModel):
 
 
 class GuidePackage(BaseModel):
-    """Versioned guide document (0015-owned schema 1.0.0)."""
+    """Versioned guide document (0015/0018; write 1.1.0, load 1.0.0|1.1.0)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["1.0.0"] = GUIDE_SCHEMA_VERSION
+    schema_version: Literal["1.0.0", "1.1.0"] = GUIDE_SCHEMA_VERSION
     honesty: str = GUIDE_HONESTY
     source_report_schema: str | None = None
     height_m: float | None = None
@@ -154,8 +155,28 @@ def _meters_from_lm(lm: LandmarkXYZ) -> tuple[float, float, float, bool]:
     )
 
 
+def _is_front_plane_only_null(lm: LandmarkXYZ) -> bool:
+    """True when only depth (y_m) is null and lateral x/z are set (class F)."""
+    return lm.x_m is not None and lm.z_m is not None and lm.y_m is None
+
+
+def _empty_null_message(key: str, lm: LandmarkXYZ) -> str:
+    """Class F vs M message for landmark empty zero-fill (R3 exact strings)."""
+    if _is_front_plane_only_null(lm):
+        return f"{key}: front-plane only (y_m null; depth unknown — not missing lateral meters)"
+    return f"{key}: missing *_m components zero-filled (need height_m on analyze for meters)"
+
+
 def _has_any_meter(lm: LandmarkXYZ) -> bool:
     return lm.x_m is not None or lm.y_m is not None or lm.z_m is not None
+
+
+def _full_xyz(lm: LandmarkXYZ) -> bool:
+    return lm.x_m is not None and lm.y_m is not None and lm.z_m is not None
+
+
+def _lateral_xz(lm: LandmarkXYZ) -> bool:
+    return lm.x_m is not None and lm.z_m is not None
 
 
 def _resolve_diameter(diameters: list[DiameterMeasure], band_id: str) -> DiameterMeasure | None:
@@ -175,16 +196,59 @@ def _radius_from_diameter(d: DiameterMeasure) -> float | None:
     return None
 
 
+def _segment_length(p0: tuple[float, float, float], p1: tuple[float, float, float]) -> float:
+    return math.sqrt((p1[0] - p0[0]) ** 2 + (p1[1] - p0[1]) ** 2 + (p1[2] - p0[2]) ** 2)
+
+
+def _resolve_radius_or_message(
+    report: ProportionReport, band_id: str, messages: list[str]
+) -> float | None:
+    """Resolve diameter/radius for a band; append skip message and return None on failure."""
+    diam = _resolve_diameter(report.diameters, band_id)
+    if diam is None:
+        messages.append(f"{band_id}: no usable radius — seed skipped")
+        return None
+    radius = _radius_from_diameter(diam)
+    if radius is None:
+        messages.append(f"{band_id}: no usable radius — seed skipped")
+        return None
+    return float(radius)
+
+
+def _front_plane_y(lm0: LandmarkXYZ, lm1: LandmarkXYZ) -> float:
+    """Y plane for front-plane capsules (R5): mean of non-null y_m, else 0.0."""
+    ys = [y for y in (lm0.y_m, lm1.y_m) if y is not None]
+    return (sum(ys) / len(ys)) if ys else 0.0
+
+
+def _first_incomplete_lateral_joint(
+    p0_id: str, lm0: LandmarkXYZ, p1_id: str, lm1: LandmarkXYZ
+) -> str:
+    """Cite first joint missing x_m or z_m (R4.5)."""
+    if not _lateral_xz(lm0):
+        return p0_id
+    return p1_id
+
+
+def _first_y_null_joint(p0_id: str, lm0: LandmarkXYZ, p1_id: str, lm1: LandmarkXYZ) -> str:
+    """Cite first of (p0, p1) with y_m is None (R4.4)."""
+    if lm0.y_m is None:
+        return p0_id
+    return p1_id
+
+
 def _build_seeds(
     report: ProportionReport,
     *,
     head_unit_m: float | None,
     messages: list[str],
+    front_plane_seeds: bool = False,
 ) -> list[GuideSeed]:
     seeds: list[GuideSeed] = []
     lms = report.landmarks_xyz
 
     for band_id, (p0_id, p1_id) in SEED_SEGMENT_MAP.items():
+        # R4.1 missing joint id
         if p0_id not in lms:
             messages.append(f"{band_id}: missing joint {p0_id} — seed skipped")
             continue
@@ -193,40 +257,77 @@ def _build_seeds(
             continue
         lm0 = lms[p0_id]
         lm1 = lms[p1_id]
-        if lm0.x_m is None or lm0.y_m is None or lm0.z_m is None:
-            messages.append(f"{band_id}: joint {p0_id} missing meters — seed skipped")
-            continue
-        if lm1.x_m is None or lm1.y_m is None or lm1.z_m is None:
-            messages.append(f"{band_id}: joint {p1_id} missing meters — seed skipped")
-            continue
-        diam = _resolve_diameter(report.diameters, band_id)
-        if diam is None:
-            messages.append(f"{band_id}: no usable radius — seed skipped")
-            continue
-        radius = _radius_from_diameter(diam)
-        if radius is None:
-            messages.append(f"{band_id}: no usable radius — seed skipped")
-            continue
-        p0 = (float(lm0.x_m), float(lm0.y_m), float(lm0.z_m))
-        p1 = (float(lm1.x_m), float(lm1.y_m), float(lm1.z_m))
-        length = math.sqrt((p1[0] - p0[0]) ** 2 + (p1[1] - p0[1]) ** 2 + (p1[2] - p0[2]) ** 2)
-        if length <= _NEAR_ZERO_LEN:
-            messages.append(f"{band_id}: zero-length segment — seed skipped")
-            continue
-        name = f"SEED_{band_id}"
-        seeds.append(
-            GuideSeed(
-                name=name,
-                kind="capsule",
-                band_id=band_id,
-                p0=p0,
-                p1=p1,
-                radius_m=float(radius),
-                label=name,
-            )
-        )
 
-    # Cross-section ellipsoids
+        # R4.2 both joints full x,y,z → full3d capsule (diameter inside path)
+        if _full_xyz(lm0) and _full_xyz(lm1):
+            radius = _resolve_radius_or_message(report, band_id, messages)
+            if radius is None:
+                continue
+            p0 = (float(lm0.x_m), float(lm0.y_m), float(lm0.z_m))  # type: ignore[arg-type]
+            p1 = (float(lm1.x_m), float(lm1.y_m), float(lm1.z_m))  # type: ignore[arg-type]
+            if _segment_length(p0, p1) <= _NEAR_ZERO_LEN:
+                messages.append(f"{band_id}: zero-length segment — seed skipped")
+                continue
+            name = f"SEED_{band_id}"
+            seeds.append(
+                GuideSeed(
+                    name=name,
+                    kind="capsule",
+                    band_id=band_id,
+                    p0=p0,
+                    p1=p1,
+                    radius_m=radius,
+                    label=name,
+                    placement="full3d",
+                )
+            )
+            continue
+
+        # R4.3 front-plane path when flag on and both have lateral x,z
+        if front_plane_seeds and _lateral_xz(lm0) and _lateral_xz(lm1):
+            radius = _resolve_radius_or_message(report, band_id, messages)
+            if radius is None:
+                continue
+            y_plane = _front_plane_y(lm0, lm1)
+            p0 = (float(lm0.x_m), y_plane, float(lm0.z_m))  # type: ignore[arg-type]
+            p1 = (float(lm1.x_m), y_plane, float(lm1.z_m))  # type: ignore[arg-type]
+            if _segment_length(p0, p1) <= _NEAR_ZERO_LEN:
+                messages.append(f"{band_id}: zero-length segment — seed skipped")
+                continue
+            name = f"SEED_{band_id}"
+            seeds.append(
+                GuideSeed(
+                    name=name,
+                    kind="capsule",
+                    band_id=band_id,
+                    p0=p0,
+                    p1=p1,
+                    radius_m=radius,
+                    label=name,
+                    placement="front_plane",
+                )
+            )
+            continue
+
+        # R4.4 both have x,z but y null on either and flag off
+        if (
+            _lateral_xz(lm0)
+            and _lateral_xz(lm1)
+            and (lm0.y_m is None or lm1.y_m is None)
+            and not front_plane_seeds
+        ):
+            first_y_null_id = _first_y_null_joint(p0_id, lm0, p1_id, lm1)
+            messages.append(
+                f"{band_id}: joint {first_y_null_id} needs y_m for full3d seed "
+                f"(use --front-plane-seeds for front-plane capsule)"
+            )
+            continue
+
+        # R4.5 missing x or z on either joint
+        incomplete_id = _first_incomplete_lateral_joint(p0_id, lm0, p1_id, lm1)
+        messages.append(f"{band_id}: joint {incomplete_id} missing meters — seed skipped")
+
+    # Cross-section ellipsoids (placement full3d — CS convention, not limb path)
     for cs in report.cross_sections:
         level_id = cs.level_id
         name = f"SEED_CS_{level_id}"
@@ -248,6 +349,7 @@ def _build_seeds(
                 ry_m=ry_m,
                 rz_m=rz_m,
                 label=name,
+                placement="full3d",
             )
         )
 
@@ -258,6 +360,8 @@ def build_guide_package(
     report: ProportionReport,
     *,
     seeds: bool = False,
+    front_plane_seeds: bool = False,
+    quiet_null_y: bool = False,
 ) -> GuidePackage:
     """Build GuidePackage from a loaded ProportionReport.
 
@@ -268,6 +372,9 @@ def build_guide_package(
     ladder: list[GuideEmpty] = []
     seed_list: list[GuideSeed] = []
 
+    if front_plane_seeds and not seeds:
+        messages.append("--front-plane-seeds ignored without --seeds")
+
     disp = display_size_m(report.height_m)
     height_m = report.height_m
     head_unit_frac = report.head_unit_frac
@@ -275,15 +382,13 @@ def build_guide_package(
     if height_m is not None and head_unit_frac is not None and head_unit_frac > 0.0:
         head_unit_m = float(height_m) * float(head_unit_frac)
 
-    # Landmarks → empties (canonical id = dict key)
+    # Landmarks → empties (canonical id = dict key); class F vs M messages (R3)
     for key, lm in report.landmarks_xyz.items():
         if not _has_any_meter(lm):
             continue
         x_m, y_m, z_m, any_null = _meters_from_lm(lm)
         if any_null:
-            messages.append(
-                f"{key}: missing *_m components zero-filled (need height_m on analyze for meters)"
-            )
+            messages.append(_empty_null_message(key, lm))
         name = f"LM_{sanitize_landmark_key(key)}"
         empties.append(
             GuideEmpty(
@@ -341,7 +446,12 @@ def build_guide_package(
         messages.append("quality.multi_figure: guides still emitted — confirm primary figure")
 
     if seeds:
-        seed_list = _build_seeds(report, head_unit_m=head_unit_m, messages=messages)
+        seed_list = _build_seeds(
+            report,
+            head_unit_m=head_unit_m,
+            messages=messages,
+            front_plane_seeds=front_plane_seeds,
+        )
 
     if not empties and not ladder and not seed_list:
         raise ProportionError(
@@ -349,10 +459,15 @@ def build_guide_package(
             code="guides_empty",
         )
 
+    if quiet_null_y:
+        messages = [m for m in messages if "front-plane only (y_m null" not in m]
+
+    seeds_front_plane = sum(1 for s in seed_list if s.placement == "front_plane")
     counts = {
         "empties": len(empties),
         "ladder": len(ladder),
         "seeds": len(seed_list),
+        "seeds_front_plane": seeds_front_plane,
     }
     return GuidePackage(
         schema_version=GUIDE_SCHEMA_VERSION,
@@ -405,17 +520,25 @@ def emit_bpy_script(package: GuidePackage) -> str:
         for e in package.ladder
     ]
     seeds_data: list[dict[str, Any]] = []
+    front_plane_comments: list[str] = []
     for s in package.seeds:
         entry: dict[str, Any] = {
             "name": s.name,
             "kind": s.kind,
             "band_id": s.band_id,
             "level_id": s.level_id,
+            "placement": s.placement,
         }
         if s.kind == "capsule":
             entry["p0"] = list(s.p0) if s.p0 is not None else None
             entry["p1"] = list(s.p1) if s.p1 is not None else None
             entry["radius_m"] = s.radius_m
+            if s.placement == "front_plane" and s.p0 is not None:
+                y_plane = float(s.p0[1])
+                front_plane_comments.append(
+                    f"# {s.name} (placement=front_plane, Y-plane={y_plane:.3f}m) "
+                    f"— front-view lateral guide only (N6)"
+                )
         else:
             entry["center"] = list(s.center) if s.center is not None else None
             entry["rx_m"] = s.rx_m
@@ -429,9 +552,10 @@ def emit_bpy_script(package: GuidePackage) -> str:
         "# N6 / Difficulty §12: guides and seeds are authoring aids only —",
         "# not mesh reconstruction, not print-ready, not hero sculpt success.",
         f"# axis_notes: {AXIS_NOTES}",
-        "# guide schema_version: 1.0.0",
+        f"# guide schema_version: {GUIDE_SCHEMA_VERSION}",
         "# MeshOps face -Y: toes -Y, heels +Y. Do not place foot centers at +Y only.",
         "# SEED only — not final mesh",
+        *front_plane_comments,
         "",
         "import math",
         "import bpy",
@@ -709,11 +833,18 @@ def run_guides(
     *,
     format: GuideFormat = "both",
     seeds: bool = False,
+    front_plane_seeds: bool = False,
+    quiet_null_y: bool = False,
     force: bool = False,
 ) -> dict[str, Any]:
     """CLI helper: load report → build → write; return success payload."""
     report = load_report(report_path)
-    package = build_guide_package(report, seeds=seeds)
+    package = build_guide_package(
+        report,
+        seeds=seeds,
+        front_plane_seeds=front_plane_seeds,
+        quiet_null_y=quiet_null_y,
+    )
     paths = write_guides(out, package, format=format, force=force)
     return {
         "ok": True,
