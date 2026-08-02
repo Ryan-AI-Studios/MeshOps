@@ -168,8 +168,30 @@ def test_depth__height_null_fracs_only(tmp_path: Path) -> None:
     assert any("height_m unset" in m for m in pkg.messages)
     for s in pkg.samples:
         assert s.y_m is None
+        assert s.depth_m is None  # R3.1: meters null when height_m unset
         if s.role.startswith("band_"):
             assert s.y_frac is not None
+
+    # Explicit band.depth_m set while report height_m is null → still null meters
+    sticky = _synthetic_report(
+        height_m=None,
+        depth_bands=[
+            DepthBand(
+                band_id="chest",
+                depth_px=30.0,
+                depth_frac=0.15,
+                depth_m=0.25,  # stale meters without stature
+                y_front=0.08,
+                y_back=-0.07,
+                y_mid=0.005,
+                z_frac=0.72,
+            )
+        ],
+    )
+    sticky_pkg = extract_depth_samples(sticky)
+    span = next(s for s in sticky_pkg.samples if s.role == "band_span")
+    assert span.depth_m is None
+    assert span.depth_frac == pytest.approx(0.15)
 
     report_path = _write_report(tmp_path / "report.json", report)
     # box mesh; height null → empty deltas not error
@@ -375,6 +397,41 @@ def test_depth__out_non_json_file(tmp_path: Path) -> None:
         run_depth_samples(report_path, bad_out)
     assert ei.value.code == "depth_failed"
     assert "must end with .json" in str(ei.value)
+
+
+def test_depth__out_trailing_sep_creates_dir(tmp_path: Path) -> None:
+    """R1: non-existent path ending with separator is a directory (Path strips sep)."""
+    report = _synthetic_report(
+        height_m=1.7,
+        landmarks_xyz={
+            "chest_front": _lm("chest_front", y=0.1, y_m=0.17),
+        },
+    )
+    report_path = _write_report(tmp_path / "report.json", report)
+    # Non-existent dir; trailing sep must survive as dir intent
+    out_raw = str(tmp_path / "new_depth_dir") + "\\"
+    payload = run_depth_samples(report_path, out_raw)
+    assert payload["ok"] is True
+    samples_file = tmp_path / "new_depth_dir" / SAMPLES_BASENAME
+    assert samples_file.is_file()
+
+    # CLI path: --out as string with trailing sep
+    out2 = str(tmp_path / "cli_depth_dir") + "\\"
+    result = runner.invoke(
+        app,
+        [
+            "proportion",
+            "depth-samples",
+            "--report",
+            str(report_path),
+            "--out",
+            out2,
+            "--force",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "cli_depth_dir" / SAMPLES_BASENAME).is_file()
 
 
 def test_depth__cli_json_shape(tmp_path: Path) -> None:

@@ -884,9 +884,17 @@ def mesh_proportion_depth_samples(
     """Export depth_at_landmarks (+ optional mesh deltas). Authoring only — DEPTH_HONESTY / N6."""
     from meshops.proportion.depth_samples import run_depth_samples
 
+    # Preserve trailing directory separator intent (R1); Path resolve strips it.
+    ends_sep = out.endswith(("/", "\\"))
+    out_base = out.rstrip("/\\") if ends_sep else out
+    out_resolved = _resolve_tool_path(out_base, work_root)
+    out_arg: str | Path = (
+        str(out_resolved) + ("\\" if ends_sep else "") if ends_sep else out_resolved
+    )
+
     return run_depth_samples(
         _resolve_tool_path(report, work_root),
-        _resolve_tool_path(out, work_root),
+        out_arg,
         mesh=_resolve_tool_path(mesh, work_root) if mesh else None,
         force=force,
     )

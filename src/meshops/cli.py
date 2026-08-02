@@ -2119,10 +2119,11 @@ def proportion_depth_samples_cmd(
         "--report",
         help="Path to proportion_report.json",
     ),
-    out: Path = typer.Option(
+    out: str = typer.Option(
         ...,
         "--out",
-        help="Output file (.json) or directory for depth_at_landmarks.json",
+        help="Output file (.json) or directory for depth_at_landmarks.json "
+        "(trailing sep marks a directory even if not yet created)",
     ),
     mesh: Path | None = typer.Option(
         None,
@@ -2145,6 +2146,7 @@ def proportion_depth_samples_cmd(
     from meshops.proportion.honesty import DEPTH_HONESTY
 
     try:
+        # Keep --out as str so trailing directory separators survive (R1).
         payload = run_depth_samples(
             report,
             out,

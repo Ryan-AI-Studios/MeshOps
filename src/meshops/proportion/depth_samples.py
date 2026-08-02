@@ -198,12 +198,14 @@ def extract_depth_samples(report: ProportionReport) -> DepthSamplesPackage:
                 band_id=bid,
             )
         )
+        # R3.1: when height_m is null, all meter fields null (do not copy band.depth_m).
+        span_depth_m = band.depth_m if height_m is not None else None
         samples.append(
             DepthSample(
                 id=f"band_{bid}_span",
                 role="band_span",
                 y_m=y_mid_m,
-                depth_m=band.depth_m,
+                depth_m=span_depth_m,
                 depth_frac=band.depth_frac,
                 y_frac=band.y_mid,
                 z_frac=z_frac,
@@ -548,36 +550,39 @@ def compute_mesh_deltas(
 
 
 def _resolve_out_paths(
-    out: Path,
+    out: Path | str,
     *,
     with_mesh: bool,
 ) -> tuple[Path, Path | None]:
     """Resolve samples path and optional deltas path from --out (R1).
 
+    Accepts str so trailing directory separators survive (Path normalizes them away).
     Returns (samples_path, deltas_path|None).
     """
-    s = str(out)
-    ends_sep = s.endswith(("/", "\\"))
-    if (out.exists() and out.is_dir()) or ends_sep:
+    raw = str(out)
+    ends_sep = raw.endswith(("/", "\\"))
+    # Strip trailing seps only for Path construction; keep dir intent via ends_sep.
+    path = Path(raw.rstrip("/\\") if ends_sep else raw)
+    if (path.exists() and path.is_dir()) or ends_sep:
         is_dir = True
-    elif out.suffix.lower() == ".json":
+    elif path.suffix.lower() == ".json":
         is_dir = False
     else:
         # file not ending .json and not a directory → depth_failed
         raise ProportionError(
             "--out file must end with .json or be a directory",
             code="depth_failed",
-            details={"out": str(out)},
+            details={"out": raw},
         )
 
     if is_dir:
-        samples_path = out / SAMPLES_BASENAME
-        deltas_path = (out / DELTAS_BASENAME) if with_mesh else None
+        samples_path = path / SAMPLES_BASENAME
+        deltas_path = (path / DELTAS_BASENAME) if with_mesh else None
         return samples_path, deltas_path
 
     # file .json
-    samples_path = out
-    deltas_path = (out.parent / DELTAS_BASENAME) if with_mesh else None
+    samples_path = path
+    deltas_path = (path.parent / DELTAS_BASENAME) if with_mesh else None
     return samples_path, deltas_path
 
 
@@ -611,7 +616,7 @@ def _write_json(path: Path, payload: dict[str, Any], *, force: bool) -> None:
 
 def run_depth_samples(
     report: Path | ProportionReport,
-    out: Path,
+    out: Path | str,
     *,
     mesh: Path | None = None,
     force: bool = False,
@@ -620,12 +625,14 @@ def run_depth_samples(
 
     Returns the CLI/MCP success payload shape. Raises ProportionError.
     Does not call CLI emit helpers.
+
+    *out* may be a str so trailing directory separators (R1) are preserved;
+    ``pathlib.Path`` normalizes them away before the engine can detect them.
     """
     rep = report if isinstance(report, ProportionReport) else load_report(report)
 
     package = extract_depth_samples(rep)
-    out_path = Path(out)
-    samples_path, deltas_path = _resolve_out_paths(out_path, with_mesh=mesh is not None)
+    samples_path, deltas_path = _resolve_out_paths(out, with_mesh=mesh is not None)
 
     paths: list[str] = []
     messages = list(package.messages)
