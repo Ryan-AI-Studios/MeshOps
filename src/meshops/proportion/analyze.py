@@ -98,6 +98,72 @@ def analyze_proportion(
             "multi_figure signal → needs_user_input (Difficulty §1; never auto-pick primary)"
         )
 
+    # --- Package checklist defaults (0014 R1/R7): after assist pose known, before checks ---
+    effective_height_m = height_m
+    leaf_cl = None
+    parent_cl = None
+    try:
+        from meshops.proportion.checklist import (
+            field_from_pair,
+            load_package_checklist,
+            resolve_checklist_pair,
+        )
+
+        leaf_path, parent_path = resolve_checklist_pair(root)
+        if leaf_path is not None:
+            try:
+                leaf_cl = load_package_checklist(leaf_path)
+            except ProportionError as exc:
+                messages.append(f"package checklist soft-warn (leaf): {leaf_path}: {exc}")
+                leaf_cl = None
+        if parent_path is not None:
+            try:
+                parent_cl = load_package_checklist(parent_path)
+            except ProportionError as exc:
+                messages.append(f"package checklist soft-warn (parent): {parent_path}: {exc}")
+                parent_cl = None
+
+        # height_m: CLI > leaf non-null > parent non-null > None (R1)
+        if height_m is None:
+            picked = field_from_pair("height_m", leaf_cl, parent_cl)
+            if picked is not None:
+                effective_height_m = float(picked)
+                src = (
+                    str(leaf_path)
+                    if leaf_cl is not None and leaf_cl.height_m is not None
+                    else str(parent_path)
+                )
+                messages.append(
+                    f"height_m={effective_height_m} from package_checklist.json ({src})"
+                )
+
+        # Pose injection only when assist pose still unknown (R7)
+        if pose == "unknown":
+            cl_pose = field_from_pair("pose", leaf_cl, parent_cl)
+            if cl_pose is not None and cl_pose != "unknown":
+                pose = str(cl_pose)
+                messages.append("pose from package_checklist.json")
+
+        # Multi-figure union from checklist (Difficulty §1)
+        multi_from_cl = False
+        for cl in (leaf_cl, parent_cl):
+            if cl is None:
+                continue
+            if cl.multi_figure or len(cl.in_scope_figures) >= 2:
+                multi_from_cl = True
+                break
+        if multi_from_cl:
+            quality.multi_figure = True
+            quality.needs_user_input = True
+            if not multi:
+                messages.append(
+                    "multi_figure from package_checklist → needs_user_input "
+                    "(Difficulty §1; never auto-pick primary)"
+                )
+            multi = True
+    except Exception as exc:  # pragma: no cover — defensive soft path
+        messages.append(f"package checklist soft-warn: {exc}")
+
     required = ("front", "left", "three_quarter")
     missing_req = [k for k in required if k not in views]
     if missing_req:
@@ -121,13 +187,13 @@ def analyze_proportion(
             quality.hair_volume_margin = True
 
     # Diameters first so edge landmarks inject into views before XYZ fuse
-    diameters, diam_msgs = compute_diameters(edge_pairs, views, height_m=height_m)
+    diameters, diam_msgs = compute_diameters(edge_pairs, views, height_m=effective_height_m)
     messages.extend(diam_msgs)
 
     # Fuse XYZ (includes injected edge landmarks)
     landmarks_xyz, fuse_quality, fuse_msgs = fuse_xyz(
         views,
-        height_m=height_m,
+        height_m=effective_height_m,
         foreshortening_risk=foreshorten,
     )
     messages.extend(fuse_msgs)
@@ -141,7 +207,7 @@ def analyze_proportion(
     # Depth bands + orientation info checks
     depth_bands, depth_checks, depth_msgs = build_depth_bands(
         views,
-        height_m=height_m,
+        height_m=effective_height_m,
         foreshortening_risk=foreshorten,
     )
     messages.extend(depth_msgs)
@@ -164,7 +230,7 @@ def analyze_proportion(
         honesty=PROPORTION_HONESTY,
         package_score=score,
         pose=pose,
-        height_m=height_m,
+        height_m=effective_height_m,
         head_unit_frac=head_unit,
         figure_height_frac=1.0 if not quality.incomplete_stature and front else None,
         vertical_span_discrepancy=disc,
