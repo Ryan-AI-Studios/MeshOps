@@ -87,13 +87,15 @@ proportion_app = typer.Typer(
     name="proportion",
     help=(
         "Pixel proportion analysis from multi-view RGB (tracks 0012-0017). "
-        "Verbs: template | analyze | show | scaffold | guides | capture | depth-samples. "
+        "Verbs: template | analyze | show | scaffold | guides | capture | depth-samples | "
+        "blockout-recipe. "
         "Assist-first landmarks + head-unit checks + blockout-grade XYZ; "
         "schema 1.1.0 diameters (edge pairs) + left depth bands + cross-sections; "
         "scaffold creates package layout + package_checklist.json only (not mesh/print success); "
         "guides emits proportion_guides.json + Blender 5.2 setup script (authoring aids only); "
         "capture fills landmarks_assist.json from px/dump/reproject (authoring only — N6); "
-        "depth-samples exports depth_at_landmarks.json + optional mesh ray deltas (N6). "
+        "depth-samples exports depth_at_landmarks.json + optional mesh ray deltas (N6); "
+        "blockout-recipe emits trap/neck/bridge RECIPE primitives (authoring only — N6). "
         "Optional: meshops[proportion] (Pillow)."
     ),
     add_completion=False,
@@ -2189,6 +2191,87 @@ def proportion_depth_samples_cmd(
             typer.echo(f"  note: {msg}")
         typer.echo(f"honesty: {DEPTH_HONESTY}")
         typer.echo("depth samples only — not mesh or print success")
+    raise typer.Exit(0)
+
+
+@proportion_app.command("blockout-recipe")
+def proportion_blockout_recipe_cmd(
+    report: Path = typer.Option(
+        ...,
+        "--report",
+        help="Path to proportion_report.json",
+    ),
+    out: str = typer.Option(
+        ...,
+        "--out",
+        help="Output file (.py/.json) or directory (default basenames; "
+        "trailing sep marks a directory even if not yet created)",
+    ),
+    format: str = typer.Option(
+        "both",
+        "--format",
+        help="Output format: bpy | json | both (default both)",
+    ),
+    depth_at_landmarks: Path | None = typer.Option(
+        None,
+        "--depth-at-landmarks",
+        help="Optional depth_at_landmarks.json (0017) for oval/trap depth prefer",
+    ),
+    limbs: bool = typer.Option(
+        True,
+        "--limbs/--no-limbs",
+        help="Emit SEED_SEGMENT_MAP limb capsules (default on)",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite existing recipe output files",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
+) -> None:
+    """Emit RECIPE_* blockout primitives from report (recipe only — not mesh/print)."""
+    from meshops.proportion.blockout_recipe import run_blockout_recipe
+    from meshops.proportion.errors import ProportionError
+    from meshops.proportion.honesty import RECIPE_HONESTY
+
+    fmt = format.strip().lower()
+    if fmt not in ("bpy", "json", "both"):
+        raise typer.BadParameter("--format must be bpy, json, or both")
+
+    try:
+        # Keep --out as str so trailing directory separators survive (R1).
+        payload = run_blockout_recipe(
+            report,
+            out,
+            format=fmt,  # type: ignore[arg-type]
+            depth_at_landmarks=depth_at_landmarks,
+            limbs=limbs,
+            force=force,
+        )
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    if json_out:
+        _emit_json(payload)
+    else:
+        counts = payload.get("counts") or {}
+        by_role = counts.get("by_role") or {}
+        neck = payload.get("neck_len_m")
+        neck_s = "null" if neck is None else f"{neck:.4f}"
+        typer.echo(
+            f"blockout-recipe format={payload.get('format')} "
+            f"parts={counts.get('parts', 0)} "
+            f"by_role={by_role} "
+            f"neck_len_m={neck_s}"
+        )
+        for p in payload.get("paths") or []:
+            typer.echo(f"  {p}")
+        for msg in payload.get("messages") or []:
+            typer.echo(f"  note: {msg}")
+        typer.echo(f"honesty: {RECIPE_HONESTY}")
+        typer.echo("blockout-recipe only — not mesh or print success")
     raise typer.Exit(0)
 
 

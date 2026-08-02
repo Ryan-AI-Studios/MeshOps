@@ -902,3 +902,38 @@ def mesh_proportion_depth_samples(
         mesh=_resolve_tool_path(mesh, work_root) if mesh else None,
         force=force,
     )
+
+
+def mesh_proportion_blockout_recipe(
+    work_root: Path,
+    *,
+    report: str,
+    out: str,
+    format: str = "both",
+    depth_at_landmarks: str | None = None,
+    limbs: bool = True,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Emit RECIPE_* blockout primitives. Authoring only — RECIPE_HONESTY / N6."""
+    from meshops.proportion.blockout_recipe import run_blockout_recipe
+
+    fmt = (format or "both").strip().lower()
+    if fmt not in ("bpy", "json", "both"):
+        raise ValueError("--format must be bpy, json, or both")
+    # Preserve trailing directory separator intent (R1); Path resolve strips it.
+    ends_sep = out.endswith(("/", "\\"))
+    out_base = out.rstrip("/\\") if ends_sep else out
+    out_resolved = _resolve_tool_path(out_base, work_root)
+    out_arg: str | Path = (
+        str(out_resolved) + ("\\" if ends_sep else "") if ends_sep else out_resolved
+    )
+    return run_blockout_recipe(
+        _resolve_tool_path(report, work_root),
+        out_arg,
+        format=fmt,  # type: ignore[arg-type]
+        depth_at_landmarks=(
+            _resolve_tool_path(depth_at_landmarks, work_root) if depth_at_landmarks else None
+        ),
+        limbs=limbs,
+        force=force,
+    )

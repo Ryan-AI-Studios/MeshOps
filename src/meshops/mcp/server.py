@@ -57,6 +57,7 @@ TOOL_NAMES: frozenset[str] = frozenset(
         "mesh_proportion_guides",
         "mesh_proportion_capture",
         "mesh_proportion_depth_samples",
+        "mesh_proportion_blockout_recipe",
     }
 )
 
@@ -586,6 +587,30 @@ def build_server(work_root: Path | None = None) -> Any:
             report=report,
             out=out,
             mesh=mesh,
+            force=force,
+        )
+
+    @mcp.tool()
+    def mesh_proportion_blockout_recipe(
+        report: str,
+        out: str,
+        format: str = "both",
+        depth_at_landmarks: str | None = None,
+        limbs: bool = True,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Emit RECIPE_* blockout primitives (trap/neck/bridges) from a report.
+
+        Authoring layout only — proportion_blockout_recipe_not_mesh_or_print_success (N6).
+        Raises ProportionError on failure (never ok:false success).
+        """
+        return T.mesh_proportion_blockout_recipe(
+            wr,
+            report=report,
+            out=out,
+            format=format,
+            depth_at_landmarks=depth_at_landmarks,
+            limbs=limbs,
             force=force,
         )
 

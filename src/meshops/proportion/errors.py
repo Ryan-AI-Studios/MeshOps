@@ -23,6 +23,8 @@ ProportionErrorCode = Literal[
     "depth_empty",
     "depth_failed",
     "mesh_load_failed",
+    "recipe_empty",
+    "recipe_failed",
     "unknown",
 ]
 
