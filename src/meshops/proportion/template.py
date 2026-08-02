@@ -8,11 +8,13 @@ from typing import Any
 
 from meshops.proportion.models import CANONICAL_VIEW_KEYS, PROPORTION_SCHEMA_VERSION
 
-# Vertical ladder + key horizontals / limbs / depths (nulls for fill-in).
+# Vertical ladder + horizontals / limbs / diameters (nulls for fill-in).
+# Aligns with spec section 3.1 B / assist.KNOWN_LANDMARK_IDS primary vocabulary.
 _FRONT_LANDMARK_KEYS: tuple[str, ...] = (
     "hair_crown",
     "cranial_vertex",
     "chin",
+    "shoulder",
     "shoulder_l",
     "shoulder_r",
     "nipple_bust",
@@ -22,19 +24,39 @@ _FRONT_LANDMARK_KEYS: tuple[str, ...] = (
     "crotch_pubic",
     "greater_trochanter",
     "knee",
+    "knee_l",
+    "knee_r",
     "ankle",
+    "ankle_l",
+    "ankle_r",
     "sole",
+    "heel",
+    "heel_l",
+    "heel_r",
+    "midline",
     "midline_x",
+    "bust_l",
+    "bust_r",
+    "waist_l",
+    "waist_r",
     "hip_l",
     "hip_r",
+    "stance_l",
+    "stance_r",
     "elbow_l",
     "elbow_r",
     "wrist_l",
     "wrist_r",
     "fingertip_l",
     "fingertip_r",
-    "stance_l",
-    "stance_r",
+    "upper_arm_l",
+    "upper_arm_r",
+    "forearm_l",
+    "forearm_r",
+    "thigh_l",
+    "thigh_r",
+    "calf_l",
+    "calf_r",
 )
 
 _LEFT_LANDMARK_KEYS: tuple[str, ...] = (

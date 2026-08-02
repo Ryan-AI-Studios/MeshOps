@@ -232,7 +232,7 @@ def test_schema_round_trip() -> None:
 
 
 def test_png_ihdr_robust_not_fixed_offset() -> None:
-    """IHDR found by chunk scan even if a tEXt chunk precedes IHDR."""
+    """IHDR found by chunk walk even when a dummy chunk precedes IHDR (not offset 16)."""
     rows = bytearray()
     for _y in range(2):
         rows.append(0)
@@ -247,18 +247,19 @@ def test_png_ihdr_robust_not_fixed_offset() -> None:
             + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
         )
 
-    # Insert a tEXt chunk BEFORE IHDR to prove we do not assume offset 16
+    # Non-standard stream: dummy chunk before IHDR so width/height are NOT at byte 16.
+    # (Valid PNGs put IHDR first; this unit-tests the scanner only.)
     text = b"Comment\x00hello"
     ihdr = struct.pack(">IIBBBBB", 3, 2, 8, 2, 0, 0, 0)
-    # Valid PNG must have IHDR first per spec — our scanner still walks chunks.
-    # Put IHDR first (valid), but scanner doesn't hardcode offset 16 for width.
     png = (
         b"\x89PNG\r\n\x1a\n"
-        + chunk(b"IHDR", ihdr)
         + chunk(b"tEXt", text)
+        + chunk(b"IHDR", ihdr)
         + chunk(b"IDAT", compressed)
         + chunk(b"IEND", b"")
     )
+    # Prove IHDR fields are not at the classic fixed offset 16.
+    assert png[16:20] != b"IHDR"
     w, h = png_size_from_bytes(png)
     assert (w, h) == (3, 2)
 
@@ -465,6 +466,57 @@ def test_fuse_signs_x_camera_right(tmp_path: Path) -> None:
     assert sr.x is not None and sl.x is not None
     assert sr.x > 0
     assert sl.x < 0
+
+
+def test_depth_sign_inverts_for_camera_right(tmp_path: Path) -> None:
+    """R5: facing_direction=camera_right inverts +Y vs camera_left."""
+    from copy import deepcopy
+
+    base = eight_head_assist()
+    left_base = make_package(tmp_path / "left_facing", assist=base)
+    r_left = analyze_proportion(left_base, run_heuristic_frame=False)
+    y_left = r_left.landmarks_xyz["chest_front"].y
+    assert y_left is not None
+
+    right_assist = deepcopy(base)
+    right_assist["views"]["left"]["facing_direction"] = "camera_right"
+    right_base = make_package(tmp_path / "right_facing", assist=right_assist)
+    r_right = analyze_proportion(right_base, run_heuristic_frame=False)
+    y_right = r_right.landmarks_xyz["chest_front"].y
+    assert y_right is not None
+    assert y_left == pytest.approx(-y_right, abs=1e-9)
+    assert y_left != 0.0
+
+
+def test_cross_resolution_fracs_stable(tmp_path: Path) -> None:
+    """Same figure fracs / HU when front and left differ in pixel size (R1)."""
+    # Front 512x560 (default), left 256x280 (half scale) with scaled assist px.
+    assist = eight_head_assist()
+    # Scale left landmarks to half resolution
+    left_lm = assist["views"]["left"]["landmarks"]
+    scaled_left: dict[str, Any] = {}
+    for k, v in left_lm.items():
+        if isinstance(v, list) and len(v) == 2:
+            scaled_left[k] = [v[0] * 0.5, v[1] * 0.5]
+        else:
+            scaled_left[k] = v
+    assist["views"]["left"]["landmarks"] = scaled_left
+
+    d = tmp_path / "pkg"
+    d.mkdir()
+    for key in ("front", "three_quarter"):
+        write_solid_png(d / f"{key}.png", W, H, color=(200, 180, 160))
+    write_solid_png(d / "left.png", W // 2, H // 2, color=(200, 180, 160))
+    (d / "landmarks_assist.json").write_text(json.dumps(assist, indent=2), encoding="utf-8")
+
+    report = analyze_proportion(d, run_heuristic_frame=False)
+    assert report.head_unit_frac == pytest.approx(60 / 480, abs=1e-6)
+    assert report.landmarks_xyz["sole"].z == pytest.approx(0.0)
+    assert report.landmarks_xyz["cranial_vertex"].z == pytest.approx(1.0, abs=1e-6)
+    assert report.package_score == pytest.approx(100.0, abs=0.1)
+    # Left view recorded at half size
+    assert report.views["left"].width_px == W // 2
+    assert report.views["left"].height_px == H // 2
 
 
 def test_overlay_with_pillow(tmp_path: Path) -> None:
