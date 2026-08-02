@@ -728,7 +728,6 @@ def mesh_proportion_analyze(
     """Analyze multi-view package → proportion_report. Measurement only (N6)."""
     from meshops.proportion.analyze import analyze_proportion
     from meshops.proportion.capture import attach_report_to_organic_session
-
     from meshops.proportion.errors import ProportionError
 
     views = _resolve_tool_path(views_dir, work_root)
