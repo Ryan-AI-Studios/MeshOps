@@ -86,13 +86,14 @@ app.add_typer(bench_app, name="bench")
 proportion_app = typer.Typer(
     name="proportion",
     help=(
-        "Pixel proportion analysis from multi-view RGB (tracks 0012-0016). "
-        "Verbs: template | analyze | show | scaffold | guides | capture. "
+        "Pixel proportion analysis from multi-view RGB (tracks 0012-0017). "
+        "Verbs: template | analyze | show | scaffold | guides | capture | depth-samples. "
         "Assist-first landmarks + head-unit checks + blockout-grade XYZ; "
         "schema 1.1.0 diameters (edge pairs) + left depth bands + cross-sections; "
         "scaffold creates package layout + package_checklist.json only (not mesh/print success); "
         "guides emits proportion_guides.json + Blender 5.2 setup script (authoring aids only); "
-        "capture fills landmarks_assist.json from px/dump/reproject (authoring only — N6). "
+        "capture fills landmarks_assist.json from px/dump/reproject (authoring only — N6); "
+        "depth-samples exports depth_at_landmarks.json + optional mesh ray deltas (N6). "
         "Optional: meshops[proportion] (Pillow)."
     ),
     add_completion=False,
@@ -2108,6 +2109,70 @@ def proportion_capture_cmd(
                 typer.echo(f"  note: {msg}")
         typer.echo(f"honesty: {CAPTURE_HONESTY}")
         typer.echo("capture only — not mesh or print success")
+    raise typer.Exit(0)
+
+
+@proportion_app.command("depth-samples")
+def proportion_depth_samples_cmd(
+    report: Path = typer.Option(
+        ...,
+        "--report",
+        help="Path to proportion_report.json",
+    ),
+    out: str = typer.Option(
+        ...,
+        "--out",
+        help="Output file (.json) or directory for depth_at_landmarks.json "
+        "(trailing sep marks a directory even if not yet created)",
+    ),
+    mesh: Path | None = typer.Option(
+        None,
+        "--mesh",
+        help="Optional blockout mesh (STL/PLY/OBJ) for Y-axis ray deltas",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite existing depth sample / delta outputs",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
+) -> None:
+    """Export sparse depth samples (+ optional mesh deltas) from a proportion report.
+
+    Authoring measurement aid only — not mesh or print success (N6 / DEPTH_HONESTY).
+    """
+    from meshops.proportion.depth_samples import run_depth_samples
+    from meshops.proportion.errors import ProportionError
+    from meshops.proportion.honesty import DEPTH_HONESTY
+
+    try:
+        # Keep --out as str so trailing directory separators survive (R1).
+        payload = run_depth_samples(
+            report,
+            out,
+            mesh=mesh,
+            force=force,
+        )
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    if json_out:
+        _emit_json(payload)
+    else:
+        counts = payload.get("counts") or {}
+        typer.echo(
+            f"depth-samples samples={counts.get('samples', 0)} "
+            f"deltas={counts.get('deltas', 0)} "
+            f"skipped_mesh={counts.get('skipped_mesh', 0)}"
+        )
+        for p in payload.get("paths") or []:
+            typer.echo(f"  {p}")
+        for msg in payload.get("messages") or []:
+            typer.echo(f"  note: {msg}")
+        typer.echo(f"honesty: {DEPTH_HONESTY}")
+        typer.echo("depth samples only — not mesh or print success")
     raise typer.Exit(0)
 
 

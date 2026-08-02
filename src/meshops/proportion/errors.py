@@ -20,6 +20,9 @@ ProportionErrorCode = Literal[
     "guides_failed",
     "capture_empty",
     "capture_failed",
+    "depth_empty",
+    "depth_failed",
+    "mesh_load_failed",
     "unknown",
 ]
 

@@ -56,6 +56,7 @@ TOOL_NAMES: frozenset[str] = frozenset(
         "mesh_proportion_scaffold",
         "mesh_proportion_guides",
         "mesh_proportion_capture",
+        "mesh_proportion_depth_samples",
     }
 )
 
@@ -560,6 +561,26 @@ def build_server(work_root: Path | None = None) -> Any:
             force=force,
             emit_dump_script=emit_dump_script,
             attach_session=attach_session,
+        )
+
+    @mcp.tool()
+    def mesh_proportion_depth_samples(
+        report: str,
+        out: str,
+        mesh: str | None = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Export sparse depth samples (+ optional mesh Y-ray deltas) from a report.
+
+        Authoring measurement aid only — proportion_depth_samples_not_mesh_or_print_success (N6).
+        Raises ProportionError on failure (never ok:false success).
+        """
+        return T.mesh_proportion_depth_samples(
+            wr,
+            report=report,
+            out=out,
+            mesh=mesh,
+            force=force,
         )
 
     return mcp
