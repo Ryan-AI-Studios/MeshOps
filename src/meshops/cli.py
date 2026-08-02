@@ -86,16 +86,18 @@ app.add_typer(bench_app, name="bench")
 proportion_app = typer.Typer(
     name="proportion",
     help=(
-        "Pixel proportion analysis from multi-view RGB (tracks 0012-0017). "
+        "Pixel proportion analysis from multi-view RGB (tracks 0012-0020). "
         "Verbs: template | analyze | show | scaffold | guides | capture | depth-samples | "
-        "blockout-recipe. "
+        "blockout-recipe | depth-heatmap | depth-hint. "
         "Assist-first landmarks + head-unit checks + blockout-grade XYZ; "
         "schema 1.1.0 diameters (edge pairs) + left depth bands + cross-sections; "
         "scaffold creates package layout + package_checklist.json only (not mesh/print success); "
         "guides emits proportion_guides.json + Blender 5.2 setup script (authoring aids only); "
         "capture fills landmarks_assist.json from px/dump/reproject (authoring only — N6); "
         "depth-samples exports depth_at_landmarks.json + optional mesh ray deltas (N6); "
-        "blockout-recipe emits trap/neck/bridge RECIPE primitives (authoring only — N6). "
+        "blockout-recipe emits trap/neck/bridge RECIPE primitives (authoring only — N6); "
+        "depth-heatmap glance PNG from samples/deltas (numbers SoT — N6); "
+        "depth-hint external depth-channel assist hints + optional merge-into (conf floor — N6). "
         "Optional: meshops[proportion] (Pillow)."
     ),
     add_completion=False,
@@ -2272,6 +2274,170 @@ def proportion_blockout_recipe_cmd(
             typer.echo(f"  note: {msg}")
         typer.echo(f"honesty: {RECIPE_HONESTY}")
         typer.echo("blockout-recipe only — not mesh or print success")
+    raise typer.Exit(0)
+
+
+@proportion_app.command("depth-heatmap")
+def proportion_depth_heatmap_cmd(
+    samples: Path = typer.Option(
+        ...,
+        "--samples",
+        help="Path to depth_at_landmarks.json (0017)",
+    ),
+    out: str = typer.Option(
+        ...,
+        "--out",
+        help="Output .png / .json file or directory for depth_heatmap.* "
+        "(trailing sep marks a directory even if not yet created)",
+    ),
+    deltas: Path | None = typer.Option(
+        None,
+        "--deltas",
+        help="Optional depth_mesh_deltas.json for dual-panel deltas",
+    ),
+    underlay: Path | None = typer.Option(
+        None,
+        "--underlay",
+        help="Optional left/front RGB underlay for marker overlay",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite existing heatmap PNG / meta",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
+) -> None:
+    """Glance depth/delta heatmap PNG + meta from sparse samples.
+
+    Authoring visualization only — numbers remain source of truth (N6 / HEATMAP_HONESTY).
+    """
+    from meshops.proportion.depth_heatmap import run_depth_heatmap
+    from meshops.proportion.errors import ProportionError
+    from meshops.proportion.honesty import HEATMAP_HONESTY
+
+    try:
+        # Keep --out as str so trailing directory separators survive (R1).
+        payload = run_depth_heatmap(
+            samples,
+            out,
+            deltas=deltas,
+            underlay=underlay,
+            force=force,
+        )
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    if json_out:
+        _emit_json(payload)
+    else:
+        counts = payload.get("counts") or {}
+        typer.echo(
+            f"depth-heatmap samples_plotted={counts.get('samples_plotted', 0)} "
+            f"deltas_plotted={counts.get('deltas_plotted', 0)}"
+        )
+        for p in payload.get("paths") or []:
+            typer.echo(f"  {p}")
+        for msg in payload.get("messages") or []:
+            typer.echo(f"  note: {msg}")
+        typer.echo(f"honesty: {HEATMAP_HONESTY}")
+        typer.echo("depth-heatmap glance only — not mesh or print success")
+    raise typer.Exit(0)
+
+
+@proportion_app.command("depth-hint")
+def proportion_depth_hint_cmd(
+    depth_map: Path | None = typer.Option(
+        None,
+        "--depth-map",
+        help="Grayscale disparity-style depth PNG (required for backend=external)",
+    ),
+    left: Path | None = typer.Option(
+        None,
+        "--left",
+        help="Left view PNG for size + optional alpha mask (required for backend=external)",
+    ),
+    out: str = typer.Option(
+        ...,
+        "--out",
+        help="Side landmarks_assist.hint.json path or directory "
+        "(trailing sep marks a directory even if not yet created)",
+    ),
+    assist: Path | None = typer.Option(
+        None,
+        "--assist",
+        help="Optional existing assist (read for conf floor when merging)",
+    ),
+    report: Path | None = typer.Option(
+        None,
+        "--report",
+        help="Optional proportion_report.json for depth_band z_frac anchors",
+    ),
+    backend: str = typer.Option(
+        "external",
+        "--backend",
+        help="external (default) | monocular (refused — no torch/onnx pin)",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite out / merge-into files only (not protected conf)",
+    ),
+    force_hint: bool = typer.Option(
+        False,
+        "--force-hint",
+        help="Allow replacing assist points with conf >= 0.99",
+    ),
+    merge_into: Path | None = typer.Option(
+        None,
+        "--merge-into",
+        help="Write/update canonical landmarks_assist.json (views.left.landmarks)",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
+) -> None:
+    """Suggest left depth-pair assist points from an external depth channel.
+
+    Side .hint.json is not auto-loaded by analyze. Use --merge-into for canonical
+    assist. Authoring only — not mesh or print success (N6 / HINT_HONESTY).
+    """
+    from meshops.proportion.depth_hint import run_depth_hint
+    from meshops.proportion.errors import ProportionError
+    from meshops.proportion.honesty import HINT_HONESTY
+
+    try:
+        # Keep --out as str so trailing directory separators survive (R1).
+        payload = run_depth_hint(
+            depth_map,
+            left,
+            out,
+            assist=assist,
+            report=report,
+            backend=backend,
+            force=force,
+            force_hint=force_hint,
+            merge_into=merge_into,
+        )
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    if json_out:
+        _emit_json(payload)
+    else:
+        counts = payload.get("counts") or {}
+        typer.echo(
+            f"depth-hint hints={counts.get('hints', 0)} "
+            f"pairs={counts.get('pairs', 0)} "
+            f"protected_skipped={counts.get('protected_skipped', 0)}"
+        )
+        for p in payload.get("paths") or []:
+            typer.echo(f"  {p}")
+        for msg in payload.get("messages") or []:
+            typer.echo(f"  note: {msg}")
+        typer.echo(f"honesty: {HINT_HONESTY}")
+        typer.echo("depth-hint only — not mesh or print success")
     raise typer.Exit(0)
 
 
