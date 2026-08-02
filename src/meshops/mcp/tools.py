@@ -937,3 +937,67 @@ def mesh_proportion_blockout_recipe(
         limbs=limbs,
         force=force,
     )
+
+
+def mesh_proportion_depth_heatmap(
+    work_root: Path,
+    *,
+    samples: str,
+    out: str,
+    deltas: str | None = None,
+    underlay: str | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Glance heatmap PNG + meta from depth samples. Authoring only — HEATMAP_HONESTY / N6."""
+    from meshops.proportion.depth_heatmap import run_depth_heatmap
+
+    # Preserve trailing directory separator intent (R1); Path resolve strips it.
+    ends_sep = out.endswith(("/", "\\"))
+    out_base = out.rstrip("/\\") if ends_sep else out
+    out_resolved = _resolve_tool_path(out_base, work_root)
+    out_arg: str | Path = (
+        str(out_resolved) + ("\\" if ends_sep else "") if ends_sep else out_resolved
+    )
+    return run_depth_heatmap(
+        _resolve_tool_path(samples, work_root),
+        out_arg,
+        deltas=_resolve_tool_path(deltas, work_root) if deltas else None,
+        underlay=_resolve_tool_path(underlay, work_root) if underlay else None,
+        force=force,
+    )
+
+
+def mesh_proportion_depth_hint(
+    work_root: Path,
+    *,
+    depth_map: str | None = None,
+    left: str | None = None,
+    out: str = "landmarks_assist.hint.json",
+    assist: str | None = None,
+    report: str | None = None,
+    backend: str = "external",
+    force: bool = False,
+    force_hint: bool = False,
+    merge_into: str | None = None,
+) -> dict[str, Any]:
+    """Depth-channel assist hints. Authoring only — HINT_HONESTY / N6; monocular refuses."""
+    from meshops.proportion.depth_hint import run_depth_hint
+
+    # Preserve trailing directory separator intent (R1); Path resolve strips it.
+    ends_sep = out.endswith(("/", "\\"))
+    out_base = out.rstrip("/\\") if ends_sep else out
+    out_resolved = _resolve_tool_path(out_base, work_root)
+    out_arg: str | Path = (
+        str(out_resolved) + ("\\" if ends_sep else "") if ends_sep else out_resolved
+    )
+    return run_depth_hint(
+        _resolve_tool_path(depth_map, work_root) if depth_map else None,
+        _resolve_tool_path(left, work_root) if left else None,
+        out_arg,
+        assist=_resolve_tool_path(assist, work_root) if assist else None,
+        report=_resolve_tool_path(report, work_root) if report else None,
+        backend=backend,
+        force=force,
+        force_hint=force_hint,
+        merge_into=(_resolve_tool_path(merge_into, work_root) if merge_into else None),
+    )

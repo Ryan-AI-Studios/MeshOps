@@ -58,6 +58,8 @@ TOOL_NAMES: frozenset[str] = frozenset(
         "mesh_proportion_capture",
         "mesh_proportion_depth_samples",
         "mesh_proportion_blockout_recipe",
+        "mesh_proportion_depth_heatmap",
+        "mesh_proportion_depth_hint",
     }
 )
 
@@ -612,6 +614,61 @@ def build_server(work_root: Path | None = None) -> Any:
             depth_at_landmarks=depth_at_landmarks,
             limbs=limbs,
             force=force,
+        )
+
+    @mcp.tool()
+    def mesh_proportion_depth_heatmap(
+        samples: str,
+        out: str,
+        deltas: str | None = None,
+        underlay: str | None = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Glance depth/delta heatmap PNG + meta from depth_at_landmarks samples.
+
+        Authoring visualization only — proportion_depth_heatmap_not_mesh_or_print_success (N6).
+        Numbers in depth_at_landmarks remain source of truth. Raises ProportionError
+        on failure (never ok:false success).
+        """
+        return T.mesh_proportion_depth_heatmap(
+            wr,
+            samples=samples,
+            out=out,
+            deltas=deltas,
+            underlay=underlay,
+            force=force,
+        )
+
+    @mcp.tool()
+    def mesh_proportion_depth_hint(
+        depth_map: str | None = None,
+        left: str | None = None,
+        out: str = "landmarks_assist.hint.json",
+        assist: str | None = None,
+        report: str | None = None,
+        backend: str = "external",
+        force: bool = False,
+        force_hint: bool = False,
+        merge_into: str | None = None,
+    ) -> dict[str, Any]:
+        """Suggest left depth-pair assist points from an external depth channel.
+
+        Side .hint.json is not analyze law; use merge_into for canonical assist.
+        Monocular backend refuses (no torch/onnx pin). Authoring only —
+        proportion_depth_hint_not_mesh_or_print_success (N6). Raises ProportionError
+        on failure (never ok:false success).
+        """
+        return T.mesh_proportion_depth_hint(
+            wr,
+            depth_map=depth_map,
+            left=left,
+            out=out,
+            assist=assist,
+            report=report,
+            backend=backend,
+            force=force,
+            force_hint=force_hint,
+            merge_into=merge_into,
         )
 
     return mcp

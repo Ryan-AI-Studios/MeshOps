@@ -25,6 +25,13 @@ ProportionErrorCode = Literal[
     "mesh_load_failed",
     "recipe_empty",
     "recipe_failed",
+    "heatmap_empty",
+    "heatmap_failed",
+    "hint_empty",
+    "hint_failed",
+    "monocular_unavailable",
+    "invalid_depth_samples",
+    "invalid_depth_deltas",
     "unknown",
 ]
 
