@@ -263,8 +263,12 @@ def test_heatmap__colorbar_at_bottom_of_panel(tmp_path: Path) -> None:
         panel_h = DEFAULT_PANEL_H
         cb_y = panel_h - COLORBAR_H - 14 + COLORBAR_H // 2
         xs = [MARGIN + 20, w // 2, w - MARGIN - 20]
-        colors = [rgba.getpixel((x, cb_y))[:3] for x in xs]
-        # Leftish should be more blue-ish than rightish for non-constant colormap
+        colors: list[tuple[int, int, int]] = []
+        for x in xs:
+            pix = rgba.getpixel((x, cb_y))
+            assert isinstance(pix, tuple) and len(pix) >= 3
+            colors.append((int(pix[0]), int(pix[1]), int(pix[2])))
+        # Leftish should differ from rightish for non-constant colormap
         assert colors[0] != colors[-1] or colors[0] != colors[1]
         # Bottom strip of panel must not be blank white-only across full width
         # (colorbar draws non-white gradients)
