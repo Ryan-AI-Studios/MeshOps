@@ -18,6 +18,8 @@ ProportionErrorCode = Literal[
     "invalid_checklist",
     "guides_empty",
     "guides_failed",
+    "capture_empty",
+    "capture_failed",
     "unknown",
 ]
 

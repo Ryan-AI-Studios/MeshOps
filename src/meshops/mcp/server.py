@@ -16,6 +16,8 @@ SERVER_INSTRUCTIONS = (
     "T3/T4 repair refused. T3 preview never auto-promotes (N6). "
     "Organic finalize is untrusted — re-triage. "
     "design_organic_api is post-plateau hosted multi-view fallback only — never default. "
+    "Proportion tools (mesh_proportion_*) are measurement/authoring only — "
+    "never mesh or print success (N6). "
     "work_root is server-bound (MESHOPS_WORK or ./work); host must set cwd to repo."
 )
 
@@ -48,6 +50,12 @@ TOOL_NAMES: frozenset[str] = frozenset(
         "organic_plateau",
         "organic_finalize",
         "design_organic_api",
+        "mesh_proportion_template",
+        "mesh_proportion_analyze",
+        "mesh_proportion_show",
+        "mesh_proportion_scaffold",
+        "mesh_proportion_guides",
+        "mesh_proportion_capture",
     }
 )
 
@@ -429,6 +437,129 @@ def build_server(work_root: Path | None = None) -> Any:
             views_from=views_from,
             accept=accept,
             accept_policy=accept_policy,
+        )
+
+    @mcp.tool()
+    def mesh_proportion_template(out: str = "landmarks_assist.json") -> dict[str, Any]:
+        """Write blank landmarks_assist.json template.
+
+        Authoring aid only — not mesh reconstruction or print success (N6 /
+        proportion_capture_not_mesh_or_print_success).
+        """
+        return T.mesh_proportion_template(wr, out=out)
+
+    @mcp.tool()
+    def mesh_proportion_analyze(
+        views_dir: str,
+        landmarks: str | None = None,
+        height_m: float | None = None,
+        out: str | None = None,
+        overlays: bool = False,
+        partial_ok: bool = False,
+        attach_session: str | None = None,
+    ) -> dict[str, Any]:
+        """Analyze multi-view package → proportion_report.json.
+
+        Measurement only — not mesh or print success (N6). Optional attach_session
+        copies report under organic session proportion/ note (soft path).
+        """
+        return T.mesh_proportion_analyze(
+            wr,
+            views_dir=views_dir,
+            landmarks=landmarks,
+            height_m=height_m,
+            out=out,
+            overlays=overlays,
+            partial_ok=partial_ok,
+            attach_session=attach_session,
+        )
+
+    @mcp.tool()
+    def mesh_proportion_show(report: str) -> dict[str, Any]:
+        """Load proportion_report.json → {report, markdown}. Measurement only (N6)."""
+        return T.mesh_proportion_show(wr, report=report)
+
+    @mcp.tool()
+    def mesh_proportion_scaffold(
+        out: str,
+        dual: bool = False,
+        mode: str | None = None,
+        height_m: float | None = None,
+        subject: str | None = None,
+        pose: str = "a_pose",
+        with_template: bool = False,
+        stub_images: bool = False,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Create multi-view package layout + checklist. Layout only — not mesh/print (N6)."""
+        return T.mesh_proportion_scaffold(
+            wr,
+            out=out,
+            dual=dual,
+            mode=mode,
+            height_m=height_m,
+            subject=subject,
+            pose=pose,
+            with_template=with_template,
+            stub_images=stub_images,
+            force=force,
+        )
+
+    @mcp.tool()
+    def mesh_proportion_guides(
+        report: str,
+        out: str,
+        format: str = "both",
+        seeds: bool = False,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Emit LM_* guide empties + optional SEED_* from report.
+
+        Authoring aids only — not mesh or print success (N6).
+        """
+        return T.mesh_proportion_guides(
+            wr,
+            report=report,
+            out=out,
+            format=format,
+            seeds=seeds,
+            force=force,
+        )
+
+    @mcp.tool()
+    def mesh_proportion_capture(
+        source: str | None = None,
+        in_path: str | None = None,
+        out: str | None = None,
+        views_dir: str | None = None,
+        pose: str | None = None,
+        multi_figure: bool = False,
+        merge: str | None = None,
+        prefer_merge: bool = False,
+        default_confidence: float | None = None,
+        force: bool = False,
+        emit_dump_script: str | None = None,
+        attach_session: str | None = None,
+    ) -> dict[str, Any]:
+        """Capture/fill landmarks_assist.json from px, ASSIST_* dump, or reproject.
+
+        Authoring aid only — proportion_capture_not_mesh_or_print_success (N6).
+        Raises ProportionError on failure (never ok:false success).
+        """
+        return T.mesh_proportion_capture(
+            wr,
+            source=source,
+            in_path=in_path,
+            out=out,
+            views_dir=views_dir,
+            pose=pose,
+            multi_figure=multi_figure,
+            merge=merge,
+            prefer_merge=prefer_merge,
+            default_confidence=default_confidence,
+            force=force,
+            emit_dump_script=emit_dump_script,
+            attach_session=attach_session,
         )
 
     return mcp
