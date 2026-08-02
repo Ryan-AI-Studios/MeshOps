@@ -13,6 +13,7 @@ from meshops.proportion.errors import ProportionError
 from meshops.proportion.guides import (
     AXIS_NOTES,
     GUIDE_SCHEMA_VERSION,
+    GuidePackage,
     build_guide_package,
     display_size_m,
     emit_bpy_script,
@@ -110,6 +111,8 @@ def test_guides__minimal_xyz__json_empties() -> None:
     assert pkg.honesty == GUIDE_HONESTY
     assert pkg.axis_notes == AXIS_NOTES
     assert pkg.schema_version == GUIDE_SCHEMA_VERSION
+    assert pkg.schema_version == "1.1.0"
+    assert pkg.counts.get("seeds_front_plane") == 0
 
 
 def test_guides__height_and_hu__ladder() -> None:
@@ -244,6 +247,8 @@ def test_guides__seeds_opt_in_capsule() -> None:
     assert seed.band_id == "thigh_l"
     assert seed.radius_m == pytest.approx(0.06)
     assert seed.p0 is not None and seed.p1 is not None
+    assert seed.placement == "full3d"
+    assert pkg.counts["seeds_front_plane"] == 0
 
 
 def test_guides__seeds_missing_joint_message() -> None:
@@ -357,11 +362,19 @@ def test_guides__cli_json_shape(tmp_path: Path) -> None:
     assert payload["format"] == "both"
     assert isinstance(payload["paths"], list)
     assert len(payload["paths"]) == 2
-    assert set(payload["counts"].keys()) >= {"empties", "ladder", "seeds"}
+    assert set(payload["counts"].keys()) >= {
+        "empties",
+        "ladder",
+        "seeds",
+        "seeds_front_plane",
+    }
+    assert payload["counts"]["seeds_front_plane"] == 0
     assert isinstance(payload["messages"], list)
     # disk files
     assert (out_dir / "proportion_guides.json").is_file()
     assert (out_dir / "setup_proportion_guides.py").is_file()
+    guides_json = json.loads((out_dir / "proportion_guides.json").read_text(encoding="utf-8"))
+    assert guides_json["schema_version"] == "1.1.0"
 
 
 def test_guides__cli_non_json_honesty(tmp_path: Path) -> None:
@@ -510,3 +523,267 @@ def test_guides__cli_invalid_report(tmp_path: Path) -> None:
             assert code == "invalid_report"
     except json.JSONDecodeError:
         assert "invalid" in result.output.lower() or "report" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# 0018 R8 — class F/M, front-plane seeds, schema 1.1.0
+# ---------------------------------------------------------------------------
+
+_CLASS_F = "front-plane only (y_m null; depth unknown — not missing lateral meters)"
+_CLASS_M = "missing *_m components zero-filled (need height_m on analyze for meters)"
+
+
+def test_guides__empty_only_y_null__class_f() -> None:
+    report = _synthetic_report(
+        landmarks_xyz={"shoulder_l": _lm("shoulder_l", x_m=-0.2, y_m=None, z_m=1.4)},
+    )
+    pkg = build_guide_package(report)
+    by_name = {e.name: e for e in pkg.empties}
+    assert by_name["LM_shoulder_l"].y_m == 0.0
+    assert by_name["LM_shoulder_l"].x_m == pytest.approx(-0.2)
+    assert by_name["LM_shoulder_l"].z_m == pytest.approx(1.4)
+    f_msg = f"shoulder_l: {_CLASS_F}"
+    assert f_msg in pkg.messages
+    assert not any(_CLASS_M in m for m in pkg.messages if m.startswith("shoulder_l:"))
+
+
+def test_guides__empty_x_null__class_m() -> None:
+    report = _synthetic_report(
+        landmarks_xyz={"chin": _lm("chin", x_m=None, y_m=0.0, z_m=1.5)},
+    )
+    pkg = build_guide_package(report)
+    m_msg = f"chin: {_CLASS_M}"
+    assert m_msg in pkg.messages
+    assert not any(_CLASS_F in m for m in pkg.messages if m.startswith("chin:"))
+
+
+def test_guides__quiet_null_y_filters_f_keeps_m() -> None:
+    report = _synthetic_report(
+        landmarks_xyz={
+            "shoulder_l": _lm("shoulder_l", x_m=-0.2, y_m=None, z_m=1.4),
+            "chin": _lm("chin", x_m=None, y_m=0.0, z_m=1.5),
+        },
+    )
+    pkg = build_guide_package(report, quiet_null_y=True)
+    assert not any("front-plane only (y_m null" in m for m in pkg.messages)
+    assert f"chin: {_CLASS_M}" in pkg.messages
+
+
+def test_guides__seeds_full_xyz__placement_full3d() -> None:
+    report = _synthetic_report(
+        landmarks_xyz={
+            "hip_l": _lm("hip_l", x_m=-0.1, y_m=0.02, z_m=0.9),
+            "knee_l": _lm("knee_l", x_m=-0.12, y_m=0.01, z_m=0.5),
+        },
+        diameters=[_thigh_diameter()],
+    )
+    pkg = build_guide_package(report, seeds=True)
+    seed = next(s for s in pkg.seeds if s.name == "SEED_thigh_l")
+    assert seed.placement == "full3d"
+    assert pkg.counts["seeds_front_plane"] == 0
+
+
+def test_guides__seeds_y_null_no_front_plane__message_cites_first_joint() -> None:
+    report = _synthetic_report(
+        landmarks_xyz={
+            "hip_l": _lm("hip_l", x_m=-0.1, y_m=None, z_m=0.9),
+            "knee_l": _lm("knee_l", x_m=-0.12, y_m=None, z_m=0.5),
+        },
+        diameters=[_thigh_diameter()],
+    )
+    pkg = build_guide_package(report, seeds=True, front_plane_seeds=False)
+    assert not any(s.name == "SEED_thigh_l" for s in pkg.seeds)
+    assert any(
+        "thigh_l: joint hip_l needs y_m for full3d seed "
+        "(use --front-plane-seeds for front-plane capsule)" in m
+        for m in pkg.messages
+    )
+
+
+def test_guides__seeds_p1_y_null_cites_p1() -> None:
+    report = _synthetic_report(
+        landmarks_xyz={
+            "hip_l": _lm("hip_l", x_m=-0.1, y_m=0.0, z_m=0.9),
+            "knee_l": _lm("knee_l", x_m=-0.12, y_m=None, z_m=0.5),
+        },
+        diameters=[_thigh_diameter()],
+    )
+    pkg = build_guide_package(report, seeds=True, front_plane_seeds=False)
+    assert not any(s.name == "SEED_thigh_l" for s in pkg.seeds)
+    assert any(
+        "thigh_l: joint knee_l needs y_m for full3d seed "
+        "(use --front-plane-seeds for front-plane capsule)" in m
+        for m in pkg.messages
+    )
+
+
+def test_guides__seeds_front_plane_y_null_with_diameter() -> None:
+    report = _synthetic_report(
+        landmarks_xyz={
+            "hip_l": _lm("hip_l", x_m=-0.1, y_m=None, z_m=0.9),
+            "knee_l": _lm("knee_l", x_m=-0.12, y_m=None, z_m=0.5),
+        },
+        diameters=[_thigh_diameter()],
+    )
+    pkg = build_guide_package(report, seeds=True, front_plane_seeds=True)
+    seed = next(s for s in pkg.seeds if s.name == "SEED_thigh_l")
+    assert seed.placement == "front_plane"
+    assert seed.p0 is not None and seed.p1 is not None
+    assert seed.p0[1] == seed.p1[1] == pytest.approx(0.0)
+    assert pkg.counts["seeds_front_plane"] == 1
+
+
+def test_guides__front_plane_no_diameter__no_seed() -> None:
+    report = _synthetic_report(
+        landmarks_xyz={
+            "hip_l": _lm("hip_l", x_m=-0.1, y_m=None, z_m=0.9),
+            "knee_l": _lm("knee_l", x_m=-0.12, y_m=None, z_m=0.5),
+        },
+        diameters=[],
+    )
+    pkg = build_guide_package(report, seeds=True, front_plane_seeds=True)
+    assert not any(s.name == "SEED_thigh_l" for s in pkg.seeds)
+    assert any("thigh_l: no usable radius — seed skipped" in m for m in pkg.messages)
+
+
+def test_guides__front_plane_partial_y_mean() -> None:
+    report = _synthetic_report(
+        landmarks_xyz={
+            "hip_l": _lm("hip_l", x_m=-0.1, y_m=0.05, z_m=0.9),
+            "knee_l": _lm("knee_l", x_m=-0.12, y_m=None, z_m=0.5),
+        },
+        diameters=[_thigh_diameter()],
+    )
+    pkg = build_guide_package(report, seeds=True, front_plane_seeds=True)
+    seed = next(s for s in pkg.seeds if s.name == "SEED_thigh_l")
+    assert seed.placement == "front_plane"
+    assert seed.p0 is not None and seed.p1 is not None
+    assert seed.p0[1] == seed.p1[1] == pytest.approx(0.05)
+
+
+def test_guides__front_plane_seeds_without_seeds_ignored() -> None:
+    report = _synthetic_report(
+        landmarks_xyz={
+            "hip_l": _lm("hip_l", x_m=-0.1, y_m=None, z_m=0.9),
+            "knee_l": _lm("knee_l", x_m=-0.12, y_m=None, z_m=0.5),
+            "sole": _lm("sole", x_m=0.0, y_m=0.0, z_m=0.0),
+        },
+        diameters=[_thigh_diameter()],
+    )
+    pkg = build_guide_package(report, seeds=False, front_plane_seeds=True)
+    assert pkg.counts["seeds"] == 0
+    assert pkg.counts["seeds_front_plane"] == 0
+    assert any("--front-plane-seeds ignored without --seeds" in m for m in pkg.messages)
+
+
+def test_guides__cs_seeds_with_front_plane_flag() -> None:
+    report = _synthetic_report(
+        landmarks_xyz={"sole": _lm("sole", x_m=0.0, y_m=0.0, z_m=0.0)},
+        height_m=1.7,
+        cross_sections=[CrossSection(level_id="waist", z_frac=0.55, rx_frac=0.08, ry_frac=0.06)],
+    )
+    pkg = build_guide_package(report, seeds=True, front_plane_seeds=True)
+    cs = next(s for s in pkg.seeds if s.name == "SEED_CS_waist")
+    assert cs.kind == "ellipsoid"
+    assert cs.placement == "full3d"
+    assert pkg.counts["seeds_front_plane"] == 0
+
+
+def test_guides__schema_write_1_1_0(tmp_path: Path) -> None:
+    report = _synthetic_report(
+        landmarks_xyz={"sole": _lm("sole", x_m=0.0, y_m=0.0, z_m=0.0)},
+    )
+    pkg = build_guide_package(report)
+    assert pkg.schema_version == "1.1.0"
+    assert GUIDE_SCHEMA_VERSION == "1.1.0"
+    out = tmp_path / "proportion_guides.json"
+    write_guides(out, pkg, format="json")
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["schema_version"] == "1.1.0"
+    assert "seeds_front_plane" in data["counts"]
+
+
+def test_guides__load_1_0_0_fixture_no_placement() -> None:
+    """Capture compat: GuidePackage 1.0.0 without placement loads (dual Literal)."""
+    raw = {
+        "schema_version": "1.0.0",
+        "honesty": GUIDE_HONESTY,
+        "axis_notes": AXIS_NOTES,
+        "empties": [
+            {
+                "name": "LM_sole",
+                "x_m": 0.0,
+                "y_m": 0.0,
+                "z_m": 0.0,
+                "kind": "landmark",
+                "source_id": "sole",
+                "display_size_m": 0.05,
+            }
+        ],
+        "ladder": [],
+        "seeds": [
+            {
+                "name": "SEED_thigh_l",
+                "kind": "capsule",
+                "band_id": "thigh_l",
+                "p0": [-0.1, 0.0, 0.9],
+                "p1": [-0.1, 0.0, 0.5],
+                "radius_m": 0.06,
+                "label": "SEED_thigh_l",
+            }
+        ],
+        "messages": [],
+        "counts": {"empties": 1, "ladder": 0, "seeds": 1},
+    }
+    pkg = GuidePackage.model_validate(raw)
+    assert pkg.schema_version == "1.0.0"
+    assert pkg.seeds[0].placement == "full3d"
+
+
+def test_guides__bpy_schema_1_1_0_and_front_plane_comment() -> None:
+    report = _synthetic_report(
+        landmarks_xyz={
+            "hip_l": _lm("hip_l", x_m=-0.1, y_m=None, z_m=0.9),
+            "knee_l": _lm("knee_l", x_m=-0.12, y_m=None, z_m=0.5),
+        },
+        diameters=[_thigh_diameter()],
+    )
+    pkg = build_guide_package(report, seeds=True, front_plane_seeds=True)
+    script = emit_bpy_script(pkg)
+    assert f"# guide schema_version: {GUIDE_SCHEMA_VERSION}" in script
+    assert "# guide schema_version: 1.1.0" in script
+    assert (
+        "# SEED_thigh_l (placement=front_plane, Y-plane=0.000m) "
+        "— front-view lateral guide only (N6)" in script
+    )
+    assert "'placement': 'front_plane'" in script or '"placement": "front_plane"' in script
+
+
+def test_guides__cli_non_json_echoes_seeds_front_plane(tmp_path: Path) -> None:
+    report = _synthetic_report(
+        landmarks_xyz={
+            "hip_l": _lm("hip_l", x_m=-0.1, y_m=None, z_m=0.9),
+            "knee_l": _lm("knee_l", x_m=-0.12, y_m=None, z_m=0.5),
+            "sole": _lm("sole", x_m=0.0, y_m=0.0, z_m=0.0),
+        },
+        diameters=[_thigh_diameter()],
+    )
+    report_path = tmp_path / "proportion_report.json"
+    report_path.write_text(json.dumps(report.model_dump(mode="json")), encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "proportion",
+            "guides",
+            "--report",
+            str(report_path),
+            "--out",
+            str(tmp_path / "g"),
+            "--format",
+            "json",
+            "--seeds",
+            "--front-plane-seeds",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "seeds_front_plane=1" in result.output
