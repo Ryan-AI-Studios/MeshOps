@@ -41,6 +41,25 @@ def draw_view_overlay(
         )
         draw.text((x + r + 2, y - r), lid, fill=(20, 20, 20, 255))
 
+    # R10: diameter edge line segments from landmarks *_edge0 / *_edge1 only
+    # (do not invent endpoints from diameters[]).
+    drawn_bands: set[str] = set()
+    for lid in view.landmarks:
+        if not lid.endswith("_edge0"):
+            continue
+        band = lid[: -len("_edge0")]
+        e1_id = f"{band}_edge1"
+        if e1_id not in view.landmarks or band in drawn_bands:
+            continue
+        e0 = view.landmarks[lid]
+        e1 = view.landmarks[e1_id]
+        draw.line(
+            (float(e0.x_px), float(e0.y_px), float(e1.x_px), float(e1.y_px)),
+            fill=(0, 220, 120, 220),
+            width=max(2, r // 2),
+        )
+        drawn_bands.add(band)
+
     if view.subject_bbox is not None:
         bb = view.subject_bbox
         draw.rectangle(

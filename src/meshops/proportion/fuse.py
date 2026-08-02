@@ -4,17 +4,39 @@ Axes (freeze):
   Z up, soles = 0
   +X = camera-right in front view
   +Y toward camera when facing_direction == camera_left (invert for camera_right / right)
+
+0013: extended depth pairs + DepthBand list + optional CrossSection correlation.
+package_score depth gate remains chest/hip only (R8).
 """
 
 from __future__ import annotations
 
 from meshops.proportion.frame import figure_span_from_landmarks
 from meshops.proportion.models import (
+    CheckResult,
+    CrossSection,
+    DepthBand,
+    DiameterMeasure,
     Landmark2D,
     LandmarkXYZ,
     QualityFlags,
     ViewLandmarks,
 )
+
+# Left-view front/back/mid depth pairs (0012 chest/hip + 0013 extras).
+DEPTH_PAIRS: tuple[tuple[str, str, str], ...] = (
+    ("chest_front", "chest_back", "chest_mid"),
+    ("hip_front", "hip_back", "hip_mid"),
+    ("breast_front", "breast_back", "breast_mid"),
+    ("glute_front", "glute_back", "glute_mid"),
+    ("thigh_front", "thigh_back", "thigh_mid"),
+    ("calf_front", "calf_back", "calf_mid"),
+)
+
+# package_score depth gate (R8) — never include glute/thigh/breast.
+_SCORE_DEPTH_BANDS: frozenset[str] = frozenset({"chest", "hip"})
+
+_CROSS_Z_TOL = 0.03
 
 
 def _stature_top(lm: dict[str, Landmark2D]) -> tuple[Landmark2D | None, bool]:
@@ -68,6 +90,29 @@ def _depth_sign(facing: str | None) -> float:
     if facing in ("camera_right", "right"):
         return -1.0
     return 1.0
+
+
+def _band_id_from_pair(front_id: str) -> str:
+    """chest_front → chest."""
+    if front_id.endswith("_front"):
+        return front_id[: -len("_front")]
+    return front_id
+
+
+def _mid_z_refs(mid_id: str) -> tuple[str, ...]:
+    if mid_id == "chest_mid":
+        return ("nipple_bust", "belt_hip", "shoulder")
+    if mid_id == "hip_mid":
+        return ("crotch_pubic", "belt_hip", "hip_l")
+    if mid_id == "breast_mid":
+        return ("nipple_bust", "chest_mid")
+    if mid_id == "glute_mid":
+        return ("crotch_pubic", "hip_mid", "belt_hip")
+    if mid_id == "thigh_mid":
+        return ("greater_trochanter", "knee", "crotch_pubic")
+    if mid_id == "calf_mid":
+        return ("knee", "ankle", "sole")
+    return ()
 
 
 def fuse_xyz(
@@ -139,7 +184,7 @@ def fuse_xyz(
             xyz.z_m = z * height_m
         out[lid] = xyz
 
-    # Depth from left view
+    # Depth from left view (extended pair table)
     if left is not None and left.landmarks:
         left_span = left.figure_span_px or figure_span_from_landmarks(left)
         if left_span is None or left_span <= 0:
@@ -154,11 +199,7 @@ def fuse_xyz(
         sign = _depth_sign(str(facing) if facing else "camera_left")
         torso_cx = _torso_center_x(left)
 
-        depth_pairs = (
-            ("chest_front", "chest_back", "chest_mid"),
-            ("hip_front", "hip_back", "hip_mid"),
-        )
-        for front_id, back_id, mid_id in depth_pairs:
+        for front_id, back_id, mid_id in DEPTH_PAIRS:
             lf = left.landmarks.get(front_id)
             lb = left.landmarks.get(back_id)
             if lf is None and lb is None:
@@ -196,18 +237,21 @@ def fuse_xyz(
                 y_mid = sign * ((lf.x_px + lb.x_px) / 2.0 - torso_cx) / left_span
                 z_ref: float | None = None
                 x_ref: float | None = None
-                if mid_id == "chest_mid":
-                    for ref in ("nipple_bust", "belt_hip", "shoulder"):
-                        if ref in out:
-                            z_ref = out[ref].z
-                            x_ref = out[ref].x
-                            break
-                else:
-                    for ref in ("crotch_pubic", "belt_hip", "hip_l"):
-                        if ref in out:
-                            z_ref = out[ref].z
-                            x_ref = out[ref].x
-                            break
+                for ref in _mid_z_refs(mid_id):
+                    if ref in out:
+                        z_ref = out[ref].z
+                        x_ref = out[ref].x
+                        break
+                if z_ref is None:
+                    # Fall back to average left-view z of the pair
+                    zf = _z_from_view(left, lf, left_span)
+                    zb = _z_from_view(left, lb, left_span)
+                    if zf is not None and zb is not None:
+                        z_ref = (zf + zb) / 2.0
+                    elif zf is not None:
+                        z_ref = zf
+                    else:
+                        z_ref = zb
                 mid = LandmarkXYZ(
                     id=mid_id,
                     x=x_ref,
@@ -225,6 +269,166 @@ def fuse_xyz(
                 out[mid_id] = mid
 
     return out, quality, messages
+
+
+def build_depth_bands(
+    views: dict[str, ViewLandmarks],
+    *,
+    height_m: float | None = None,
+    foreshortening_risk: bool = False,
+) -> tuple[list[DepthBand], list[CheckResult], list[str]]:
+    """Build DepthBand list from left front/back pairs with orientation auto-swap (R12).
+
+    torso_cx is reused for all bands (approximation for non-torso — R9).
+    """
+    messages: list[str] = []
+    checks: list[CheckResult] = []
+    bands: list[DepthBand] = []
+
+    left = views.get("left")
+    if left is None or not left.landmarks:
+        return bands, checks, messages
+
+    front = views.get("front")
+    left_span = left.figure_span_px or figure_span_from_landmarks(left)
+    if left_span is None or left_span <= 0:
+        if front is not None:
+            left_span = front.figure_span_px or figure_span_from_landmarks(front)
+        if left_span is None or left_span <= 0:
+            messages.append("cannot build depth_bands (no left/front span)")
+            return bands, checks, messages
+        messages.append("depth_bands: left span unknown; using front span")
+
+    facing = left.facing_direction or "camera_left"
+    sign = _depth_sign(str(facing) if facing else "camera_left")
+    torso_cx = _torso_center_x(left)
+    conf_scale = 0.7 if foreshortening_risk else 1.0
+
+    non_torso_used = False
+    for front_id, back_id, mid_id in DEPTH_PAIRS:
+        lf = left.landmarks.get(front_id)
+        lb = left.landmarks.get(back_id)
+        if lf is None or lb is None:
+            continue
+
+        band_id = _band_id_from_pair(front_id)
+        if band_id not in ("chest", "hip", "breast"):
+            non_torso_used = True
+
+        y_front = sign * (lf.x_px - torso_cx) / left_span
+        y_back = sign * (lb.x_px - torso_cx) / left_span
+        swapped = False
+        # Require y_front > y_back (+Y toward camera/front). If inverted → swap.
+        if y_front < y_back:
+            y_front, y_back = y_back, y_front
+            swapped = True
+            checks.append(
+                CheckResult(
+                    name="depth_band_orientation",
+                    ok=True,
+                    severity="info",
+                    message=(
+                        f"{band_id}: y_front < y_back after body-depth map — "
+                        "auto-swapped endpoints (orientation_swapped)"
+                    ),
+                    measured={"band_id": band_id, "swapped": True},
+                    expected="y_front > y_back (+Y toward camera)",
+                )
+            )
+
+        depth_px = abs(lf.x_px - lb.x_px)
+        depth_frac = abs(y_front - y_back)  # == depth_px / left_span
+        y_mid = (y_front + y_back) / 2.0
+        z_front = _z_from_view(left, lf, left_span)
+        z_back = _z_from_view(left, lb, left_span)
+        z_frac: float | None
+        if z_front is not None and z_back is not None:
+            z_frac = (z_front + z_back) / 2.0
+        else:
+            z_frac = z_front if z_front is not None else z_back
+
+        conf = min(1.0, min(lf.confidence, lb.confidence) * conf_scale * 0.9)
+        depth_m = depth_frac * height_m if height_m is not None else None
+        bands.append(
+            DepthBand(
+                band_id=band_id,
+                depth_px=depth_px,
+                depth_frac=depth_frac,
+                depth_m=depth_m,
+                y_front=y_front,
+                y_back=y_back,
+                y_mid=y_mid,
+                z_frac=z_frac,
+                confidence=conf,
+                sources=["left", front_id, back_id, mid_id],
+                orientation_swapped=swapped,
+            )
+        )
+
+    if non_torso_used:
+        messages.append(
+            "depth_bands: torso_cx reused for non-torso bands "
+            "(thigh/calf/glute) — approximation (R9)"
+        )
+    if bands:
+        messages.append(f"depth_bands: {len(bands)} band(s)")
+    return bands, checks, messages
+
+
+def level_id_from_band(band_id: str) -> str:
+    """Normalize diameter/depth band id to a shared level_id for cross-sections."""
+    bid = band_id
+    if bid.endswith("_l") or bid.endswith("_r"):
+        bid = bid[:-2]
+    # Front diameter "bust" correlates with left depth "breast"
+    if bid == "bust":
+        return "breast"
+    return bid
+
+
+def build_cross_sections(
+    diameters: list[DiameterMeasure],
+    depth_bands: list[DepthBand],
+    *,
+    z_tol: float = _CROSS_Z_TOL,
+) -> list[CrossSection]:
+    """Emit CrossSection when diameter + depth share level and |z_frac| within tol (R13)."""
+    if not diameters or not depth_bands:
+        return []
+
+    # Prefer first depth band per level_id
+    depth_by_level: dict[str, DepthBand] = {}
+    for db in depth_bands:
+        lid = level_id_from_band(db.band_id)
+        if lid not in depth_by_level:
+            depth_by_level[lid] = db
+
+    out: list[CrossSection] = []
+    seen: set[str] = set()
+    for d in diameters:
+        if d.z_frac is None:
+            continue
+        level = level_id_from_band(d.band_id)
+        db = depth_by_level.get(level)
+        if db is None or db.z_frac is None:
+            continue
+        if abs(d.z_frac - db.z_frac) > z_tol:
+            continue
+        if level in seen:
+            continue
+        seen.add(level)
+        half_w = d.half_width_frac if d.half_width_frac is not None else d.width_frac / 2.0
+        half_d = db.depth_frac / 2.0
+        out.append(
+            CrossSection(
+                level_id=level,
+                z_frac=(d.z_frac + db.z_frac) / 2.0,
+                rx_frac=half_w,
+                ry_frac=half_d,
+                sources=[f"diameter:{d.band_id}", f"depth:{db.band_id}"],
+            )
+        )
+    return out
 
 
 def _midline_x(front: ViewLandmarks) -> float | None:
@@ -253,6 +457,11 @@ def _torso_center_x(left: ViewLandmarks) -> float:
     hf, hb = lm.get("hip_front"), lm.get("hip_back")
     if hf is not None and hb is not None:
         return (hf.x_px + hb.x_px) / 2.0
+    # Fall back to other depth pairs if chest/hip missing
+    for front_id, back_id, _mid in DEPTH_PAIRS:
+        a, b = lm.get(front_id), lm.get(back_id)
+        if a is not None and b is not None:
+            return (a.x_px + b.x_px) / 2.0
     if "spine_hint" in lm:
         return lm["spine_hint"].x_px
     return left.width_px / 2.0
@@ -268,7 +477,10 @@ def _z_from_view(view: ViewLandmarks, L: Landmark2D, span: float) -> float | Non
 
 
 def compute_package_score(views: dict[str, ViewLandmarks]) -> tuple[float, dict[str, float]]:
-    """Weighted completeness score 0-100 (spec section 3.1 F)."""
+    """Weighted completeness score 0-100 (spec section 3.1 F).
+
+    Depth points only for chest_front+back OR hip_front+back (R8 — unchanged by 0013).
+    """
     from meshops.proportion.models import (
         REQUIRED_VIEW_KEYS,
         SCORE_DEPTH,
@@ -307,11 +519,14 @@ def compute_package_score(views: dict[str, ViewLandmarks]) -> tuple[float, dict[
     left = views.get("left")
     if left is not None:
         llm = left.landmarks
+        # R8: chest/hip only — glute/thigh/breast never score-weight depth
         depth_ok = ("chest_front" in llm and "chest_back" in llm) or (
             "hip_front" in llm and "hip_back" in llm
         )
         if depth_ok:
             breakdown["depth"] = SCORE_DEPTH
+        # Silence unused set (documents freeze)
+        _ = _SCORE_DEPTH_BANDS
 
     total = sum(breakdown.values())
     # Clamp float dust

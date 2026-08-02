@@ -1,4 +1,4 @@
-"""Orchestrate load → assist/frame → fuse → checks → package_score → report."""
+"""Orchestrate load → assist/frame → fuse → diameters/depth → checks → report."""
 
 from __future__ import annotations
 
@@ -7,10 +7,13 @@ from pathlib import Path
 from typing import Any
 
 from meshops.proportion.assist import apply_assist, find_default_assist, load_assist_json
-from meshops.proportion.checks import run_checks
+from meshops.proportion.checks import diameter_info_checks, run_checks
+from meshops.proportion.diameters import compute_diameters
 from meshops.proportion.errors import ProportionError
 from meshops.proportion.frame import apply_heuristic_frame, figure_span_from_landmarks
 from meshops.proportion.fuse import (
+    build_cross_sections,
+    build_depth_bands,
     compute_package_score,
     fuse_xyz,
     head_unit_frac_from_front,
@@ -57,10 +60,11 @@ def analyze_proportion(
     pose: str = "unknown"
     multi_from_assist = False
     views: dict[str, ViewLandmarks] = {}
+    edge_pairs: dict[str, Any] = {}
 
     if assist_path is not None:
         assist = load_assist_json(assist_path)
-        views, pose, multi_from_assist, assist_notes = apply_assist(assist, view_images)
+        views, pose, multi_from_assist, assist_notes, edge_pairs = apply_assist(assist, view_images)
         messages.extend(assist_notes)
         messages.append(f"assist loaded: {assist_path}")
     else:
@@ -116,7 +120,11 @@ def analyze_proportion(
         if hair:
             quality.hair_volume_margin = True
 
-    # Fuse XYZ
+    # Diameters first so edge landmarks inject into views before XYZ fuse
+    diameters, diam_msgs = compute_diameters(edge_pairs, views, height_m=height_m)
+    messages.extend(diam_msgs)
+
+    # Fuse XYZ (includes injected edge landmarks)
     landmarks_xyz, fuse_quality, fuse_msgs = fuse_xyz(
         views,
         height_m=height_m,
@@ -130,10 +138,25 @@ def analyze_proportion(
     if fuse_quality.notes:
         quality.notes.extend(fuse_quality.notes)
 
-    # Checks
-    checks = run_checks(views, pose=str(pose), head_unit_frac=head_unit)
+    # Depth bands + orientation info checks
+    depth_bands, depth_checks, depth_msgs = build_depth_bands(
+        views,
+        height_m=height_m,
+        foreshortening_risk=foreshorten,
+    )
+    messages.extend(depth_msgs)
 
-    # package_score
+    # Cross-sections when Rx/Ry z match (R13)
+    cross_sections = build_cross_sections(diameters, depth_bands)
+    if cross_sections:
+        messages.append(f"cross_sections: {len(cross_sections)} level(s)")
+
+    # Checks (canon signature unchanged) + diameter info checks + depth orientation
+    checks = run_checks(views, pose=str(pose), head_unit_frac=head_unit)
+    checks.extend(diameter_info_checks(diameters))
+    checks.extend(depth_checks)
+
+    # package_score (R8 — chest/hip depth only; weights unchanged)
     score, breakdown = compute_package_score(views)
 
     report = ProportionReport(
@@ -147,6 +170,11 @@ def analyze_proportion(
         vertical_span_discrepancy=disc,
         views=views,
         landmarks_xyz=landmarks_xyz,
+        diameters=diameters,
+        depth_bands=depth_bands,
+        cross_sections=cross_sections,
+        thickness_band_count=len(diameters),
+        depth_band_count=len(depth_bands),
         checks=checks,
         quality=quality,
         messages=messages,
@@ -224,6 +252,8 @@ def report_to_markdown(report: ProportionReport) -> str:
         )
     if report.vertical_span_discrepancy is not None:
         lines.append(f"- **vertical_span_discrepancy:** {report.vertical_span_discrepancy:.4f}")
+    lines.append(f"- **thickness_band_count:** {report.thickness_band_count}")
+    lines.append(f"- **depth_band_count:** {report.depth_band_count}")
     lines.extend(
         [
             "",
@@ -245,6 +275,42 @@ def report_to_markdown(report: ProportionReport) -> str:
             f"- **{key}:** {vl.width_px}x{vl.height_px}px, "
             f"{len(vl.landmarks)} landmarks, span={vl.figure_span_px}"
         )
+
+    # R6: fixed section headers
+    lines.extend(["", "## Diameters", ""])
+    if report.diameters:
+        for d in report.diameters:
+            z_s = f"{d.z_frac:.3f}" if d.z_frac is not None else "—"
+            lines.append(
+                f"- **{d.band_id}** ({d.view}): width_frac={d.width_frac:.4f} "
+                f"(width_px={d.width_px:.1f}, eucl={d.width_eucl_px:.1f}, "
+                f"theta_deg={d.theta_deg:.1f}), z_frac={z_s}, conf={d.confidence:.2f}"
+            )
+    else:
+        lines.append("- (none)")
+
+    lines.extend(["", "## Depth bands", ""])
+    if report.depth_bands:
+        for b in report.depth_bands:
+            swap = " [swapped]" if b.orientation_swapped else ""
+            z_s = f"{b.z_frac:.3f}" if b.z_frac is not None else "—"
+            lines.append(
+                f"- **{b.band_id}**: depth_frac={b.depth_frac:.4f}, "
+                f"y_mid={b.y_mid:.4f}, z_frac={z_s}, conf={b.confidence:.2f}{swap}"
+            )
+    else:
+        lines.append("- (none)")
+
+    lines.extend(["", "## Cross-sections", ""])
+    if report.cross_sections:
+        for cs in report.cross_sections:
+            lines.append(
+                f"- **{cs.level_id}**: rx_frac={cs.rx_frac:.4f}, "
+                f"ry_frac={cs.ry_frac:.4f}, z_frac={cs.z_frac:.3f}"
+            )
+    else:
+        lines.append("- (none)")
+
     lines.extend(["", "## Checks", ""])
     for c in report.checks:
         mark = "OK" if c.ok else "FLAG"

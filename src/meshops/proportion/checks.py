@@ -10,7 +10,7 @@ import math
 from typing import Any
 
 from meshops.proportion.fuse import head_unit_frac_from_front, vertical_span_discrepancy
-from meshops.proportion.models import CheckResult, ViewLandmarks
+from meshops.proportion.models import CheckResult, DiameterMeasure, ViewLandmarks
 
 # Tolerances (generous — art canons, not force-fit)
 _HU_8HEAD = 1.0 / 8.0
@@ -109,6 +109,67 @@ def run_checks(
             expected="present for full package",
         )
     )
+
+    return checks
+
+
+def diameter_info_checks(diameters: list[DiameterMeasure]) -> list[CheckResult]:
+    """Info-grade diameter ratio checks (separate from run_checks — R7).
+
+    Does not change run_checks signature. Examples: thigh ≥ calf width.
+    """
+    checks: list[CheckResult] = []
+    if not diameters:
+        return checks
+
+    by_band: dict[str, DiameterMeasure] = {}
+    for d in diameters:
+        # Prefer front view; first write wins unless front overwrites
+        existing = by_band.get(d.band_id)
+        if existing is None or d.view == "front":
+            by_band[d.band_id] = d
+
+    def _avg_width(*ids: str) -> float | None:
+        vals = [by_band[i].width_frac for i in ids if i in by_band]
+        if not vals:
+            return None
+        return sum(vals) / len(vals)
+
+    thigh_w = _avg_width("thigh_l", "thigh_r")
+    calf_w = _avg_width("calf_l", "calf_r")
+    if thigh_w is not None and calf_w is not None:
+        ok = thigh_w >= calf_w * 0.95  # small tolerance
+        checks.append(
+            CheckResult(
+                name="thigh_vs_calf_width",
+                ok=ok,
+                severity="info",
+                message=(
+                    f"thigh_width_frac={thigh_w:.4f} vs calf_width_frac={calf_w:.4f} "
+                    f"({'ok thigh≥calf' if ok else 'calf wider than thigh — check edges'})"
+                ),
+                measured={"thigh_frac": thigh_w, "calf_frac": calf_w},
+                expected="thigh ≥ calf width (info)",
+            )
+        )
+
+    upper_w = _avg_width("upper_arm_l", "upper_arm_r")
+    fore_w = _avg_width("forearm_l", "forearm_r")
+    if upper_w is not None and fore_w is not None:
+        ok = upper_w >= fore_w * 0.95
+        checks.append(
+            CheckResult(
+                name="upper_arm_vs_forearm_width",
+                ok=ok,
+                severity="info",
+                message=(
+                    f"upper_arm_frac={upper_w:.4f} vs forearm_frac={fore_w:.4f} "
+                    f"({'ok' if ok else 'forearm wider than upper arm — check edges'})"
+                ),
+                measured={"upper_arm_frac": upper_w, "forearm_frac": fore_w},
+                expected="upper_arm ≥ forearm width (info)",
+            )
+        )
 
     return checks
 
