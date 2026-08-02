@@ -320,9 +320,13 @@ def merge_assist_docs(
     unless prefer_merge (then old wins).
     """
     out = blank_assist_document()
-    # pose / multi_figure: prefer new if set meaningfully
+    # pose: prefer new if set; multi_figure: prefer new when present so
+    # explicit --no-multi-figure (False) is not sticky-ORed with base True.
     out["pose"] = new.get("pose") or base.get("pose") or out["pose"]
-    out["multi_figure"] = bool(new.get("multi_figure") or base.get("multi_figure"))
+    if "multi_figure" in new:
+        out["multi_figure"] = bool(new["multi_figure"])
+    else:
+        out["multi_figure"] = bool(base.get("multi_figure", False))
 
     # edge_pairs
     base_ep = _as_dict(base.get("edge_pairs"))
@@ -408,7 +412,7 @@ def build_assist_from_px(
     data = capture.model_dump(mode="json") if isinstance(capture, AssistPixelCapture) else capture
 
     kind = data.get("kind")
-    if kind is not None and kind != "assist_pixel_capture":
+    if kind != "assist_pixel_capture":
         raise ProportionError(
             f"expected kind assist_pixel_capture, got {kind!r}",
             code="capture_failed",
@@ -490,7 +494,7 @@ def build_assist_from_dump(
     data = dump.model_dump(mode="json") if isinstance(dump, AssistEmptyDump) else dump
 
     kind = data.get("kind")
-    if kind is not None and kind != "assist_empty_dump":
+    if kind != "assist_empty_dump":
         raise ProportionError(
             f"expected kind assist_empty_dump, got {kind!r}",
             code="capture_failed",

@@ -359,6 +359,72 @@ def test_capture__prefer_merge() -> None:
     assert merged_old["views"]["front"]["landmarks"]["chin"] == [1, 1]
 
 
+def test_capture__merge_explicit_no_multi_figure() -> None:
+    """Explicit multi_figure=False on new must not sticky-OR with base True (Codex P2-002)."""
+    base = blank_assist_document()
+    base["multi_figure"] = True
+    base["views"]["front"]["landmarks"]["sole"] = [50, 190]
+    new = blank_assist_document()
+    new["multi_figure"] = False
+    new["views"]["front"]["landmarks"]["chin"] = [50, 40]
+    merged = merge_assist_docs(base, new, prefer_merge=False)
+    assert merged["multi_figure"] is False
+    assert merged["views"]["front"]["landmarks"]["sole"] == [50, 190]
+    assert merged["views"]["front"]["landmarks"]["chin"] == [50, 40]
+
+
+def test_capture__px_requires_kind() -> None:
+    """Missing kind fails closed (Codex P2-003)."""
+    bad = {
+        "schema_version": "1.0.0",
+        "pose": "unknown",
+        "multi_figure": False,
+        "views": {"front": {"landmarks": {"chin": [1, 2]}}},
+    }
+    with pytest.raises(ProportionError) as ei:
+        build_assist_from_px(bad)
+    assert ei.value.code == "capture_failed"
+
+
+def test_capture__dump_requires_kind() -> None:
+    bad = {
+        "schema_version": "1.0.0",
+        "view_sizes": {"front": {"width_px": 100, "height_px": 200}},
+        "empties": [{"name": "ASSIST_front_chin", "x_px": 1.0, "y_px": 2.0}],
+    }
+    with pytest.raises(ProportionError) as ei:
+        build_assist_from_dump(bad)
+    assert ei.value.code == "capture_failed"
+
+
+def test_mcp_analyze_attach_requires_out(tmp_path: Path) -> None:
+    """attach_session without out fails closed (Codex P2-001)."""
+    from meshops.mcp.tools import mesh_proportion_analyze
+
+    views = tmp_path / "views"
+    views.mkdir()
+    _minimal_png(views / "front.png")
+    _minimal_png(views / "left.png")
+    _minimal_png(views / "three_quarter.png")
+    assist = blank_assist_document()
+    assist["views"]["front"]["landmarks"]["sole"] = [50, 190]
+    assist["views"]["front"]["landmarks"]["chin"] = [50, 40]
+    assist["views"]["front"]["landmarks"]["cranial_vertex"] = [50, 10]
+    ap = tmp_path / "landmarks_assist.json"
+    write_assist(ap, assist, force=True)
+
+    with pytest.raises(ProportionError) as ei:
+        mesh_proportion_analyze(
+            tmp_path,
+            views_dir=str(views),
+            landmarks=str(ap),
+            attach_session="sess-missing",
+            out=None,
+        )
+    assert ei.value.code == "capture_failed"
+    assert "out" in str(ei.value).lower() or "attach" in str(ei.value).lower()
+
+
 # ---------------------------------------------------------------------------
 # Dump script + CLI
 # ---------------------------------------------------------------------------

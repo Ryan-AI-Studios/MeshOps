@@ -729,9 +729,17 @@ def mesh_proportion_analyze(
     from meshops.proportion.analyze import analyze_proportion
     from meshops.proportion.capture import attach_report_to_organic_session
 
+    from meshops.proportion.errors import ProportionError
+
     views = _resolve_tool_path(views_dir, work_root)
     lm = _resolve_tool_path(landmarks, work_root) if landmarks else None
     out_dir = _resolve_tool_path(out, work_root) if out else None
+    if attach_session and out_dir is None:
+        raise ProportionError(
+            "attach_session requires out (report must be written)",
+            code="capture_failed",
+            details={"attach_session": attach_session},
+        )
     report = analyze_proportion(
         views,
         landmarks_path=lm,
