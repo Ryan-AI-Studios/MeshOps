@@ -372,29 +372,33 @@ def _build_overlay(ref_grid: np.ndarray, mesh_grid: np.ndarray) -> Any:
     mesh_only = mesh_grid & ~ref_grid
     both = ref_grid & mesh_grid
 
-    # ref red alpha ~120
+    # ref red alpha ~120 (R6)
     canvas[ref_only, 0] = 220
     canvas[ref_only, 1] = 40
     canvas[ref_only, 2] = 40
-    canvas[ref_only, 3] = 255
+    canvas[ref_only, 3] = 120
 
-    # mesh cyan alpha ~120
+    # mesh cyan alpha ~120 (R6)
     canvas[mesh_only, 0] = 40
     canvas[mesh_only, 1] = 200
     canvas[mesh_only, 2] = 220
-    canvas[mesh_only, 3] = 255
+    canvas[mesh_only, 3] = 120
 
-    # intersection yellow/white
+    # intersection yellow/white (slightly more opaque for glance)
     canvas[both, 0] = 240
     canvas[both, 1] = 230
     canvas[both, 2] = 60
-    canvas[both, 3] = 255
+    canvas[both, 3] = 180
 
     return Image.fromarray(canvas, mode="RGBA")
 
 
 def _render_mesh_front(mesh_path: Path) -> Path:
-    """Render mesh front view via F3D; return path to front.png (R5 / B2)."""
+    """Render mesh front view via F3D; return path to front.png (R5 / B2).
+
+    Forces white background so ``frame.silhouette_mask`` (near-white ≥ 250)
+    classifies the backdrop as background, not full-frame foreground.
+    """
     from meshops.render.f3d_renderer import F3DRenderer, RenderUnavailableError
 
     tmp = Path(tempfile.mkdtemp(prefix="meshops_sil_"))
@@ -405,6 +409,7 @@ def _render_mesh_front(mesh_path: Path) -> Path:
             tmp,
             camera_names=("front",),
             include_depth_for=(),
+            background_color=(1.0, 1.0, 1.0),
         )
     except RenderUnavailableError as exc:
         raise ProportionError(

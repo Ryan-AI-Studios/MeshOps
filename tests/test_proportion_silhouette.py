@@ -312,3 +312,140 @@ def test_silhouette__cli_json_smoke(tmp_path: Path) -> None:
     assert payload["ok"] is True
     assert "score_iou" in payload
     assert "score_dice" in payload
+
+
+def test_silhouette__b1_reuses_frame_silhouette_mask(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """B1: primary mask must call frame.silhouette_mask (not a parallel extractor)."""
+    pytest.importorskip("PIL")
+    import meshops.proportion.silhouette as sil
+
+    calls: list[int] = []
+    real = sil.silhouette_mask
+
+    def _wrap(rgba: np.ndarray) -> np.ndarray:
+        calls.append(1)
+        return real(rgba)
+
+    monkeypatch.setattr(sil, "silhouette_mask", _wrap)
+    ref = _write_rgba_png(tmp_path / "front.png", _rect_silhouette())
+    mesh_view = _write_rgba_png(tmp_path / "mesh_front.png", _rect_silhouette())
+    run_silhouette_compare(ref, tmp_path / "out", mesh_view=mesh_view, force=True)
+    assert len(calls) >= 2  # ref + mesh_view
+
+
+def test_silhouette__corner_median_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When primary silhouette_mask is empty, corner-median fallback is used."""
+    pytest.importorskip("PIL")
+    import meshops.proportion.silhouette as mod
+
+    arr = _blank_white(64, 64)
+    arr[16:48, 16:48, :3] = 40  # dark center — fallback FG via luma
+    path = _write_rgba_png(tmp_path / "ref.png", arr)
+    mesh_view = _write_rgba_png(tmp_path / "mesh.png", _rect_silhouette(64, 64))
+
+    def empty_primary(rgba: np.ndarray) -> np.ndarray:
+        return np.zeros(rgba.shape[:2], dtype=bool)
+
+    monkeypatch.setattr(mod, "silhouette_mask", empty_primary)
+    payload = run_silhouette_compare(path, tmp_path / "out", mesh_view=mesh_view, force=True)
+    assert payload["ok"] is True
+    assert any("corner-median fallback" in m for m in payload["messages"])
+
+
+def test_silhouette__render_unavailable_maps_to_silhouette_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """B2: RenderUnavailableError → silhouette_failed + details.code=render_unavailable."""
+    pytest.importorskip("PIL")
+    from meshops.render.f3d_renderer import RenderUnavailableError
+
+    ref = _write_rgba_png(tmp_path / "front.png", _rect_silhouette())
+    mesh = tmp_path / "unit.stl"
+    mesh.write_text("solid x\nendsolid x\n", encoding="utf-8")
+
+    def _boom(*_a: Any, **_k: Any) -> Any:
+        raise RenderUnavailableError("F3D Engine.create(offscreen=True) failed")
+
+    monkeypatch.setattr(
+        "meshops.render.f3d_renderer.F3DRenderer.render_mesh_to_dir",
+        _boom,
+    )
+    with pytest.raises(ProportionError) as ei:
+        run_silhouette_compare(ref, tmp_path / "out", mesh=mesh, force=True)
+    assert ei.value.code == "silhouette_failed"
+    assert ei.value.details.get("code") == "render_unavailable"
+
+
+def test_silhouette__json_out_path_is_directory_fails(tmp_path: Path) -> None:
+    """C7: .json-suffixed path that is an existing directory → silhouette_failed."""
+    pytest.importorskip("PIL")
+    ref = _write_rgba_png(tmp_path / "front.png", _rect_silhouette())
+    mesh_view = _write_rgba_png(tmp_path / "mesh_front.png", _rect_silhouette())
+    bad = tmp_path / "already.json"
+    bad.mkdir()
+    with pytest.raises(ProportionError) as ei:
+        run_silhouette_compare(ref, bad, mesh_view=mesh_view, force=True)
+    assert ei.value.code == "silhouette_failed"
+
+
+def test_silhouette__overlay_alpha_approx_120(tmp_path: Path) -> None:
+    """R6: ref/mesh overlay tints use alpha ~120."""
+    pytest.importorskip("PIL")
+    from meshops.proportion.silhouette import _build_overlay
+
+    ref_g = np.zeros((GRID_PX, GRID_PX), dtype=bool)
+    mesh_g = np.zeros((GRID_PX, GRID_PX), dtype=bool)
+    ref_g[10:50, 10:50] = True
+    mesh_g[30:70, 30:70] = True
+    img = _build_overlay(ref_g, mesh_g)
+    arr = np.asarray(img)
+    # ref-only pixel
+    assert int(arr[15, 15, 3]) == 120
+    # mesh-only pixel
+    assert int(arr[60, 60, 3]) == 120
+
+
+def test_silhouette__mesh_render_requests_white_background(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R5: --mesh path must pass white background_color to F3DRenderer."""
+    pytest.importorskip("PIL")
+    from meshops.render.f3d_renderer import RenderResult
+
+    ref = _write_rgba_png(tmp_path / "front.png", _rect_silhouette())
+    mesh = tmp_path / "unit.stl"
+    mesh.write_text("solid x\nendsolid x\n", encoding="utf-8")
+    seen: dict[str, Any] = {}
+
+    def _fake_render(
+        self: Any,
+        mesh_path: Any,
+        views_dir: Any,
+        **kwargs: Any,
+    ) -> RenderResult:
+        seen.update(kwargs)
+        out = Path(views_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        front = out / "front.png"
+        # white bg + dark subject so mask is non-empty
+        _write_rgba_png(front, _rect_silhouette())
+        return RenderResult(
+            mesh_id="",
+            rendered_from="mesh",
+            view_paths=[str(front)],
+            cameras=["front"],
+        )
+
+    monkeypatch.setattr(
+        "meshops.render.f3d_renderer.F3DRenderer.render_mesh_to_dir",
+        _fake_render,
+    )
+    payload = run_silhouette_compare(ref, tmp_path / "out", mesh=mesh, force=True)
+    assert payload["ok"] is True
+    assert seen.get("background_color") == (1.0, 1.0, 1.0)
+    assert seen.get("camera_names") == ("front",)
+    assert seen.get("include_depth_for") == ()

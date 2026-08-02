@@ -140,12 +140,17 @@ class F3DRenderer:
         height: int | None = None,
         mesh_id: str = "",
         rendered_from: str = "mesh",
+        background_color: Sequence[float] | None = None,
     ) -> RenderResult:
         """Render RGB (+ selective visual depth) for named cameras into views_dir.
 
         Depth is F3D ``display_depth`` mode on the listed pose names (not a camera).
         When ``include_depth_for`` is non-empty, at least one depth map must be
         written or ``RenderUnavailableError`` is raised.
+
+        ``background_color`` is optional RGB in 0..1 (F3D ``render.background.color``).
+        Silhouette compare (0021) passes white so ``frame.silhouette_mask`` treats
+        background as near-white rather than full-frame foreground.
         """
         f3d = _import_f3d()
         mesh_file = Path(mesh_path)
@@ -196,6 +201,14 @@ class F3DRenderer:
 
             options = engine.options
             _require_option(options, "scene.camera.orthographic", True)
+            if background_color is not None:
+                # Soft set: fail closed only when caller requires white (0021).
+                bg = [float(c) for c in background_color]
+                if not _set_option(options, "render.background.color", bg):
+                    raise RenderUnavailableError(
+                        "Failed to set F3D option 'render.background.color'="
+                        f"{bg!r} (required for silhouette-safe mesh renders)"
+                    )
 
             camera = window.camera
             result = RenderResult(mesh_id=mesh_id, rendered_from=rendered_from)
