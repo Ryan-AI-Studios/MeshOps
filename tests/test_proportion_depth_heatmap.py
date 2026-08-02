@@ -80,6 +80,7 @@ def _write_deltas(path: Path, deltas: list[DepthDelta]) -> Path:
 
 
 def test_heatmap__synthetic_png_and_meta(tmp_path: Path) -> None:
+    pytest.importorskip("PIL")
     samples_path = _write_samples(
         tmp_path / "depth_at_landmarks.json",
         [
@@ -134,6 +135,7 @@ def test_heatmap__pillow_required(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 
 
 def test_heatmap__deltas_dual_panel(tmp_path: Path) -> None:
+    pytest.importorskip("PIL")
     samples_path = _write_samples(
         tmp_path / "depth_at_landmarks.json",
         [
@@ -242,6 +244,7 @@ def test_heatmap__front_right(tmp_path: Path) -> None:
 
 def test_heatmap__colorbar_at_bottom_of_panel(tmp_path: Path) -> None:
     """R3.3: per-panel color bar is horizontal at the bottom (not a right-side vertical bar)."""
+    pytest.importorskip("PIL")
     from PIL import Image  # type: ignore[import-untyped,import-not-found]
 
     from meshops.proportion.depth_heatmap import COLORBAR_H, MARGIN
@@ -285,6 +288,7 @@ def test_heatmap__invalid_samples(tmp_path: Path) -> None:
 
 
 def test_heatmap__cli_json(tmp_path: Path) -> None:
+    pytest.importorskip("PIL")
     samples_path = _write_samples(
         tmp_path / "depth_at_landmarks.json",
         [_sample("chest_front")],

@@ -95,6 +95,7 @@ def _synthetic_disparity(
 
 
 def test_hint__external_disparity_pairs(tmp_path: Path) -> None:
+    pytest.importorskip("PIL")
     depth = _synthetic_disparity()
     depth_path = tmp_path / "depth.png"
     left_path = tmp_path / "left.png"
@@ -130,6 +131,7 @@ def test_hint__external_disparity_pairs(tmp_path: Path) -> None:
 
 
 def test_hint__merge_into_apply_assist(tmp_path: Path) -> None:
+    pytest.importorskip("PIL")
     depth = _synthetic_disparity()
     depth_path = tmp_path / "depth.png"
     left_path = tmp_path / "left.png"
@@ -171,6 +173,7 @@ def test_hint__merge_into_apply_assist(tmp_path: Path) -> None:
 
 
 def test_hint__protected_conf_skip_and_force(tmp_path: Path) -> None:
+    pytest.importorskip("PIL")
     depth = _synthetic_disparity()
     depth_path = tmp_path / "depth.png"
     left_path = tmp_path / "left.png"
@@ -227,6 +230,7 @@ def test_hint__protected_conf_skip_and_force(tmp_path: Path) -> None:
 
 
 def test_hint__default_z_frac_message(tmp_path: Path) -> None:
+    pytest.importorskip("PIL")
     depth = _synthetic_disparity()
     depth_path = tmp_path / "depth.png"
     left_path = tmp_path / "left.png"
@@ -285,6 +289,7 @@ def test_hint__pillow_required_for_depth_decode(
 
 
 def test_hint__empty_all_background(tmp_path: Path) -> None:
+    pytest.importorskip("PIL")
     # all zeros → background
     depth = np.zeros((50, 50), dtype=np.uint8)
     depth_path = tmp_path / "depth.png"
@@ -320,6 +325,7 @@ def test_hint__merge_helpers_conf_floor() -> None:
 
 
 def test_hint__cli_json(tmp_path: Path) -> None:
+    pytest.importorskip("PIL")
     depth = _synthetic_disparity()
     depth_path = tmp_path / "depth.png"
     left_path = tmp_path / "left.png"

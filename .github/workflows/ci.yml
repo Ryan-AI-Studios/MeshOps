@@ -41,9 +41,10 @@ jobs:
           enable-cache: true
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Sync project (dev + mcp extras)
+      - name: Sync project (dev + mcp + proportion extras)
         # mcp extra required so basedpyright + MCP tests see meshops.mcp (R11).
-        run: uv sync --extra dev --extra mcp
+        # proportion (Pillow) so 0020 depth-heatmap/hint PNG success paths run in CI.
+        run: uv sync --extra dev --extra mcp --extra proportion
 
       - name: Ruff lint
         run: uv run ruff check .
