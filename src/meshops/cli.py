@@ -86,11 +86,12 @@ app.add_typer(bench_app, name="bench")
 proportion_app = typer.Typer(
     name="proportion",
     help=(
-        "Pixel proportion analysis from multi-view RGB (tracks 0012-0014). "
-        "Verbs: template | analyze | show | scaffold. "
+        "Pixel proportion analysis from multi-view RGB (tracks 0012-0015). "
+        "Verbs: template | analyze | show | scaffold | guides. "
         "Assist-first landmarks + head-unit checks + blockout-grade XYZ; "
         "schema 1.1.0 diameters (edge pairs) + left depth bands + cross-sections; "
-        "scaffold creates package layout + package_checklist.json only (not mesh/print success). "
+        "scaffold creates package layout + package_checklist.json only (not mesh/print success); "
+        "guides emits proportion_guides.json + Blender 5.2 setup script (authoring aids only). "
         "Optional: meshops[proportion] (Pillow)."
     ),
     add_completion=False,
@@ -1597,7 +1598,7 @@ def bench_envelope_cmd(
 
 
 # ---------------------------------------------------------------------------
-# proportion (0012-0014) — template | analyze | show | scaffold  (no check verb)
+# proportion (0012-0015) — template | analyze | show | scaffold | guides
 # ---------------------------------------------------------------------------
 
 
@@ -1881,6 +1882,74 @@ def proportion_scaffold_cmd(
             typer.echo(f"  analyze_hint: {result.analyze_hint}")
         for p in result.paths:
             typer.echo(f"  {p}")
+    raise typer.Exit(0)
+
+
+@proportion_app.command("guides")
+def proportion_guides_cmd(
+    report: Path = typer.Option(
+        ...,
+        "--report",
+        help="Path to proportion_report.json",
+    ),
+    out: Path = typer.Option(
+        ...,
+        "--out",
+        help="Output file (.py/.json) or directory (default basenames)",
+    ),
+    format: str = typer.Option(
+        "both",
+        "--format",
+        help="Output format: bpy | json | both (default both)",
+    ),
+    seeds: bool = typer.Option(
+        False,
+        "--seeds/--no-seeds",
+        help="Emit optional SEED_* capsule/ellipsoid primitives (default off)",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite existing guide output files",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
+) -> None:
+    """Emit LM_* guide empties + optional SEED_* from report (guides only — not mesh/print)."""
+    from meshops.proportion.errors import ProportionError
+    from meshops.proportion.guides import run_guides
+
+    fmt = format.strip().lower()
+    if fmt not in ("bpy", "json", "both"):
+        raise typer.BadParameter("--format must be bpy, json, or both")
+
+    try:
+        payload = run_guides(
+            report,
+            out,
+            format=fmt,  # type: ignore[arg-type]
+            seeds=seeds,
+            force=force,
+        )
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    if json_out:
+        _emit_json(payload)
+    else:
+        counts = payload.get("counts", {})
+        typer.echo(
+            f"guides format={payload.get('format')} "
+            f"empties={counts.get('empties', 0)} "
+            f"ladder={counts.get('ladder', 0)} "
+            f"seeds={counts.get('seeds', 0)}"
+        )
+        for p in payload.get("paths", []):
+            typer.echo(f"  {p}")
+        for msg in payload.get("messages", []):
+            typer.echo(f"  note: {msg}")
+        typer.echo("guides only — not mesh or print success")
     raise typer.Exit(0)
 
 

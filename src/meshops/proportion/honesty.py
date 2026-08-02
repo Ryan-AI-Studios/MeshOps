@@ -8,3 +8,4 @@ from __future__ import annotations
 
 # Binding freeze — do not rephrase without a schema bump.
 PROPORTION_HONESTY = "proportion_measurement_not_mesh_or_print_success"
+GUIDE_HONESTY = "proportion_guides_not_mesh_or_print_success"
