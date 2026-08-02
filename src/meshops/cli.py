@@ -86,10 +86,12 @@ app.add_typer(bench_app, name="bench")
 proportion_app = typer.Typer(
     name="proportion",
     help=(
-        "Pixel proportion analysis from multi-view RGB (tracks 0012+0013). "
+        "Pixel proportion analysis from multi-view RGB (tracks 0012-0014). "
+        "Verbs: template | analyze | show | scaffold. "
         "Assist-first landmarks + head-unit checks + blockout-grade XYZ; "
-        "schema 1.1.0 diameters (edge pairs) + left depth bands + cross-sections. "
-        "Not mesh reconstruction or print success. Optional: meshops[proportion] (Pillow)."
+        "schema 1.1.0 diameters (edge pairs) + left depth bands + cross-sections; "
+        "scaffold creates package layout + package_checklist.json only (not mesh/print success). "
+        "Optional: meshops[proportion] (Pillow)."
     ),
     add_completion=False,
     no_args_is_help=True,
@@ -1595,7 +1597,7 @@ def bench_envelope_cmd(
 
 
 # ---------------------------------------------------------------------------
-# proportion (0012+0013) — template | analyze | show  (no check verb)
+# proportion (0012-0014) — template | analyze | show | scaffold  (no check verb)
 # ---------------------------------------------------------------------------
 
 
@@ -1747,6 +1749,138 @@ def proportion_show_cmd(
         _emit_json(payload)
     else:
         typer.echo(report_to_markdown(rep))
+    raise typer.Exit(0)
+
+
+@proportion_app.command("scaffold")
+def proportion_scaffold_cmd(
+    out: Path = typer.Option(
+        ...,
+        "--out",
+        help="Output directory for package layout (created if missing)",
+    ),
+    dual: bool = typer.Option(
+        False,
+        "--dual",
+        help="Dual package: proportion/ + character/ under --out (Package A + B)",
+    ),
+    mode: str | None = typer.Option(
+        None,
+        "--mode",
+        help="Package mode: single | dual (conflict with --dual + single → error)",
+    ),
+    height_m: float | None = typer.Option(
+        None,
+        "--height-m",
+        help="Optional stature meters stored in package_checklist.json",
+    ),
+    subject: str | None = typer.Option(
+        None,
+        "--subject",
+        help="Subject label for checklist / SOURCE.txt",
+    ),
+    pose: str = typer.Option(
+        "a_pose",
+        "--pose",
+        help="Pose kind default for checklist / optional assist template (default a_pose)",
+    ),
+    heroic_vs_realistic: str = typer.Option(
+        "unknown",
+        "--heroic-vs-realistic",
+        help="heroic | realistic | stylized | unknown",
+    ),
+    figures: str | None = typer.Option(
+        None,
+        "--figures",
+        help="Comma-separated in-scope figure labels (strip/drop empties)",
+    ),
+    source: str = typer.Option(
+        "unknown",
+        "--source",
+        help="source_kind: imagen|chatgpt|photo|f3d|blender|other|unknown",
+    ),
+    wardrobe_tier: str | None = typer.Option(
+        None,
+        "--wardrobe-tier",
+        help="two_piece_midriff|unitard|tank_leggings|costume|unknown",
+    ),
+    with_template: bool = typer.Option(
+        False,
+        "--with-template",
+        help="Write landmarks_assist.json (pose post-processed from checklist)",
+    ),
+    stub_images: bool = typer.Option(
+        False,
+        "--stub-images",
+        help="Write 1x1 PNG stubs for required views (off by default; layout only)",
+    ),
+    include_back_stub: bool = typer.Option(
+        False,
+        "--include-back-stub",
+        help="Also write back.png stub when --stub-images",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite existing package_checklist.json (and stubs if --stub-images)",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit scaffold result JSON"),
+) -> None:
+    """Create multi-view package layout + checklist (layout only — not mesh/print success)."""
+    from meshops.proportion.checklist import parse_figures
+    from meshops.proportion.errors import ProportionError
+    from meshops.proportion.scaffold import scaffold_package
+
+    # R3: --dual + --mode single is illegal
+    if dual and mode is not None and mode.strip().lower() == "single":
+        raise typer.BadParameter(
+            "cannot combine --dual with --mode single (use --dual alone or --mode dual)"
+        )
+    if mode is not None and mode.strip().lower() not in ("single", "dual"):
+        raise typer.BadParameter("--mode must be 'single' or 'dual'")
+
+    resolved_mode = "dual" if dual else (mode.strip().lower() if mode else "single")
+    figure_list = parse_figures(figures)
+
+    try:
+        result = scaffold_package(
+            out,
+            dual=dual or resolved_mode == "dual",
+            mode=resolved_mode if not dual else "dual",  # type: ignore[arg-type]
+            height_m=height_m,
+            subject=subject,
+            pose=pose,
+            heroic_vs_realistic=heroic_vs_realistic,
+            figures=figure_list,
+            source_kind=source,  # type: ignore[arg-type]
+            wardrobe_tier=wardrobe_tier,  # type: ignore[arg-type]
+            with_template=with_template,
+            stub_images=stub_images,
+            include_back_stub=include_back_stub,
+            force=force,
+        )
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    payload = {
+        "ok": True,
+        "mode": result.mode,
+        "paths": [str(p) for p in result.paths],
+        "analyze_hint": str(result.analyze_hint) if result.analyze_hint is not None else None,
+    }
+    if json_out:
+        _emit_json(payload)
+    else:
+        typer.echo(
+            f"scaffold mode={result.mode} paths={len(result.paths)} "
+            "(layout only — not mesh or print success)"
+        )
+        if result.analyze_hint is not None:
+            typer.echo(f"  analyze_hint: {result.analyze_hint}")
+        for p in result.paths:
+            typer.echo(f"  {p}")
     raise typer.Exit(0)
 
 

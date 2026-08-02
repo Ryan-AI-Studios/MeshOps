@@ -13,6 +13,9 @@ ProportionErrorCode = Literal[
     "incomplete_stature",
     "invalid_report",
     "write_failed",
+    "checklist_exists",
+    "scaffold_failed",
+    "invalid_checklist",
     "unknown",
 ]
 
