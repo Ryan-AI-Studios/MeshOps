@@ -871,3 +871,22 @@ def mesh_proportion_capture(
         attach_session=attach_session,
         work_root=work_root,
     )
+
+
+def mesh_proportion_depth_samples(
+    work_root: Path,
+    *,
+    report: str,
+    out: str,
+    mesh: str | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Export depth_at_landmarks (+ optional mesh deltas). Authoring only — DEPTH_HONESTY / N6."""
+    from meshops.proportion.depth_samples import run_depth_samples
+
+    return run_depth_samples(
+        _resolve_tool_path(report, work_root),
+        _resolve_tool_path(out, work_root),
+        mesh=_resolve_tool_path(mesh, work_root) if mesh else None,
+        force=force,
+    )

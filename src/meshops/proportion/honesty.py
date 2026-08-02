@@ -10,3 +10,4 @@ from __future__ import annotations
 PROPORTION_HONESTY = "proportion_measurement_not_mesh_or_print_success"
 GUIDE_HONESTY = "proportion_guides_not_mesh_or_print_success"
 CAPTURE_HONESTY = "proportion_capture_not_mesh_or_print_success"
+DEPTH_HONESTY = "proportion_depth_samples_not_mesh_or_print_success"
