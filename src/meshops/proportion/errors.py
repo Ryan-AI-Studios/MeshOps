@@ -16,6 +16,8 @@ ProportionErrorCode = Literal[
     "checklist_exists",
     "scaffold_failed",
     "invalid_checklist",
+    "guides_empty",
+    "guides_failed",
     "unknown",
 ]
 
