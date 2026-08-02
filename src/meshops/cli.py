@@ -86,8 +86,9 @@ app.add_typer(bench_app, name="bench")
 proportion_app = typer.Typer(
     name="proportion",
     help=(
-        "Pixel proportion analysis from multi-view RGB (track 0012). "
-        "Assist-first landmarks + head-unit checks + blockout-grade XYZ. "
+        "Pixel proportion analysis from multi-view RGB (tracks 0012+0013). "
+        "Assist-first landmarks + head-unit checks + blockout-grade XYZ; "
+        "schema 1.1.0 diameters (edge pairs) + left depth bands + cross-sections. "
         "Not mesh reconstruction or print success. Optional: meshops[proportion] (Pillow)."
     ),
     add_completion=False,
@@ -1594,7 +1595,7 @@ def bench_envelope_cmd(
 
 
 # ---------------------------------------------------------------------------
-# proportion (0012) — template | analyze | show  (no check verb)
+# proportion (0012+0013) — template | analyze | show  (no check verb)
 # ---------------------------------------------------------------------------
 
 

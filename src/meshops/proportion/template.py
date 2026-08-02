@@ -68,7 +68,34 @@ _LEFT_LANDMARK_KEYS: tuple[str, ...] = (
     "chest_back",
     "hip_front",
     "hip_back",
+    "breast_front",
+    "breast_back",
+    "glute_front",
+    "glute_back",
+    "thigh_front",
+    "thigh_back",
+    "calf_front",
+    "calf_back",
     "spine_hint",
+)
+
+# Top-level edge_pairs stubs (sibling of views) — fill [[x0,y0],[x1,y1]].
+_EDGE_PAIR_BANDS: tuple[str, ...] = (
+    "upper_arm_l",
+    "upper_arm_r",
+    "forearm_l",
+    "forearm_r",
+    "wrist_l",
+    "wrist_r",
+    "thigh_l",
+    "thigh_r",
+    "calf_l",
+    "calf_r",
+    "ankle_l",
+    "ankle_r",
+    "bust",
+    "waist",
+    "neck",
 )
 
 _TQ_LANDMARK_KEYS: tuple[str, ...] = (
@@ -112,10 +139,15 @@ def blank_assist_document() -> dict[str, Any]:
             "facing_direction": _FACING[key],
             "landmarks": landmarks,
         }
+    # Top-level edge_pairs (R4 / R15) — null stubs per front band
+    edge_pairs: dict[str, Any] = {
+        "front": {band: None for band in _EDGE_PAIR_BANDS},
+    }
     return {
         "schema_version": PROPORTION_SCHEMA_VERSION,
         "pose": "unknown",
         "multi_figure": False,
+        "edge_pairs": edge_pairs,
         "views": views,
     }
 

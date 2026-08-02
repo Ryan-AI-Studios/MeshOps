@@ -15,6 +15,7 @@ from meshops.proportion.models import (
 )
 
 # Common landmark ids (loose validation — unknown ids allowed with note).
+# Edge suffixes {band}_edge0/_edge1 are allowed without spam (R5) via is_edge_landmark_id.
 KNOWN_LANDMARK_IDS: frozenset[str] = frozenset(
     {
         "hair_crown",
@@ -56,6 +57,14 @@ KNOWN_LANDMARK_IDS: frozenset[str] = frozenset(
         "chest_back",
         "hip_front",
         "hip_back",
+        "breast_front",
+        "breast_back",
+        "glute_front",
+        "glute_back",
+        "thigh_front",
+        "thigh_back",
+        "calf_front",
+        "calf_back",
         "spine_hint",
         "upper_arm_l",
         "upper_arm_r",
@@ -68,6 +77,9 @@ KNOWN_LANDMARK_IDS: frozenset[str] = frozenset(
         "heel",
         "heel_l",
         "heel_r",
+        "bust",
+        "waist",
+        "neck",
     }
 )
 
@@ -182,14 +194,18 @@ def load_assist_json(path: Path | str) -> dict[str, Any]:
 def apply_assist(
     assist: dict[str, Any],
     view_images: dict[str, ViewImage],
-) -> tuple[dict[str, ViewLandmarks], PoseKind | str, bool, list[str]]:
+) -> tuple[dict[str, ViewLandmarks], PoseKind | str, bool, list[str], dict[str, Any]]:
     """Merge assist landmarks into ViewLandmarks keyed by view.
 
-    Returns (views, pose, multi_figure, notes).
+    Returns (views, pose, multi_figure, notes, edge_pairs).
+    edge_pairs is the top-level assist key (sibling of views), or {}.
     """
+    from meshops.proportion.diameters import is_edge_landmark_id, parse_edge_pairs
+
     notes: list[str] = []
     pose: PoseKind | str = assist.get("pose", "unknown") or "unknown"
     multi_figure = bool(assist.get("multi_figure", False))
+    edge_pairs = parse_edge_pairs(assist)
     views_raw = assist.get("views")
     if views_raw is None:
         views_raw = {}
@@ -234,7 +250,8 @@ def apply_assist(
 
         for lid, val in lm_raw.items():
             sid = str(lid)
-            if sid not in KNOWN_LANDMARK_IDS:
+            # R5: edge0/edge1 suffixes allowed without spam notes
+            if sid not in KNOWN_LANDMARK_IDS and not is_edge_landmark_id(sid):
                 notes.append(f"unknown landmark id {sid!r} in {view_key} (allowed)")
             lm = _parse_landmark_value(sid, val, width_px=img.width_px, height_px=img.height_px)
             if lm is not None:
@@ -254,7 +271,7 @@ def apply_assist(
                 y1=float(bb["y1"]),
             )
 
-    return result, pose, multi_figure, notes
+    return result, pose, multi_figure, notes, edge_pairs
 
 
 def find_default_assist(views_dir: Path | str) -> Path | None:

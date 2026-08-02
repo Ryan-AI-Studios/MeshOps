@@ -1,4 +1,4 @@
-"""Proportion report models — schema_version "1.0.0" is **0012-owned**.
+"""Proportion report models — schema_version "1.0.0"/"1.1.0" is **0012+0013 owned**.
 
 Independence: ProportionReport schema_version does **not** share versioning,
 freeze rules, or compatibility with:
@@ -9,7 +9,8 @@ freeze rules, or compatibility with:
 - DesignManifest.schema_version (0003)
 - HostedReport schema (0007)
 
-Bump proportion schemas only when 0012 contracts change.
+Bump proportion schemas only when 0012/0013 contracts change.
+Write always "1.1.0"; load still accepts "1.0.0" (new fields default empty/0).
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from meshops.proportion.honesty import PROPORTION_HONESTY
 
-PROPORTION_SCHEMA_VERSION: Literal["1.0.0"] = "1.0.0"
+PROPORTION_SCHEMA_VERSION: Literal["1.0.0", "1.1.0"] = "1.1.0"
 
 ViewKey = Literal["front", "left", "three_quarter", "back"]
 PoseKind = Literal["a_pose", "hanging", "unknown", "t_pose", "other"]
@@ -38,7 +39,7 @@ REQUIRED_VIEW_KEYS: tuple[str, ...] = ("front", "left", "three_quarter")
 CANONICAL_VIEW_KEYS: tuple[str, ...] = ("front", "left", "three_quarter", "back")
 IMAGE_EXTENSIONS: tuple[str, ...] = (".png", ".jpg", ".jpeg", ".webp")
 
-# package_score weights (spec §3.1 F) — completeness only.
+# package_score weights (spec §3.1 F) — completeness only; 0013 does not reweight.
 SCORE_VIEWS_TOTAL = 40.0
 SCORE_PER_REQUIRED_VIEW = SCORE_VIEWS_TOTAL / 3.0  # ≈13.333
 SCORE_STATURE = 25.0
@@ -103,6 +104,59 @@ class LandmarkXYZ(BaseModel):
     sources: list[str] = Field(default_factory=list)
 
 
+class DiameterMeasure(BaseModel):
+    """Limb/torso thickness from edge pair (ortho-aware primary width)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    band_id: str
+    view: str
+    width_px: float  # ortho primary
+    width_eucl_px: float
+    theta_deg: float
+    width_frac: float
+    width_m: float | None = None
+    half_width_frac: float | None = None
+    half_width_m: float | None = None
+    mid_x_px: float
+    mid_y_px: float
+    z_frac: float | None = None
+    x_frac: float | None = None
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    method: str = "edge_pair"
+    sources: list[str] = Field(default_factory=list)
+
+
+class DepthBand(BaseModel):
+    """Left-view front/back depth band (body +Y toward camera)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    band_id: str
+    depth_px: float
+    depth_frac: float
+    depth_m: float | None = None
+    y_front: float
+    y_back: float
+    y_mid: float
+    z_frac: float | None = None
+    confidence: float = Field(default=0.8, ge=0.0, le=1.0)
+    sources: list[str] = Field(default_factory=list)
+    orientation_swapped: bool = False
+
+
+class CrossSection(BaseModel):
+    """Optional Rx/Ry cross-section when diameter + depth z_frac match."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    level_id: str
+    z_frac: float
+    rx_frac: float
+    ry_frac: float
+    sources: list[str] = Field(default_factory=list)
+
+
 class CheckResult(BaseModel):
     """One comparative-measurement check (flag, do not force-fit)."""
 
@@ -135,7 +189,7 @@ class ProportionReport(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["1.0.0"] = PROPORTION_SCHEMA_VERSION
+    schema_version: Literal["1.0.0", "1.1.0"] = PROPORTION_SCHEMA_VERSION
     honesty: str = PROPORTION_HONESTY
     package_score: float = Field(default=0.0, ge=0.0, le=100.0)
     pose: PoseKind | str = "unknown"
@@ -148,6 +202,11 @@ class ProportionReport(BaseModel):
     vertical_span_discrepancy: float | None = None
     views: dict[str, ViewLandmarks] = Field(default_factory=dict)
     landmarks_xyz: dict[str, LandmarkXYZ] = Field(default_factory=dict)
+    diameters: list[DiameterMeasure] = Field(default_factory=list)
+    depth_bands: list[DepthBand] = Field(default_factory=list)
+    cross_sections: list[CrossSection] = Field(default_factory=list)
+    thickness_band_count: int = 0
+    depth_band_count: int = 0
     checks: list[CheckResult] = Field(default_factory=list)
     quality: QualityFlags = Field(default_factory=QualityFlags)
     messages: list[str] = Field(default_factory=list)
