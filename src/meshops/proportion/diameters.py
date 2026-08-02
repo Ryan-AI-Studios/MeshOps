@@ -144,12 +144,20 @@ def _measure_from_pair(
     method: str,
     height_m: float | None,
     source_tag: str,
+    skip_reasons: list[str] | None = None,
 ) -> DiameterMeasure | None:
     figure_h = _figure_h(view)
     if figure_h is None or figure_h <= 0:
+        if skip_reasons is not None:
+            skip_reasons.append(
+                f"diameter {band_id} on {view_key}: skipped — need stature "
+                f"(cranial_vertex|hair_crown + sole) for figure height"
+            )
         return None
     width_px, width_eucl, theta_deg = ortho_width(p0[0], p0[1], p1[0], p1[1])
     if width_px <= 0:
+        if skip_reasons is not None:
+            skip_reasons.append(f"diameter {band_id} on {view_key}: skipped — non-positive width")
         return None
     mid_x = (p0[0] + p1[0]) / 2.0
     mid_y = (p0[1] + p1[1]) / 2.0
@@ -214,6 +222,7 @@ def compute_diameters(
     Returns (diameters, messages).
     """
     messages: list[str] = []
+    skip_reasons: list[str] = []
     out: list[DiameterMeasure] = []
     # band_id -> (view_key, measure) — structured overwrites suffix for same band+view
     by_key: dict[tuple[str, str], DiameterMeasure] = {}
@@ -247,6 +256,7 @@ def compute_diameters(
                 method="edge_pairs",
                 height_m=height_m,
                 source_tag=f"edge_pairs:{vk}",
+                skip_reasons=skip_reasons,
             )
             if m is not None:
                 by_key[(vk, bid)] = m
@@ -266,6 +276,7 @@ def compute_diameters(
                 method="edge_suffix",
                 height_m=height_m,
                 source_tag=f"landmarks:{vk}",
+                skip_reasons=skip_reasons,
             )
             if m is not None:
                 by_key[(vk, bid)] = m
@@ -274,6 +285,12 @@ def compute_diameters(
     view_order = {k: i for i, k in enumerate(("front", "left", "three_quarter", "back"))}
     ordered = sorted(by_key.items(), key=lambda kv: (view_order.get(kv[0][0], 99), kv[0][1]))
     out = [m for _, m in ordered]
+    # Deduplicate skip diagnostics (same missing stature can hit many bands)
+    seen_skip: set[str] = set()
+    for reason in skip_reasons:
+        if reason not in seen_skip:
+            seen_skip.add(reason)
+            messages.append(reason)
     if out:
         messages.append(f"diameters: {len(out)} band(s) measured")
     return out, messages

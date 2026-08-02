@@ -17,7 +17,8 @@ from typer.testing import CliRunner
 from meshops.cli import app
 from meshops.proportion.analyze import analyze_proportion, load_report, report_to_markdown
 from meshops.proportion.assist import load_assist_json, point_to_landmark2d
-from meshops.proportion.diameters import ortho_width
+from meshops.proportion.checks import diameter_info_checks
+from meshops.proportion.diameters import compute_diameters, ortho_width
 from meshops.proportion.errors import ProportionError
 from meshops.proportion.fuse import compute_package_score, head_unit_frac_from_front
 from meshops.proportion.honesty import PROPORTION_HONESTY
@@ -881,3 +882,40 @@ def test_glute_only_depth_band_built(tmp_path: Path) -> None:
     d = make_package(tmp_path, assist=assist)
     report = analyze_proportion(d, run_heuristic_frame=False)
     assert any(b.band_id == "glute" for b in report.depth_bands)
+
+
+def test_diameter_info_checks_emitted_in_report(tmp_path: Path) -> None:
+    """R7: diameter_info_checks appears in report.checks when thigh+calf present."""
+    assist = eight_head_assist()
+    assist["edge_pairs"] = {
+        "front": {
+            "thigh_l": [[200, 360], [250, 360]],
+            "thigh_r": [[262, 360], [312, 360]],
+            "calf_l": [[210, 430], [240, 430]],
+            "calf_r": [[272, 430], [302, 430]],
+            "upper_arm_l": [[160, 180], [190, 180]],
+            "upper_arm_r": [[322, 180], [352, 180]],
+            "forearm_l": [[150, 230], [175, 230]],
+            "forearm_r": [[337, 230], [362, 230]],
+        }
+    }
+    d = make_package(tmp_path, assist=assist)
+    report = analyze_proportion(d, run_heuristic_frame=False)
+    names = {c.name for c in report.checks}
+    assert "thigh_vs_calf_width" in names
+    assert "upper_arm_vs_forearm_width" in names
+    # Direct unit path also returns info checks
+    unit = diameter_info_checks(report.diameters)
+    assert any(c.name == "thigh_vs_calf_width" for c in unit)
+
+
+def test_missing_stature_diameter_emits_diagnostic() -> None:
+    """P2 fix: edge pairs without figure height must not silent-drop."""
+    view = ViewLandmarks(view="front", width_px=100, height_px=100, landmarks={})
+    diameters, messages = compute_diameters(
+        {"front": {"waist": [[10.0, 20.0], [30.0, 20.0]]}},
+        {"front": view},
+    )
+    assert diameters == []
+    assert any("stature" in m.lower() or "figure height" in m.lower() for m in messages)
+    assert any("waist" in m for m in messages)
