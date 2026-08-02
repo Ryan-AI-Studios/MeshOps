@@ -1001,3 +1001,35 @@ def mesh_proportion_depth_hint(
         force_hint=force_hint,
         merge_into=(_resolve_tool_path(merge_into, work_root) if merge_into else None),
     )
+
+
+def mesh_proportion_silhouette_compare(
+    work_root: Path,
+    *,
+    ref: str,
+    out: str,
+    mesh: str | None = None,
+    mesh_view: str | None = None,
+    view_role: str = "front",
+    overlay: bool = True,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Front-only silhouette IoU/Dice. Authoring only — SILHOUETTE_HONESTY / N6."""
+    from meshops.proportion.silhouette import run_silhouette_compare
+
+    # Preserve trailing directory separator intent (R1); Path resolve strips it.
+    ends_sep = out.endswith(("/", "\\"))
+    out_base = out.rstrip("/\\") if ends_sep else out
+    out_resolved = _resolve_tool_path(out_base, work_root)
+    out_arg: str | Path = (
+        str(out_resolved) + ("\\" if ends_sep else "") if ends_sep else out_resolved
+    )
+    return run_silhouette_compare(
+        _resolve_tool_path(ref, work_root),
+        out_arg,
+        mesh=_resolve_tool_path(mesh, work_root) if mesh else None,
+        mesh_view=_resolve_tool_path(mesh_view, work_root) if mesh_view else None,
+        view_role=view_role,
+        overlay=overlay,
+        force=force,
+    )

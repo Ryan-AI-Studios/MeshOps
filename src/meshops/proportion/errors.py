@@ -32,6 +32,8 @@ ProportionErrorCode = Literal[
     "monocular_unavailable",
     "invalid_depth_samples",
     "invalid_depth_deltas",
+    "silhouette_empty",
+    "silhouette_failed",
     "unknown",
 ]
 
