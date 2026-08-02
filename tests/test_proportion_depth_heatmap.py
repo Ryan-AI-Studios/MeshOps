@@ -170,7 +170,7 @@ def test_heatmap__deltas_dual_panel(tmp_path: Path) -> None:
     assert "samples" in panels
     assert "deltas" in panels
     # F3: canvas_h = 2 * panel_h + 12 + footer
-    from PIL import Image
+    from PIL import Image  # type: ignore[import-untyped,import-not-found]
 
     with Image.open(out_png) as im:
         w, h = im.size
@@ -242,7 +242,7 @@ def test_heatmap__front_right(tmp_path: Path) -> None:
 
 def test_heatmap__colorbar_at_bottom_of_panel(tmp_path: Path) -> None:
     """R3.3: per-panel color bar is horizontal at the bottom (not a right-side vertical bar)."""
-    from PIL import Image
+    from PIL import Image  # type: ignore[import-untyped,import-not-found]
 
     from meshops.proportion.depth_heatmap import COLORBAR_H, MARGIN
 
