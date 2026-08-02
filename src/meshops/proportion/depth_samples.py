@@ -4,6 +4,10 @@ Export depth_at_landmarks.json from ProportionReport (depth_bands + fused y),
 and optional depth_mesh_deltas.json via trimesh Y-axis rays against a blockout.
 
 Authoring measurement aids only — not mesh or print success (Difficulty §12 / N6).
+
+Sign contract (mesh deltas):
+  delta_y_m     = ref_y_m - mesh_y_m       # positive → mesh shallower (less +Y)
+  delta_depth_m = ref_depth_m - mesh_depth_m  # positive → mesh thinner than ref
 """
 
 from __future__ import annotations
