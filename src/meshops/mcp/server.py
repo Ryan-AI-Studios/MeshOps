@@ -60,6 +60,7 @@ TOOL_NAMES: frozenset[str] = frozenset(
         "mesh_proportion_blockout_recipe",
         "mesh_proportion_depth_heatmap",
         "mesh_proportion_depth_hint",
+        "mesh_proportion_silhouette_compare",
     }
 )
 
@@ -669,6 +670,33 @@ def build_server(work_root: Path | None = None) -> Any:
             force=force,
             force_hint=force_hint,
             merge_into=merge_into,
+        )
+
+    @mcp.tool()
+    def mesh_proportion_silhouette_compare(
+        ref: str,
+        out: str,
+        mesh: str | None = None,
+        mesh_view: str | None = None,
+        view_role: str = "front",
+        overlay: bool = True,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Front-only binary silhouette IoU/Dice (Package A front vs mesh front).
+
+        Authoring QA only — proportion_silhouette_compare_not_mesh_or_print_success (N6).
+        Not print success. Front-vs-front only. Raises ProportionError on failure
+        (never ok:false success).
+        """
+        return T.mesh_proportion_silhouette_compare(
+            wr,
+            ref=ref,
+            out=out,
+            mesh=mesh,
+            mesh_view=mesh_view,
+            view_role=view_role,
+            overlay=overlay,
+            force=force,
         )
 
     return mcp

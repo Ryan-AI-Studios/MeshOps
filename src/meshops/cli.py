@@ -86,9 +86,9 @@ app.add_typer(bench_app, name="bench")
 proportion_app = typer.Typer(
     name="proportion",
     help=(
-        "Pixel proportion analysis from multi-view RGB (tracks 0012-0020). "
+        "Pixel proportion analysis from multi-view RGB (tracks 0012-0021). "
         "Verbs: template | analyze | show | scaffold | guides | capture | depth-samples | "
-        "blockout-recipe | depth-heatmap | depth-hint. "
+        "blockout-recipe | depth-heatmap | depth-hint | silhouette-compare. "
         "Assist-first landmarks + head-unit checks + blockout-grade XYZ; "
         "schema 1.1.0 diameters (edge pairs) + left depth bands + cross-sections; "
         "scaffold creates package layout + package_checklist.json only (not mesh/print success); "
@@ -97,7 +97,8 @@ proportion_app = typer.Typer(
         "depth-samples exports depth_at_landmarks.json + optional mesh ray deltas (N6); "
         "blockout-recipe emits trap/neck/bridge RECIPE primitives (authoring only — N6); "
         "depth-heatmap glance PNG from samples/deltas (numbers SoT — N6); "
-        "depth-hint external depth-channel assist hints + optional merge-into (conf floor — N6). "
+        "depth-hint external depth-channel assist hints + optional merge-into (conf floor — N6); "
+        "silhouette-compare front-only binary IoU/Dice QA score (authoring only — N6). "
         "Optional: meshops[proportion] (Pillow)."
     ),
     add_completion=False,
@@ -2438,6 +2439,90 @@ def proportion_depth_hint_cmd(
             typer.echo(f"  note: {msg}")
         typer.echo(f"honesty: {HINT_HONESTY}")
         typer.echo("depth-hint only — not mesh or print success")
+    raise typer.Exit(0)
+
+
+@proportion_app.command("silhouette-compare")
+def proportion_silhouette_compare_cmd(
+    ref: Path = typer.Option(
+        ...,
+        "--ref",
+        help="Package A front RGB/PNG reference (required)",
+    ),
+    out: str = typer.Option(
+        ...,
+        "--out",
+        help="Output silhouette_compare.json file or directory "
+        "(trailing sep marks a directory even if not yet created)",
+    ),
+    mesh: Path | None = typer.Option(
+        None,
+        "--mesh",
+        help="STL/PLY/OBJ → F3D front render (runtime may fail)",
+    ),
+    mesh_view: Path | None = typer.Option(
+        None,
+        "--mesh-view",
+        help="Pre-rendered mesh front image (CI / offline path)",
+    ),
+    view_role: str = typer.Option(
+        "front",
+        "--view-role",
+        help="Must be front (case-insensitive); front-only law",
+    ),
+    overlay: bool = typer.Option(
+        True,
+        "--overlay/--no-overlay",
+        help="Write silhouette_overlay.png (default on when Pillow OK)",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite existing JSON / overlay",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
+) -> None:
+    """Front-only binary silhouette IoU/Dice between Package A front and mesh front.
+
+    Authoring QA score only — not mesh or print success (N6 / SILHOUETTE_HONESTY).
+    """
+    from meshops.proportion.errors import ProportionError
+    from meshops.proportion.honesty import SILHOUETTE_HONESTY
+    from meshops.proportion.silhouette import run_silhouette_compare
+
+    try:
+        payload = run_silhouette_compare(
+            ref,
+            out,
+            mesh=mesh,
+            mesh_view=mesh_view,
+            view_role=view_role,
+            overlay=overlay,
+            force=force,
+        )
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    if json_out:
+        _emit_json(payload)
+    else:
+        typer.echo(
+            f"silhouette-compare iou={payload.get('score_iou', 0):.4f} "
+            f"dice={payload.get('score_dice', 0):.4f}"
+        )
+        counts = payload.get("counts") or {}
+        typer.echo(
+            f"  ref_fg_grid_px={counts.get('ref_fg_grid_px', 0)} "
+            f"mesh_fg_grid_px={counts.get('mesh_fg_grid_px', 0)}"
+        )
+        for p in payload.get("paths") or []:
+            typer.echo(f"  {p}")
+        for msg in payload.get("messages") or []:
+            typer.echo(f"  note: {msg}")
+        typer.echo(f"honesty: {SILHOUETTE_HONESTY}")
+        typer.echo("silhouette-compare authoring QA only — not mesh or print success")
     raise typer.Exit(0)
 
 
