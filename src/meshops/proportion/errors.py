@@ -1,0 +1,32 @@
+"""Structured proportion analysis failures (track 0012)."""
+
+from __future__ import annotations
+
+from typing import Any, Literal
+
+ProportionErrorCode = Literal[
+    "missing_views",
+    "unreadable_image",
+    "invalid_assist",
+    "pillow_required",
+    "incomplete_package",
+    "incomplete_stature",
+    "invalid_report",
+    "write_failed",
+    "unknown",
+]
+
+
+class ProportionError(RuntimeError):
+    """Fail-closed proportion error with stable machine code."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: ProportionErrorCode | str = "unknown",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.details = details or {}

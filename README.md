@@ -4,7 +4,7 @@ Local agent-driven OS for 3D-printable meshes (repair + mechanical design + orga
 
 | Doc | Role |
 |-----|------|
-| [docs/Difficulty.md](docs/Difficulty.md) | **Binding law** (Rogue2 lessons) |
+| [docs/archive/Difficulty.md](docs/archive/Difficulty.md) | **Binding law** (Rogue2 lessons) |
 | [docs/MeshOps.md](docs/MeshOps.md) | Product spec |
 | [docs/TechStack.md](docs/TechStack.md) | Dependency pins |
 | [docs/PRD.md](docs/PRD.md) | Short PRD |
@@ -26,6 +26,9 @@ uv sync --extra dev
 # uv sync --extra mcp
 # uv run meshops-mcp   # or: python -m meshops.mcp  (set cwd=repo; MESHOPS_WORK optional)
 # docs: docs/mcp/README.md
+# optional multi-view proportion overlays + JPG/WebP (track 0012):
+# uv sync --extra proportion
+# uv run meshops proportion template|analyze|show
 
 # 2. Diagnose tools (default: core env only — missing Blender/Orca is a warning)
 uv run meshops doctor

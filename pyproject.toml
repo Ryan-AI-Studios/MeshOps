@@ -41,6 +41,11 @@ bench = [
 ]
 # Open3D prove-or-reject (P19) — fill pin only if PROVED; never required core.
 open3d = []
+# Optional image overlays + JPG/WebP sizing for proportion analyze (0012).
+# PNG sizing works without Pillow via robust IHDR scan. License: MIT-CMU-HPND.
+proportion = [
+    "pillow==12.3.0",
+]
 
 [project.scripts]
 meshops = "meshops.cli:app"

@@ -1,5 +1,6 @@
 """Typer CLI — ingest / triage / render / report / repair / export / diff /
-accept / design / escalate / organic / hosted / slice / doctor / bench.
+accept / design / escalate / organic / hosted / slice / doctor / bench /
+proportion.
 """
 
 from __future__ import annotations
@@ -18,9 +19,9 @@ app = typer.Typer(
     name="meshops",
     help=(
         "MeshOps — triage + guarded T1/T2 repair + T7 design + T3 escalate + T6 organic + "
-        "hosted multi-view fallback + Orca slice + doctor + bench (ingest / triage / render / "
-        "report / repair / export / diff / accept / design / escalate / organic / hosted / "
-        "slice / doctor / bench)."
+        "hosted multi-view fallback + Orca slice + doctor + bench + proportion "
+        "(ingest / triage / render / report / repair / export / diff / accept / design / "
+        "escalate / organic / hosted / slice / doctor / bench / proportion)."
     ),
     add_completion=False,
     no_args_is_help=True,
@@ -81,6 +82,18 @@ bench_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(bench_app, name="bench")
+
+proportion_app = typer.Typer(
+    name="proportion",
+    help=(
+        "Pixel proportion analysis from multi-view RGB (track 0012). "
+        "Assist-first landmarks + head-unit checks + blockout-grade XYZ. "
+        "Not mesh reconstruction or print success. Optional: meshops[proportion] (Pillow)."
+    ),
+    add_completion=False,
+    no_args_is_help=True,
+)
+app.add_typer(proportion_app, name="proportion")
 
 
 def _emit_json(payload: dict[str, Any]) -> None:
@@ -207,7 +220,7 @@ def doctor_cmd(
         disk = report.disk
         mb = disk.pymeshlab_approx_mb
         mb_s = f"{mb} MB" if mb is not None else "unknown"
-        typer.echo(f"  disk: pymeshlab ≈ {mb_s} ({disk.note})")
+        typer.echo(f"  disk: pymeshlab ~ {mb_s} ({disk.note})")
         typer.echo("  licenses:")
         for line in report.licenses:
             typer.echo(f"    - {line}")
@@ -1577,6 +1590,162 @@ def bench_envelope_cmd(
     else:
         typer.echo(f"source: {path}")
         typer.echo(envelope_to_markdown(envelope))
+    raise typer.Exit(0)
+
+
+# ---------------------------------------------------------------------------
+# proportion (0012) — template | analyze | show  (no check verb)
+# ---------------------------------------------------------------------------
+
+
+@proportion_app.command("template")
+def proportion_template_cmd(
+    out: Path = typer.Option(
+        Path("landmarks_assist.json"),
+        "--out",
+        help="Path for blank landmarks_assist.json",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON on stdout"),
+) -> None:
+    """Emit blank assist JSON with all canonical view keys (null landmarks)."""
+    from meshops.proportion.errors import ProportionError
+    from meshops.proportion.template import blank_assist_document, write_template
+
+    try:
+        path = write_template(out)
+        doc = blank_assist_document()
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except OSError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+
+    if json_out:
+        _emit_json({"ok": True, "path": str(path), "assist": doc})
+    else:
+        typer.echo(f"wrote blank assist template: {path}")
+    raise typer.Exit(0)
+
+
+@proportion_app.command("analyze")
+def proportion_analyze_cmd(
+    views_dir: Path = typer.Option(
+        ...,
+        "--views-dir",
+        help="Directory with front/left/three_quarter[.png|.jpg] (optional back)",
+    ),
+    landmarks: Path | None = typer.Option(
+        None,
+        "--landmarks",
+        help="landmarks_assist.json (default: <views-dir>/landmarks_assist.json)",
+    ),
+    height_m: float | None = typer.Option(
+        None,
+        "--height-m",
+        help="Optional stature in meters; scales landmarks_xyz *_m fields",
+    ),
+    out: Path | None = typer.Option(
+        None,
+        "--out",
+        help="Output directory for proportion_report.json (+ .md / overlays)",
+    ),
+    overlays: bool = typer.Option(
+        False,
+        "--overlays",
+        help="Write landmark overlay PNGs (requires Pillow / meshops[proportion])",
+    ),
+    partial_ok: bool = typer.Option(
+        False,
+        "--partial-ok",
+        help="Allow missing required views; sets partial_package + lower package_score",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit ProportionReport JSON on stdout"),
+) -> None:
+    """Analyze multi-view package → proportion_report (not mesh/print success)."""
+    from meshops.proportion.analyze import analyze_proportion
+    from meshops.proportion.errors import ProportionError
+
+    try:
+        report = analyze_proportion(
+            views_dir,
+            landmarks_path=landmarks,
+            height_m=height_m,
+            out_dir=out,
+            partial_ok=partial_ok,
+            overlays=overlays,
+        )
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    payload = report.model_dump(mode="json")
+    payload["ok"] = True
+    if out is not None:
+        payload["report_path"] = str(Path(out) / "proportion_report.json")
+
+    if json_out:
+        _emit_json(payload)
+    else:
+        typer.echo(
+            f"proportion package_score={report.package_score:.1f} "
+            f"pose={report.pose} honesty={report.honesty}"
+        )
+        if report.head_unit_frac is not None:
+            typer.echo(
+                f"  head_unit_frac={report.head_unit_frac:.4f} "
+                f"(~{1.0 / report.head_unit_frac:.2f} heads)"
+            )
+        q = report.quality
+        flags = [
+            name
+            for name, val in (
+                ("hair_volume_margin", q.hair_volume_margin),
+                ("foreshortening_risk", q.foreshortening_risk),
+                ("multi_figure", q.multi_figure),
+                ("needs_user_input", q.needs_user_input),
+                ("incomplete_stature", q.incomplete_stature),
+                ("partial_package", q.partial_package),
+            )
+            if val
+        ]
+        if flags:
+            typer.echo(f"  quality: {', '.join(flags)}")
+        for c in report.checks:
+            if not c.ok or c.severity != "info":
+                mark = "ok" if c.ok else "flag"
+                typer.echo(f"  [{mark}] {c.name}: {c.message}")
+        if out is not None:
+            typer.echo(f"  wrote {Path(out) / 'proportion_report.json'}")
+    raise typer.Exit(0)
+
+
+@proportion_app.command("show")
+def proportion_show_cmd(
+    report: Path = typer.Option(
+        ...,
+        "--report",
+        help="Path to proportion_report.json",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit report JSON on stdout"),
+) -> None:
+    """Re-display a saved proportion_report.json (checks included; no separate check verb)."""
+    from meshops.proportion.analyze import load_report, report_to_markdown
+    from meshops.proportion.errors import ProportionError
+
+    try:
+        rep = load_report(report)
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    if json_out:
+        payload = rep.model_dump(mode="json")
+        payload["ok"] = True
+        payload["source_path"] = str(report)
+        _emit_json(payload)
+    else:
+        typer.echo(report_to_markdown(rep))
     raise typer.Exit(0)
 
 
