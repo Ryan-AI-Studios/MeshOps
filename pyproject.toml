@@ -62,6 +62,8 @@ packages = ["src/meshops"]
 target-version = "py313"
 line-length = 100
 src = ["src", "tests"]
+# Local Lab MCP clone / session junk — not MeshOps product code
+extend-exclude = ["tools", ".grok"]
 
 [tool.ruff.lint]
 select = [

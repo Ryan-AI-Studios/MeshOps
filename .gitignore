@@ -20,6 +20,10 @@ conductor/
 docs/
 .agents/
 AGENTS.md
+.grok/
+
+# Local vendor / Lab MCP clone (not published with MeshOps package)
+tools/
 
 # large binaries unless LFS policy set
 # fixtures/rogue2/*.stl  # un-ignore when using LFS
