@@ -1,0 +1,594 @@
+"""Track 0019 — blockout primitive recipes (offline; no Blender)."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from typer.testing import CliRunner
+
+from meshops.cli import app
+from meshops.proportion.blockout_recipe import (
+    AXIS_NOTES,
+    CROTCH_Z_FRAC_FALLBACK,
+    MIDLINE_X_TOL_M,
+    RECIPE_SCHEMA_VERSION,
+    BlockoutRecipePackage,
+    build_blockout_recipe,
+    emit_bpy_script,
+    load_blockout_recipe,
+    run_blockout_recipe,
+    write_blockout_recipe,
+)
+from meshops.proportion.errors import ProportionError
+from meshops.proportion.honesty import RECIPE_HONESTY
+from meshops.proportion.models import (
+    DepthBand,
+    DiameterMeasure,
+    LandmarkXYZ,
+    ProportionReport,
+    QualityFlags,
+)
+
+runner = CliRunner()
+
+
+def _lm(
+    id_: str,
+    *,
+    x_m: float | None = None,
+    y_m: float | None = None,
+    z_m: float | None = None,
+) -> LandmarkXYZ:
+    return LandmarkXYZ(id=id_, x_m=x_m, y_m=y_m, z_m=z_m)
+
+
+def _diam(
+    band_id: str,
+    *,
+    half_width_m: float | None = 0.05,
+    width_m: float | None = None,
+    view: str = "front",
+) -> DiameterMeasure:
+    w = (
+        width_m
+        if width_m is not None
+        else (half_width_m * 2.0 if half_width_m is not None else 0.1)
+    )
+    return DiameterMeasure(
+        band_id=band_id,
+        view=view,
+        width_px=40.0,
+        width_eucl_px=40.0,
+        theta_deg=90.0,
+        width_frac=0.1,
+        width_m=w,
+        half_width_m=half_width_m,
+        mid_x_px=100.0,
+        mid_y_px=200.0,
+    )
+
+
+def _depth_band(
+    band_id: str,
+    *,
+    depth_m: float = 0.22,
+    z_frac: float = 0.72,
+    y_mid: float = 0.0,
+) -> DepthBand:
+    return DepthBand(
+        band_id=band_id,
+        depth_px=50.0,
+        depth_frac=0.12,
+        depth_m=depth_m,
+        y_front=0.1,
+        y_back=-0.1,
+        y_mid=y_mid,
+        z_frac=z_frac,
+    )
+
+
+def _full_torso_report(
+    *,
+    height_m: float = 1.72,
+    chin_z: float = 1.50,
+    shoulder_z: float = 1.38,
+    hip_z: float = 0.95,
+    shoulder_x: float = 0.20,
+    hip_x: float = 0.14,
+    include_chin: bool = True,
+    include_shoulder_x: bool = True,
+    include_bust: bool = True,
+    chest_band: bool = True,
+    chest_front_z: float | None = None,
+    chest_band_z_frac: float | None = 0.72,
+    crotch_z: float | None = 0.86,
+    head_unit_frac: float = 1.0 / 7.5,
+    extra_lms: dict[str, LandmarkXYZ] | None = None,
+    diameters: list[DiameterMeasure] | None = None,
+    depth_bands: list[DepthBand] | None = None,
+) -> ProportionReport:
+    lms: dict[str, LandmarkXYZ] = {
+        "sole": _lm("sole", x_m=0.0, y_m=0.0, z_m=0.0),
+    }
+    if include_chin:
+        lms["chin"] = _lm("chin", x_m=0.0, y_m=-0.02, z_m=chin_z)
+    if include_shoulder_x:
+        lms["shoulder_l"] = _lm("shoulder_l", x_m=-shoulder_x, y_m=0.0, z_m=shoulder_z)
+        lms["shoulder_r"] = _lm("shoulder_r", x_m=shoulder_x, y_m=0.0, z_m=shoulder_z)
+    else:
+        lms["shoulder_l"] = _lm("shoulder_l", y_m=0.0, z_m=shoulder_z)
+        lms["shoulder_r"] = _lm("shoulder_r", y_m=0.0, z_m=shoulder_z)
+    lms["hip_l"] = _lm("hip_l", x_m=-hip_x, y_m=0.0, z_m=hip_z)
+    lms["hip_r"] = _lm("hip_r", x_m=hip_x, y_m=0.0, z_m=hip_z)
+    lms["cranial_vertex"] = _lm("cranial_vertex", x_m=0.0, y_m=-0.01, z_m=chin_z + 0.18)
+    if crotch_z is not None:
+        lms["crotch_pubic"] = _lm("crotch_pubic", x_m=0.0, y_m=0.0, z_m=crotch_z)
+    if chest_front_z is not None:
+        lms["chest_front"] = _lm("chest_front", x_m=0.0, y_m=0.05, z_m=chest_front_z)
+    if extra_lms:
+        lms.update(extra_lms)
+
+    diams = list(diameters) if diameters is not None else []
+    if diameters is None:
+        if include_bust:
+            diams.append(_diam("bust", half_width_m=0.16))
+        diams.append(_diam("waist", half_width_m=0.13))
+        diams.append(_diam("neck", half_width_m=0.05))
+        for band in (
+            "upper_arm_l",
+            "upper_arm_r",
+            "forearm_l",
+            "forearm_r",
+            "thigh_l",
+            "thigh_r",
+            "calf_l",
+            "calf_r",
+        ):
+            diams.append(_diam(band, half_width_m=0.05))
+
+    bands = list(depth_bands) if depth_bands is not None else []
+    if depth_bands is None and chest_band:
+        zf = chest_band_z_frac if chest_band_z_frac is not None else 0.72
+        bands.append(_depth_band("chest", depth_m=0.24, z_frac=zf))
+        bands.append(_depth_band("hip", depth_m=0.26, z_frac=0.55))
+
+    return ProportionReport(
+        schema_version="1.1.0",
+        height_m=height_m,
+        head_unit_frac=head_unit_frac,
+        landmarks_xyz=lms,
+        diameters=diams,
+        depth_bands=bands,
+        quality=QualityFlags(),
+    )
+
+
+def _write_report(tmp: Path, report: ProportionReport) -> Path:
+    p = tmp / "proportion_report.json"
+    p.write_text(json.dumps(report.model_dump(mode="json"), indent=2), encoding="utf-8")
+    return p
+
+
+# ---------------------------------------------------------------------------
+# R10 cases
+# ---------------------------------------------------------------------------
+
+
+def test_recipe__full_torso_trap() -> None:
+    report = _full_torso_report()
+    pkg = build_blockout_recipe(report, limbs=False)
+    traps = [p for p in pkg.parts if p.name == "RECIPE_torso_trap"]
+    assert len(traps) == 1
+    trap = traps[0]
+    assert trap.kind == "trap_box"
+    assert trap.role == "torso"
+    assert trap.top_half_width_m == pytest.approx(0.20)
+    assert trap.bottom_half_width_m == pytest.approx(0.14)
+    assert trap.z_bottom_m is not None
+    assert trap.z_top_m is not None
+    assert trap.z_top_m > trap.z_bottom_m
+    assert pkg.schema_version == "1.0.0"
+    assert pkg.recipe_id == "humanoid_a_pose_v1"
+    assert pkg.honesty == RECIPE_HONESTY
+    assert pkg.axis_notes == AXIS_NOTES
+
+
+def test_recipe__neck_0_12_golden() -> None:
+    """DoD: chin z=1.50, shoulder z=1.38, H=1.72 → neck_len 0.12."""
+    report = _full_torso_report(chin_z=1.50, shoulder_z=1.38, height_m=1.72)
+    pkg = build_blockout_recipe(report, limbs=False)
+    assert pkg.metrics.neck_len_m == pytest.approx(0.12)
+    necks = [p for p in pkg.parts if p.role == "neck"]
+    assert len(necks) == 1
+    n = necks[0]
+    assert n.kind == "cylinder"
+    assert n.p0 is not None and n.p1 is not None
+    length = abs(n.p1[2] - n.p0[2])
+    assert length == pytest.approx(0.12)
+
+
+def test_recipe__giraffe_clamp() -> None:
+    """raw 0.5 @ H=1.72 → clamped 0.20*H; message has measured+clamped."""
+    h = 1.72
+    shoulder_z = 1.20
+    chin_z = shoulder_z + 0.50  # raw 0.5
+    report = _full_torso_report(chin_z=chin_z, shoulder_z=shoulder_z, height_m=h)
+    pkg = build_blockout_recipe(report, limbs=False)
+    cap = 0.20 * h
+    assert pkg.metrics.neck_len_m == pytest.approx(cap)
+    necks = [p for p in pkg.parts if p.role == "neck"]
+    assert len(necks) == 1
+    n = necks[0]
+    assert n.p0 is not None and n.p1 is not None
+    assert abs(n.p1[2] - n.p0[2]) == pytest.approx(cap)
+    assert any("0.500" in m and "clamped" in m and "giraffe" in m for m in pkg.messages)
+
+
+def test_recipe__missing_chin_no_neck() -> None:
+    report = _full_torso_report(include_chin=False)
+    # still need head skip + some parts
+    pkg = build_blockout_recipe(report, limbs=False)
+    assert pkg.metrics.neck_len_m is None
+    assert not any(p.role == "neck" for p in pkg.parts)
+
+
+def test_recipe__shoulder_hw_from_bust() -> None:
+    report = _full_torso_report(include_shoulder_x=False, include_bust=True)
+    pkg = build_blockout_recipe(report, limbs=False)
+    assert pkg.metrics.shoulder_half_width_m == pytest.approx(0.16 * 1.05)
+    assert any(p.name == "RECIPE_torso_trap" for p in pkg.parts)
+    assert any("bust*1.05" in m for m in pkg.messages)
+
+
+def test_recipe__no_shoulder_x_no_bust__no_trap() -> None:
+    report = _full_torso_report(include_shoulder_x=False, include_bust=False)
+    # remove bust from default diameters by custom list
+    diams = [
+        _diam("waist", half_width_m=0.13),
+        _diam("neck", half_width_m=0.05),
+    ]
+    report = _full_torso_report(
+        include_shoulder_x=False,
+        include_bust=False,
+        diameters=diams,
+    )
+    pkg = build_blockout_recipe(report, limbs=False)
+    assert pkg.metrics.shoulder_half_width_m is None
+    assert not any(p.name == "RECIPE_torso_trap" for p in pkg.parts)
+
+
+def test_recipe__chest_z_from_depth_band() -> None:
+    h = 1.72
+    z_frac = 0.70
+    report = _full_torso_report(
+        height_m=h,
+        chest_band_z_frac=z_frac,
+        chest_front_z=None,
+        shoulder_z=1.30,  # lower than band-derived
+    )
+    pkg = build_blockout_recipe(report, limbs=False)
+    trap = next(p for p in pkg.parts if p.name == "RECIPE_torso_trap")
+    # z_top = max(shoulder_z, chest_z) = max(1.30, 0.70*1.72)
+    expected_chest_z = z_frac * h
+    assert trap.z_top_m == pytest.approx(max(1.30, expected_chest_z))
+
+
+def test_recipe__chest_z_from_chest_front() -> None:
+    report = _full_torso_report(
+        chest_band=False,
+        depth_bands=[_depth_band("hip", depth_m=0.26, z_frac=0.55)],
+        chest_front_z=1.35,
+        shoulder_z=1.30,
+    )
+    # no chest depth band for z_frac — chest_z from chest_front
+    # also need chest depth fallback from H
+    pkg = build_blockout_recipe(report, limbs=False)
+    trap = next(p for p in pkg.parts if p.name == "RECIPE_torso_trap")
+    assert trap.z_top_m == pytest.approx(max(1.30, 1.35))
+
+
+def test_recipe__chest_z_shoulder_fallback() -> None:
+    report = _full_torso_report(
+        chest_band=False,
+        depth_bands=[_depth_band("hip", depth_m=0.26, z_frac=0.55)],
+        chest_front_z=None,
+        shoulder_z=1.38,
+    )
+    pkg = build_blockout_recipe(report, limbs=False)
+    trap = next(p for p in pkg.parts if p.name == "RECIPE_torso_trap")
+    assert trap.z_top_m == pytest.approx(1.38)
+    assert any("trap top at shoulder z" in m for m in pkg.messages)
+
+
+def test_recipe__deltoid_michelin() -> None:
+    # Large upper_arm radius relative to shoulder_hw triggers clamp
+    report = _full_torso_report(shoulder_x=0.18)
+    # override diameters with fat upper arms
+    fat = [
+        _diam("bust", half_width_m=0.16),
+        _diam("waist", half_width_m=0.13),
+        _diam("neck", half_width_m=0.05),
+        _diam("upper_arm_l", half_width_m=0.20),
+        _diam("upper_arm_r", half_width_m=0.20),
+        _diam("thigh_l", half_width_m=0.08),
+        _diam("thigh_r", half_width_m=0.08),
+    ]
+    report = _full_torso_report(shoulder_x=0.18, diameters=fat)
+    pkg = build_blockout_recipe(report, limbs=False)
+    dels = [p for p in pkg.parts if p.role == "deltoid_soft"]
+    assert len(dels) == 2
+    clamp_max = 0.45 * 0.18
+    for d in dels:
+        assert d.rx_m is not None
+        assert d.rx_m <= clamp_max + 1e-9
+    assert any("Michelin guard" in m and "clamped" in m for m in pkg.messages)
+
+
+def test_recipe__midline_junk_skipped() -> None:
+    """Free soft below crotch near midline is not emitted."""
+    # Inject a junk-like situation: iliac would be OK off midline;
+    # force a breast soft at midline below crotch by faking CS-like path.
+    # Use glute/breast builders with very small offset — instead test filter
+    # via a constructed package path: build with crotch and check message
+    # for any free soft that would land mid-line below crotch.
+    # Direct unit: hip_hw tiny so iliac centers nearly midline at low z.
+    report = _full_torso_report(
+        hip_x=0.02,  # mean |x| = 0.02 < 0.05
+        hip_z=0.40,  # below crotch
+        crotch_z=0.86,
+        shoulder_z=1.38,
+    )
+    # iliac soft at hip_hw*0.9 = 0.018 < MIDLINE_X_TOL → skipped
+    pkg = build_blockout_recipe(report, limbs=False)
+    assert MIDLINE_X_TOL_M == 0.05
+    iliac = [p for p in pkg.parts if p.role == "iliac_soft"]
+    # Both iliac should be midline-blocked
+    assert len(iliac) == 0
+    assert any("midline below crotch skipped" in m for m in pkg.messages)
+
+
+def test_recipe__crotch_fallback_message() -> None:
+    report = _full_torso_report(crotch_z=None, height_m=1.72)
+    pkg = build_blockout_recipe(report, limbs=False)
+    assert any("0.5*H fallback" in m for m in pkg.messages)
+    assert CROTCH_Z_FRAC_FALLBACK == 0.5
+
+
+def test_recipe__no_limbs() -> None:
+    report = _full_torso_report(
+        extra_lms={
+            "elbow_l": _lm("elbow_l", x_m=-0.25, y_m=0.0, z_m=1.10),
+            "elbow_r": _lm("elbow_r", x_m=0.25, y_m=0.0, z_m=1.10),
+            "wrist_l": _lm("wrist_l", x_m=-0.30, y_m=0.0, z_m=0.90),
+            "wrist_r": _lm("wrist_r", x_m=0.30, y_m=0.0, z_m=0.90),
+            "knee_l": _lm("knee_l", x_m=-0.12, y_m=0.0, z_m=0.50),
+            "knee_r": _lm("knee_r", x_m=0.12, y_m=0.0, z_m=0.50),
+            "ankle_l": _lm("ankle_l", x_m=-0.10, y_m=0.0, z_m=0.08),
+            "ankle_r": _lm("ankle_r", x_m=0.10, y_m=0.0, z_m=0.08),
+        }
+    )
+    pkg = build_blockout_recipe(report, limbs=False)
+    assert not any(p.role == "limb_segment" for p in pkg.parts)
+    assert any("no-limbs" in m for m in pkg.messages)
+
+
+def test_recipe__limbs_sparse_skip_cap() -> None:
+    """Torso only — 0 limbs; skip messages ≤ 8 (one per SEED segment)."""
+    report = _full_torso_report()  # no elbow/knee etc.
+    pkg = build_blockout_recipe(report, limbs=True)
+    limbs = [p for p in pkg.parts if p.role == "limb_segment"]
+    assert len(limbs) == 0
+    limb_skips = [m for m in pkg.messages if "limb skipped" in m or "no usable radius" in m]
+    # only SEED segments produce skip msgs — ≤8
+    assert len(limb_skips) <= 8
+
+
+def test_recipe__limbs_y_null_front_plane() -> None:
+    report = _full_torso_report(
+        extra_lms={
+            "elbow_l": _lm("elbow_l", x_m=-0.25, z_m=1.10),  # y null
+            "elbow_r": _lm("elbow_r", x_m=0.25, z_m=1.10),
+            "wrist_l": _lm("wrist_l", x_m=-0.30, z_m=0.90),
+            "wrist_r": _lm("wrist_r", x_m=0.30, z_m=0.90),
+            "knee_l": _lm("knee_l", x_m=-0.12, z_m=0.50),
+            "knee_r": _lm("knee_r", x_m=0.12, z_m=0.50),
+            "ankle_l": _lm("ankle_l", x_m=-0.10, z_m=0.08),
+            "ankle_r": _lm("ankle_r", x_m=0.10, z_m=0.08),
+        }
+    )
+    # shoulders/hips have y; limb joints y null → front_plane
+    # need to also null shoulder y for upper_arm? SEED uses shoulder→elbow
+    # shoulders have y_m; elbow y null → front_plane path
+    pkg = build_blockout_recipe(report, limbs=True)
+    limbs = [p for p in pkg.parts if p.role == "limb_segment"]
+    assert len(limbs) >= 1
+    assert all(p.placement == "front_plane" for p in limbs)
+
+
+def test_recipe__depth_at_landmarks_override(tmp_path: Path) -> None:
+    from meshops.proportion.depth_samples import DepthSample, DepthSamplesPackage
+    from meshops.proportion.honesty import DEPTH_HONESTY
+
+    report = _full_torso_report()
+    # report chest depth 0.24; override sample 0.40
+    depth_pkg = DepthSamplesPackage(
+        honesty=DEPTH_HONESTY,
+        samples=[
+            DepthSample(
+                id="band_chest_span",
+                role="band_span",
+                depth_m=0.40,
+                source="depth_band",
+                band_id="chest",
+            )
+        ],
+        counts={"samples": 1},
+    )
+    depth_path = tmp_path / "depth_at_landmarks.json"
+    depth_path.write_text(json.dumps(depth_pkg.model_dump(mode="json"), indent=2), encoding="utf-8")
+    report_path = _write_report(tmp_path, report)
+    out = tmp_path / "out"
+    payload = run_blockout_recipe(
+        report_path,
+        out,
+        format="json",
+        depth_at_landmarks=depth_path,
+        limbs=False,
+        force=True,
+    )
+    assert payload["ok"] is True
+    loaded = load_blockout_recipe(out / "blockout_recipe.json")
+    assert loaded.metrics.chest_depth_m == pytest.approx(0.40)
+    assert any("depth-at-landmarks:band_chest_span" in m for m in loaded.messages)
+    trap = next(p for p in loaded.parts if p.name == "RECIPE_torso_trap")
+    assert trap.half_depth_m == pytest.approx(0.20)
+
+
+def test_recipe__empty_report_recipe_empty() -> None:
+    report = ProportionReport(schema_version="1.1.0")
+    with pytest.raises(ProportionError) as ei:
+        build_blockout_recipe(report)
+    assert ei.value.code == "recipe_empty"
+
+
+def test_recipe__out_both_py_only(tmp_path: Path) -> None:
+    report = _full_torso_report()
+    pkg = build_blockout_recipe(report, limbs=False)
+    out_py = tmp_path / "only.py"
+    paths = write_blockout_recipe(out_py, pkg, format="both")
+    assert len(paths) == 1
+    assert paths[0] == out_py
+    assert any(m == "format both with single-file .py — emitting bpy only" for m in pkg.messages)
+    assert out_py.is_file()
+    assert not (tmp_path / "blockout_recipe.json").exists()
+
+
+def test_recipe__bpy_string_scan() -> None:
+    report = _full_torso_report()
+    pkg = build_blockout_recipe(report, limbs=False)
+    script = emit_bpy_script(pkg)
+    assert RECIPE_HONESTY in script
+    assert "Proportion_Recipes" in script
+    assert "import meshops" not in script
+    assert "from_pydata" in script
+    assert "mesh.update()" in script
+    assert "voxel_remesh" not in script
+    assert "8 corner" in script or "verts" in script
+    assert "setup_blockout_recipe.py — MeshOps track 0019" in script
+    assert AXIS_NOTES in script or "face -Y" in script
+    assert "meshops_role" in script
+
+
+def test_recipe__schema_1_0_0_write(tmp_path: Path) -> None:
+    report = _full_torso_report()
+    pkg = build_blockout_recipe(report, limbs=False)
+    assert pkg.schema_version == RECIPE_SCHEMA_VERSION
+    assert pkg.schema_version == "1.0.0"
+    paths = write_blockout_recipe(tmp_path / "r", pkg, format="json", force=True)
+    data = json.loads(paths[0].read_text(encoding="utf-8"))
+    assert data["schema_version"] == "1.0.0"
+    assert data["honesty"] == RECIPE_HONESTY
+    loaded = load_blockout_recipe(paths[0])
+    assert isinstance(loaded, BlockoutRecipePackage)
+    assert loaded.schema_version == "1.0.0"
+
+
+def test_recipe__load_rejects_other_schema(tmp_path: Path) -> None:
+    p = tmp_path / "bad.json"
+    p.write_text(
+        json.dumps(
+            {
+                "schema_version": "2.0.0",
+                "honesty": RECIPE_HONESTY,
+                "axis_notes": AXIS_NOTES,
+                "recipe_id": "humanoid_a_pose_v1",
+                "parts": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ProportionError) as ei:
+        load_blockout_recipe(p)
+    assert ei.value.code == "recipe_failed"
+
+
+def test_recipe__cli_json_shape(tmp_path: Path) -> None:
+    report = _full_torso_report()
+    report_path = _write_report(tmp_path, report)
+    out = tmp_path / "blockout"
+    result = runner.invoke(
+        app,
+        [
+            "proportion",
+            "blockout-recipe",
+            "--report",
+            str(report_path),
+            "--out",
+            str(out),
+            "--format",
+            "both",
+            "--no-limbs",
+            "--force",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["format"] == "both"
+    assert "paths" in payload
+    assert payload["counts"]["parts"] >= 1
+    assert "by_role" in payload["counts"]
+    assert "messages" in payload
+    assert "neck_len_m" in payload
+    assert (out / "blockout_recipe.json").is_file()
+    assert (out / "setup_blockout_recipe.py").is_file()
+
+
+def test_recipe__cli_non_json_honesty(tmp_path: Path) -> None:
+    report = _full_torso_report()
+    report_path = _write_report(tmp_path, report)
+    out = tmp_path / "blockout"
+    result = runner.invoke(
+        app,
+        [
+            "proportion",
+            "blockout-recipe",
+            "--report",
+            str(report_path),
+            "--out",
+            str(out),
+            "--no-limbs",
+            "--force",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert RECIPE_HONESTY in result.output
+    assert "not mesh or print success" in result.output
+
+
+def test_recipe__format_conflict(tmp_path: Path) -> None:
+    report = _full_torso_report()
+    pkg = build_blockout_recipe(report, limbs=False)
+    with pytest.raises(ProportionError) as ei:
+        write_blockout_recipe(tmp_path / "x.py", pkg, format="json")
+    assert ei.value.code == "recipe_failed"
+    with pytest.raises(ProportionError) as ei2:
+        write_blockout_recipe(tmp_path / "x.json", pkg, format="bpy")
+    assert ei2.value.code == "recipe_failed"
+
+
+def test_recipe__bridges_are_cylinders() -> None:
+    report = _full_torso_report()
+    pkg = build_blockout_recipe(report, limbs=False)
+    bridges = [p for p in pkg.parts if p.role in ("shoulder_bridge", "hip_bridge")]
+    assert len(bridges) >= 2
+    assert all(p.kind == "cylinder" for p in bridges)
+
+
+def test_recipe__head_unit_m() -> None:
+    report = _full_torso_report(height_m=1.72, head_unit_frac=1.0 / 7.5)
+    pkg = build_blockout_recipe(report, limbs=False)
+    assert pkg.head_unit_m == pytest.approx(1.72 / 7.5)
