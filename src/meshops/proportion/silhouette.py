@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any, Final, Literal
@@ -398,48 +400,63 @@ def _render_mesh_front(mesh_path: Path) -> Path:
 
     Forces white background so ``frame.silhouette_mask`` (near-white ≥ 250)
     classifies the backdrop as background, not full-frame foreground.
+
+    Caller must delete the returned path when finished (temp copy).
     """
     from meshops.render.f3d_renderer import F3DRenderer, RenderUnavailableError
 
-    tmp = Path(tempfile.mkdtemp(prefix="meshops_sil_"))
-    try:
-        renderer = F3DRenderer()
-        result = renderer.render_mesh_to_dir(
-            mesh_path,
-            tmp,
-            camera_names=("front",),
-            include_depth_for=(),
-            background_color=(1.0, 1.0, 1.0),
-        )
-    except RenderUnavailableError as exc:
-        raise ProportionError(
-            f"mesh front render unavailable: {exc}",
-            code="silhouette_failed",
-            details={
-                "code": "render_unavailable",
-                "mesh": str(mesh_path),
-                "cause": str(exc),
-            },
-        ) from exc
+    with tempfile.TemporaryDirectory(prefix="meshops_sil_") as td:
+        tmp = Path(td)
+        try:
+            renderer = F3DRenderer()
+            result = renderer.render_mesh_to_dir(
+                mesh_path,
+                tmp,
+                camera_names=("front",),
+                include_depth_for=(),
+                background_color=(1.0, 1.0, 1.0),
+            )
+        except RenderUnavailableError as exc:
+            raise ProportionError(
+                f"mesh front render unavailable: {exc}",
+                code="silhouette_failed",
+                details={
+                    "code": "render_unavailable",
+                    "mesh": str(mesh_path),
+                    "cause": str(exc),
+                },
+            ) from exc
 
-    # Prefer explicit front.png from result
-    front: Path | None = None
-    for p in result.view_paths:
-        cand = Path(p)
-        if cand.stem.lower() == "front" and cand.is_file():
-            front = cand
-            break
-    if front is None:
-        cand = tmp / "front.png"
-        if cand.is_file():
-            front = cand
-    if front is None or not front.is_file():
-        raise ProportionError(
-            "mesh front render produced no front.png",
-            code="silhouette_failed",
-            details={"code": "render_unavailable", "mesh": str(mesh_path)},
-        )
-    return front
+        front: Path | None = None
+        for p in result.view_paths:
+            cand = Path(p)
+            if cand.stem.lower() == "front" and cand.is_file():
+                front = cand
+                break
+        if front is None:
+            cand = tmp / "front.png"
+            if cand.is_file():
+                front = cand
+        if front is None or not front.is_file():
+            raise ProportionError(
+                "mesh front render produced no front.png",
+                code="silhouette_failed",
+                details={"code": "render_unavailable", "mesh": str(mesh_path)},
+            )
+        # Copy out of TemporaryDirectory before it is removed.
+        out_fd, out_name = tempfile.mkstemp(prefix="meshops_sil_front_", suffix=".png")
+        os.close(out_fd)
+        out_path = Path(out_name)
+        try:
+            shutil.copy2(front, out_path)
+        except OSError as exc:
+            out_path.unlink(missing_ok=True)
+            raise ProportionError(
+                f"failed to stage mesh front render: {exc}",
+                code="silhouette_failed",
+                details={"code": "render_unavailable", "mesh": str(mesh_path)},
+            ) from exc
+        return out_path
 
 
 def _normalize_view_role(view_role: str) -> None:
@@ -546,18 +563,25 @@ def run_silhouette_compare(
     if identical:
         messages.append(_IDENTICAL_MSG)
 
-    # Load + mask
+    # Load + mask (clean staged --mesh render after load)
     try:
         ref_rgba = _load_rgba_array(ref_p)
         mesh_rgba = _load_rgba_array(mesh_view_for_mask)
     except ProportionError:
+        if rendered_mesh_view is not None:
+            rendered_mesh_view.unlink(missing_ok=True)
         raise
     except Exception as exc:
+        if rendered_mesh_view is not None:
+            rendered_mesh_view.unlink(missing_ok=True)
         raise ProportionError(
             f"failed to load silhouette images: {exc}",
             code="silhouette_failed",
             details={"ref": str(ref_p), "mesh_view": str(mesh_view_for_mask)},
         ) from exc
+    finally:
+        if rendered_mesh_view is not None:
+            rendered_mesh_view.unlink(missing_ok=True)
 
     ref_mask, ref_msgs = extract_silhouette_mask(ref_rgba, side="ref")
     messages.extend(ref_msgs)
