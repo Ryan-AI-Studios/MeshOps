@@ -592,3 +592,76 @@ def test_recipe__head_unit_m() -> None:
     report = _full_torso_report(height_m=1.72, head_unit_frac=1.0 / 7.5)
     pkg = build_blockout_recipe(report, limbs=False)
     assert pkg.head_unit_m == pytest.approx(1.72 / 7.5)
+
+
+def test_recipe__load_rejects_malformed_trap_part(tmp_path: Path) -> None:
+    """R2 / P2-1: load validates per-kind required fields → recipe_failed."""
+    bad = {
+        "schema_version": "1.0.0",
+        "honesty": RECIPE_HONESTY,
+        "axis_notes": AXIS_NOTES,
+        "recipe_id": "humanoid_a_pose_v1",
+        "parts": [
+            {
+                "name": "RECIPE_torso_trap",
+                "role": "torso",
+                "kind": "trap_box",
+                "center": None,
+                "top_half_width_m": 0.2,
+                "bottom_half_width_m": 0.15,
+                "half_depth_m": 0.1,
+                "z_bottom_m": 0.9,
+                "z_top_m": 1.3,
+                "label": "RECIPE_torso_trap",
+            }
+        ],
+        "messages": [],
+        "counts": {"parts": 1, "by_role": {"torso": 1}},
+        "metrics": {},
+    }
+    path = tmp_path / "bad_recipe.json"
+    path.write_text(json.dumps(bad), encoding="utf-8")
+    with pytest.raises(ProportionError) as ei:
+        load_blockout_recipe(path)
+    assert ei.value.code == "recipe_failed"
+    assert "missing required" in str(ei.value).lower() or "center" in str(ei.value)
+
+
+def test_recipe__no_absolute_radius_invent_without_h() -> None:
+    """R4/R5 / P2-2: no absolute 0.04m invent when height/diameters missing."""
+    # Chin + shoulders for neck_len; no H, no neck diam, no head_unit → skip neck part
+    report = ProportionReport(
+        schema_version="1.1.0",
+        height_m=None,
+        head_unit_frac=None,
+        landmarks_xyz={
+            "chin": _lm("chin", z_m=1.50),
+            "shoulder_l": _lm("shoulder_l", x_m=-0.18, z_m=1.38),
+            "shoulder_r": _lm("shoulder_r", x_m=0.18, z_m=1.38),
+            "hip_l": _lm("hip_l", x_m=-0.12, z_m=0.95),
+            "hip_r": _lm("hip_r", x_m=0.12, z_m=0.95),
+        },
+        diameters=[],
+        depth_bands=[],
+        quality=QualityFlags(),
+    )
+    pkg = build_blockout_recipe(report, limbs=False)
+    assert not any(p.role == "neck" for p in pkg.parts)
+    assert any("RECIPE_neck skipped" in m for m in pkg.messages)
+    # metrics may still record neck_len when chin-shoulder known
+    if pkg.metrics.neck_len_m is not None:
+        assert pkg.metrics.neck_len_m == pytest.approx(0.12)
+
+
+def test_recipe__out_trailing_sep_is_directory(tmp_path: Path) -> None:
+    """R1 / P2-3: trailing separator marks directory even if path looks like a file."""
+    report = _full_torso_report()
+    pkg = build_blockout_recipe(report, limbs=False)
+    # suffix-looking path + trailing sep → directory basenames
+    out_dir = tmp_path / "recipe.json"
+    out_str = str(out_dir) + "\\"
+    paths = write_blockout_recipe(out_str, pkg, format="json", force=True)
+    assert len(paths) == 1
+    assert paths[0].name == "blockout_recipe.json"
+    assert paths[0].parent == out_dir
+    assert paths[0].is_file()

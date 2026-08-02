@@ -517,8 +517,11 @@ def _build_pelvis(m: _ResolvedMetrics, messages: list[str]) -> RecipePart | None
         else:
             messages.append("RECIPE_pelvis_bucket skipped: need hip depth or H")
             return None
-    # Bucket: from ~crotch area up through hips
-    h = m.height_m if m.height_m is not None else 1.7
+    # Bucket: from ~crotch area up through hips (needs H for span — no invent 1.7m)
+    if m.height_m is None:
+        messages.append("RECIPE_pelvis_bucket skipped: need height_m for pelvis span")
+        return None
+    h = m.height_m
     z_top = m.hip_z + 0.03 * h
     z_bottom = m.hip_z - 0.12 * h
     if z_bottom < 0.0:
@@ -562,7 +565,10 @@ def _build_neck(
         elif m.height_m is not None:
             radius = 0.04 * m.height_m
         else:
-            radius = 0.04
+            messages.append(
+                "RECIPE_neck skipped: no neck diameter, head_unit_m, or height_m for radius"
+            )
+            return None
     p0 = [0.0, y, z_sh]
     p1 = [0.0, y, z_sh + m.neck_len_m]
     placement: Literal["full3d", "front_plane"] = (
@@ -617,7 +623,10 @@ def _build_head(
         elif m.height_m is not None:
             rx = 0.06 * m.height_m
         else:
-            rx = 0.08
+            messages.append(
+                "RECIPE_head skipped: no head diameter, head_unit_m, or height_m for radius"
+            )
+            return None
     ry = rx * 0.9
     y = 0.0
     if chin.y_m is not None:
@@ -654,7 +663,8 @@ def _build_shoulder_bridges(
     ua_r = _resolve_diameter(report.diameters, "upper_arm_r")
     ua_hw_l = _half_width_from_diameter(ua_l) if ua_l else None
     ua_hw_r = _half_width_from_diameter(ua_r) if ua_r else None
-    default_r = 0.04 * m.height_m if m.height_m is not None else 0.04
+    # Spec: radius <= 0.55 * upper_arm half-width or 0.04 * H — no absolute invent
+    default_r = 0.04 * m.height_m if m.height_m is not None else None
     y_torso = m.chest_y if m.chest_y is not None else 0.0
 
     for side, lm_id, ua_hw in (
@@ -664,6 +674,18 @@ def _build_shoulder_bridges(
         lm = lms.get(lm_id)
         if lm is None or lm.x_m is None or lm.z_m is None:
             messages.append(f"RECIPE_shoulder_bridge_{side} skipped: missing joint")
+            continue
+        if ua_hw is not None and default_r is not None:
+            radius = min(0.55 * ua_hw, default_r)
+        elif ua_hw is not None:
+            radius = 0.55 * ua_hw
+        elif default_r is not None:
+            radius = default_r
+        else:
+            messages.append(
+                f"RECIPE_shoulder_bridge_{side} skipped: "
+                "no upper_arm diameter or height_m for radius"
+            )
             continue
         sx = float(lm.x_m)
         sz = float(lm.z_m)
@@ -679,8 +701,6 @@ def _build_shoulder_bridges(
         if _segment_length((p0[0], p0[1], p0[2]), (p1[0], p1[1], p1[2])) <= _NEAR_ZERO_LEN:
             messages.append(f"RECIPE_shoulder_bridge_{side} skipped: zero length")
             continue
-        # Spec: radius <= 0.55 * upper_arm half-width or 0.04 * H
-        radius = min(0.55 * ua_hw, default_r) if ua_hw is not None else default_r
         placement: Literal["full3d", "front_plane"] = (
             "full3d" if lm.y_m is not None and m.chest_y is not None else "front_plane"
         )
@@ -720,10 +740,15 @@ def _build_hip_bridges(
             continue
         diam = _resolve_diameter(report.diameters, thigh_band)
         thigh_hw = _half_width_from_diameter(diam) if diam else None
-        if thigh_hw is None:
-            radius = 0.03 * m.height_m if m.height_m is not None else 0.03
-        else:
+        if thigh_hw is not None:
             radius = 0.5 * thigh_hw
+        elif m.height_m is not None:
+            radius = 0.03 * m.height_m
+        else:
+            messages.append(
+                f"RECIPE_hip_bridge_{side} skipped: no thigh diameter or height_m for radius"
+            )
+            continue
         hx = float(lm.x_m)
         hz = float(lm.z_m)
         hy = float(lm.y_m) if lm.y_m is not None else y_pelvis
@@ -944,14 +969,13 @@ def _build_soft_ovals(
     else:
         messages.append("glute softs skipped: no CS/depth/hip_hw")
 
-    # Iliac soft optional
-    if m.hip_hw is not None and m.hip_z is not None:
-        h_or = h if h is not None else 1.7
+    # Iliac soft optional — needs H for z offset (no invent 1.7m)
+    if m.hip_hw is not None and m.hip_z is not None and h is not None:
         for side, sign in (("l", -1.0), ("r", 1.0)):
             center = [
                 sign * m.hip_hw * 0.9,
                 m.hip_y if m.hip_y is not None else 0.0,
-                m.hip_z + 0.02 * h_or,
+                m.hip_z + 0.02 * h,
             ]
             name = f"RECIPE_iliac_soft_{side}"
             if _midline_blocked(center, "iliac_soft", crotch_z):
@@ -971,6 +995,8 @@ def _build_soft_ovals(
                     label=name,
                 )
             )
+    elif m.hip_hw is not None and m.hip_z is not None and h is None:
+        messages.append("iliac softs skipped: need height_m for z offset")
 
     return parts
 
@@ -1159,13 +1185,17 @@ def load_blockout_recipe(path: Path | str) -> BlockoutRecipePackage:
             details={"path": str(p), "schema_version": ver},
         )
     try:
-        return BlockoutRecipePackage.model_validate(data)
+        package = BlockoutRecipePackage.model_validate(data)
     except Exception as exc:
         raise ProportionError(
             f"invalid blockout recipe: {p}: {exc}",
             code="recipe_failed",
             details={"path": str(p)},
         ) from exc
+    # R2: per-kind required fields on load (emit path validates via _append_part)
+    for part in package.parts:
+        _validate_part_fields(part)
+    return package
 
 
 def _load_depth_at_landmarks(path: Path | str) -> DepthSamplesPackage:
@@ -1474,14 +1504,18 @@ def emit_bpy_script(package: BlockoutRecipePackage) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _is_directory_out(out: Path) -> bool:
-    """R1: existing dir OR ends with / or \\ OR no .py/.json suffix → directory."""
-    s = str(out)
-    if s.endswith(("/", "\\")):
+def _is_directory_out(out: Path | str) -> bool:
+    """R1: existing dir OR ends with / or \\ OR no .py/.json suffix → directory.
+
+    Accept str so trailing separators survive (Path normalizes them away).
+    """
+    raw = str(out)
+    if raw.endswith(("/", "\\")):
         return True
-    if out.exists() and out.is_dir():
+    path = Path(raw.rstrip("/\\"))
+    if path.exists() and path.is_dir():
         return True
-    return out.suffix.lower() not in (".py", ".json")
+    return path.suffix.lower() not in (".py", ".json")
 
 
 def write_blockout_recipe(
@@ -1494,12 +1528,15 @@ def write_blockout_recipe(
     """Write recipe JSON and/or bpy script per R1 path resolution.
 
     May append warn messages to package.messages for single-file + both.
+    *out* may be str so trailing directory separators (R1) are preserved.
     """
-    out_path = Path(out)
+    raw = str(out)
+    ends_sep = raw.endswith(("/", "\\"))
+    out_path = Path(raw.rstrip("/\\") if ends_sep else raw)
     fmt: RecipeFormat = format
     written: list[Path] = []
 
-    is_dir = _is_directory_out(out_path)
+    is_dir = ends_sep or _is_directory_out(raw if ends_sep else out_path)
     suffix = out_path.suffix.lower()
 
     if not is_dir:

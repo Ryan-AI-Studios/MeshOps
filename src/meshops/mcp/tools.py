@@ -920,9 +920,16 @@ def mesh_proportion_blockout_recipe(
     fmt = (format or "both").strip().lower()
     if fmt not in ("bpy", "json", "both"):
         raise ValueError("--format must be bpy, json, or both")
+    # Preserve trailing directory separator intent (R1); Path resolve strips it.
+    ends_sep = out.endswith(("/", "\\"))
+    out_base = out.rstrip("/\\") if ends_sep else out
+    out_resolved = _resolve_tool_path(out_base, work_root)
+    out_arg: str | Path = (
+        str(out_resolved) + ("\\" if ends_sep else "") if ends_sep else out_resolved
+    )
     return run_blockout_recipe(
         _resolve_tool_path(report, work_root),
-        _resolve_tool_path(out, work_root),
+        out_arg,
         format=fmt,  # type: ignore[arg-type]
         depth_at_landmarks=(
             _resolve_tool_path(depth_at_landmarks, work_root) if depth_at_landmarks else None

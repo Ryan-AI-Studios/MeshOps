@@ -2201,10 +2201,11 @@ def proportion_blockout_recipe_cmd(
         "--report",
         help="Path to proportion_report.json",
     ),
-    out: Path = typer.Option(
+    out: str = typer.Option(
         ...,
         "--out",
-        help="Output file (.py/.json) or directory (default basenames)",
+        help="Output file (.py/.json) or directory (default basenames; "
+        "trailing sep marks a directory even if not yet created)",
     ),
     format: str = typer.Option(
         "both",
@@ -2238,6 +2239,7 @@ def proportion_blockout_recipe_cmd(
         raise typer.BadParameter("--format must be bpy, json, or both")
 
     try:
+        # Keep --out as str so trailing directory separators survive (R1).
         payload = run_blockout_recipe(
             report,
             out,
