@@ -53,7 +53,55 @@ def test_tool_catalog_complete_and_no_forbidden() -> None:
             assert "mesh_promote_working" in names
             assert "mesh_import_sculpt" in names
             assert "design_organic_api" in names
-            assert len(names) >= 26
+            assert "mesh_proportion_template" in names
+            assert "mesh_proportion_analyze" in names
+            assert "mesh_proportion_show" in names
+            assert "mesh_proportion_scaffold" in names
+            assert "mesh_proportion_guides" in names
+            assert "mesh_proportion_capture" in names
+            assert len(names) >= 32
+
+    _run(_body())
+
+
+def test_mcp__proportion_tools_in_catalog() -> None:
+    """Explicit 0016 catalog freeze: six proportion tools; len >= 32."""
+
+    async def _body() -> None:
+        server = build_server()
+        async with Client(server) as client:
+            listed = await client.list_tools()
+            names = {t.name for t in listed.tools}
+            for n in (
+                "mesh_proportion_template",
+                "mesh_proportion_analyze",
+                "mesh_proportion_show",
+                "mesh_proportion_scaffold",
+                "mesh_proportion_guides",
+                "mesh_proportion_capture",
+            ):
+                assert n in names
+            assert len(names) >= 32
+            assert names >= TOOL_NAMES
+
+    _run(_body())
+
+
+def test_mcp__proportion_template_smoke(tmp_path: Path) -> None:
+    async def _body() -> None:
+        server = build_server(tmp_path)
+        async with Client(server) as client:
+            result = await client.call_tool(
+                "mesh_proportion_template",
+                {"out": "landmarks_assist.json"},
+            )
+            assert result.is_error is False
+            assert result.structured_content is not None
+            assert result.structured_content.get("ok") is True
+            path = Path(result.structured_content["path"])
+            assert path.is_file()
+            # honesty / N6 not a mesh success claim
+            assert "assist" in result.structured_content
 
     _run(_body())
 

@@ -686,3 +686,188 @@ def design_organic_api(
         "acceptance": _dump_model(result.acceptance),
         "schema_version": result.schema_version,
     }
+
+
+# ---------------------------------------------------------------------------
+# Proportion (0012-0016) — measurement / authoring only (N6)
+# ---------------------------------------------------------------------------
+
+
+def _resolve_tool_path(path: str | Path, work_root: Path) -> Path:
+    """Resolve relative paths against work_root, else cwd (R8 / 0008 R3)."""
+    p = Path(path).expanduser()
+    if p.is_absolute():
+        return p.resolve()
+    wr_cand = (work_root / p).resolve()
+    if wr_cand.exists() or wr_cand.parent.exists():
+        return wr_cand
+    return (Path.cwd() / p).resolve()
+
+
+def mesh_proportion_template(
+    work_root: Path, *, out: str = "landmarks_assist.json"
+) -> dict[str, Any]:
+    """Write blank landmarks_assist.json. Authoring only — not mesh/print success (N6)."""
+    from meshops.proportion.template import blank_assist_document, write_template
+
+    path = write_template(_resolve_tool_path(out, work_root))
+    return {"ok": True, "path": str(path), "assist": blank_assist_document()}
+
+
+def mesh_proportion_analyze(
+    work_root: Path,
+    *,
+    views_dir: str,
+    landmarks: str | None = None,
+    height_m: float | None = None,
+    out: str | None = None,
+    overlays: bool = False,
+    partial_ok: bool = False,
+    attach_session: str | None = None,
+) -> dict[str, Any]:
+    """Analyze multi-view package → proportion_report. Measurement only (N6)."""
+    from meshops.proportion.analyze import analyze_proportion
+    from meshops.proportion.capture import attach_report_to_organic_session
+    from meshops.proportion.errors import ProportionError
+
+    views = _resolve_tool_path(views_dir, work_root)
+    lm = _resolve_tool_path(landmarks, work_root) if landmarks else None
+    out_dir = _resolve_tool_path(out, work_root) if out else None
+    if attach_session and out_dir is None:
+        raise ProportionError(
+            "attach_session requires out (report must be written)",
+            code="capture_failed",
+            details={"attach_session": attach_session},
+        )
+    report = analyze_proportion(
+        views,
+        landmarks_path=lm,
+        height_m=height_m,
+        out_dir=out_dir,
+        partial_ok=partial_ok,
+        overlays=overlays,
+    )
+    payload = report.model_dump(mode="json")
+    payload["ok"] = True
+    if out_dir is not None:
+        report_path = out_dir / "proportion_report.json"
+        payload["report_path"] = str(report_path)
+        if attach_session:
+            dest = attach_report_to_organic_session(
+                attach_session,
+                report_path,
+                work_root=work_root,
+            )
+            payload["attach_dest"] = str(dest)
+    return payload
+
+
+def mesh_proportion_show(work_root: Path, *, report: str) -> dict[str, Any]:
+    """Load proportion_report.json → {report, markdown}. Measurement only (N6)."""
+    from meshops.proportion.analyze import load_report, report_to_markdown
+
+    path = _resolve_tool_path(report, work_root)
+    rep = load_report(path)
+    return {
+        "report": rep.model_dump(mode="json"),
+        "markdown": report_to_markdown(rep),
+    }
+
+
+def mesh_proportion_scaffold(
+    work_root: Path,
+    *,
+    out: str,
+    dual: bool = False,
+    mode: str | None = None,
+    height_m: float | None = None,
+    subject: str | None = None,
+    pose: str = "a_pose",
+    with_template: bool = False,
+    stub_images: bool = False,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Create multi-view package layout + checklist. Layout only — not mesh/print (N6)."""
+    from meshops.proportion.scaffold import scaffold_package
+
+    out_path = _resolve_tool_path(out, work_root)
+    resolved_mode = "dual" if dual else (mode.strip().lower() if mode else "single")
+    result = scaffold_package(
+        out_path,
+        dual=dual or resolved_mode == "dual",
+        mode=resolved_mode if not dual else "dual",  # type: ignore[arg-type]
+        height_m=height_m,
+        subject=subject,
+        pose=pose,
+        with_template=with_template,
+        stub_images=stub_images,
+        force=force,
+    )
+    return {
+        "ok": True,
+        "mode": result.mode,
+        "paths": [str(p) for p in result.paths],
+        "analyze_hint": str(result.analyze_hint) if result.analyze_hint is not None else None,
+    }
+
+
+def mesh_proportion_guides(
+    work_root: Path,
+    *,
+    report: str,
+    out: str,
+    format: str = "both",
+    seeds: bool = False,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Emit LM_* guides / optional SEED_* from report. Authoring aids only (N6)."""
+    from meshops.proportion.guides import run_guides
+
+    fmt = (format or "both").strip().lower()
+    if fmt not in ("bpy", "json", "both"):
+        raise ValueError("--format must be bpy, json, or both")
+    return run_guides(
+        _resolve_tool_path(report, work_root),
+        _resolve_tool_path(out, work_root),
+        format=fmt,  # type: ignore[arg-type]
+        seeds=seeds,
+        force=force,
+    )
+
+
+def mesh_proportion_capture(
+    work_root: Path,
+    *,
+    source: str | None = None,
+    in_path: str | None = None,
+    out: str | None = None,
+    views_dir: str | None = None,
+    pose: str | None = None,
+    multi_figure: bool | None = None,
+    merge: str | None = None,
+    prefer_merge: bool = False,
+    default_confidence: float | None = None,
+    force: bool = False,
+    emit_dump_script: str | None = None,
+    attach_session: str | None = None,
+) -> dict[str, Any]:
+    """Fill landmarks_assist from px/dump/reproject. Authoring only — CAPTURE_HONESTY / N6."""
+    from meshops.proportion.capture import run_capture
+
+    return run_capture(
+        source=source,  # type: ignore[arg-type]
+        in_path=_resolve_tool_path(in_path, work_root) if in_path else None,
+        out_path=_resolve_tool_path(out, work_root) if out else None,
+        views_dir=_resolve_tool_path(views_dir, work_root) if views_dir else None,
+        pose=pose,
+        multi_figure=multi_figure,
+        merge_path=_resolve_tool_path(merge, work_root) if merge else None,
+        prefer_merge=prefer_merge,
+        default_confidence=default_confidence,
+        force=force,
+        emit_dump_script_path=(
+            _resolve_tool_path(emit_dump_script, work_root) if emit_dump_script else None
+        ),
+        attach_session=attach_session,
+        work_root=work_root,
+    )

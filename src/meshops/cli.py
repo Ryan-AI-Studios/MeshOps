@@ -86,12 +86,13 @@ app.add_typer(bench_app, name="bench")
 proportion_app = typer.Typer(
     name="proportion",
     help=(
-        "Pixel proportion analysis from multi-view RGB (tracks 0012-0015). "
-        "Verbs: template | analyze | show | scaffold | guides. "
+        "Pixel proportion analysis from multi-view RGB (tracks 0012-0016). "
+        "Verbs: template | analyze | show | scaffold | guides | capture. "
         "Assist-first landmarks + head-unit checks + blockout-grade XYZ; "
         "schema 1.1.0 diameters (edge pairs) + left depth bands + cross-sections; "
         "scaffold creates package layout + package_checklist.json only (not mesh/print success); "
-        "guides emits proportion_guides.json + Blender 5.2 setup script (authoring aids only). "
+        "guides emits proportion_guides.json + Blender 5.2 setup script (authoring aids only); "
+        "capture fills landmarks_assist.json from px/dump/reproject (authoring only — N6). "
         "Optional: meshops[proportion] (Pillow)."
     ),
     add_completion=False,
@@ -1598,7 +1599,7 @@ def bench_envelope_cmd(
 
 
 # ---------------------------------------------------------------------------
-# proportion (0012-0015) — template | analyze | show | scaffold | guides
+# proportion (0012-0016) — template | analyze | show | scaffold | guides | capture
 # ---------------------------------------------------------------------------
 
 
@@ -1662,9 +1663,21 @@ def proportion_analyze_cmd(
         "--partial-ok",
         help="Allow missing required views; sets partial_package + lower package_score",
     ),
+    attach_session: str | None = typer.Option(
+        None,
+        "--attach-session",
+        help="Soft organic session id: copy report under organic/proportion/ + note",
+    ),
+    work_root: Path | None = typer.Option(
+        None,
+        "--work-root",
+        help="Work root for --attach-session (default: MESHOPS_WORK or work)",
+    ),
     json_out: bool = typer.Option(False, "--json", help="Emit ProportionReport JSON on stdout"),
 ) -> None:
     """Analyze multi-view package → proportion_report (not mesh/print success)."""
+    import os
+
     from meshops.proportion.analyze import analyze_proportion
     from meshops.proportion.errors import ProportionError
 
@@ -1677,6 +1690,25 @@ def proportion_analyze_cmd(
             partial_ok=partial_ok,
             overlays=overlays,
         )
+        attach_dest = None
+        if attach_session is not None:
+            if out is None:
+                raise ProportionError(
+                    "--attach-session requires --out (report must be written)",
+                    code="capture_failed",
+                )
+            from meshops.proportion.capture import attach_report_to_organic_session
+
+            if work_root is not None:
+                wr = work_root
+            else:
+                wr = Path(os.environ.get("MESHOPS_WORK", "work"))
+            report_path = Path(out) / "proportion_report.json"
+            attach_dest = attach_report_to_organic_session(
+                attach_session,
+                report_path,
+                work_root=wr,
+            )
     except ProportionError as exc:
         _emit_error(exc, json_mode=json_out, code=1)
     except Exception as exc:
@@ -1686,6 +1718,8 @@ def proportion_analyze_cmd(
     payload["ok"] = True
     if out is not None:
         payload["report_path"] = str(Path(out) / "proportion_report.json")
+    if attach_session is not None and attach_dest is not None:
+        payload["attach_dest"] = str(attach_dest)
 
     if json_out:
         _emit_json(payload)
@@ -1720,6 +1754,8 @@ def proportion_analyze_cmd(
                 typer.echo(f"  [{mark}] {c.name}: {c.message}")
         if out is not None:
             typer.echo(f"  wrote {Path(out) / 'proportion_report.json'}")
+        if attach_dest is not None:
+            typer.echo(f"  attached to session: {attach_dest}")
     raise typer.Exit(0)
 
 
@@ -1950,6 +1986,128 @@ def proportion_guides_cmd(
         for msg in payload.get("messages", []):
             typer.echo(f"  note: {msg}")
         typer.echo("guides only — not mesh or print success")
+    raise typer.Exit(0)
+
+
+@proportion_app.command("capture")
+def proportion_capture_cmd(
+    source: str | None = typer.Option(
+        None,
+        "--source",
+        help="Capture source: px | dump | reproject (required unless --emit-dump-script alone)",
+    ),
+    in_path: Path | None = typer.Option(
+        None,
+        "--in",
+        help="Input: pixel capture / empty dump / guides or report JSON",
+    ),
+    out: Path | None = typer.Option(
+        None,
+        "--out",
+        help="Output landmarks_assist.json path",
+    ),
+    views_dir: Path | None = typer.Option(
+        None,
+        "--views-dir",
+        help="Optional multi-view dir for image sizes (dump view_sizes fill)",
+    ),
+    pose: str | None = typer.Option(
+        None,
+        "--pose",
+        help='Pose string (default: from dump or "unknown")',
+    ),
+    multi_figure: bool | None = typer.Option(
+        None,
+        "--multi-figure/--no-multi-figure",
+        help="Mark multi_figure on output assist (message only; no primary pick)",
+    ),
+    merge: Path | None = typer.Option(
+        None,
+        "--merge",
+        help="Existing assist to merge into (required for reproject anchors)",
+    ),
+    prefer_merge: bool = typer.Option(
+        False,
+        "--prefer-merge/--no-prefer-merge",
+        help="When both set, keep merge value (default: new wins)",
+    ),
+    default_confidence: float | None = typer.Option(
+        None,
+        "--default-confidence",
+        help="Default confidence (px/dump 1.0; reproject 0.75 if unset)",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite existing --out",
+    ),
+    emit_dump_script: Path | None = typer.Option(
+        None,
+        "--emit-dump-script",
+        help="Write self-contained Blender ASSIST_* dump script (can be alone)",
+    ),
+    attach_session: str | None = typer.Option(
+        None,
+        "--attach-session",
+        help="Soft organic session id: copy assist under organic/proportion/ + note",
+    ),
+    work_root: Path | None = typer.Option(
+        None,
+        "--work-root",
+        help="Work root for --attach-session (default: MESHOPS_WORK or work)",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
+) -> None:
+    """Capture/fill landmarks_assist.json from px dump, ASSIST_* empties, or reproject.
+
+    Authoring aid only — not mesh or print success (N6 / CAPTURE_HONESTY).
+    """
+    from meshops.proportion.capture import run_capture
+    from meshops.proportion.errors import ProportionError
+    from meshops.proportion.honesty import CAPTURE_HONESTY
+
+    src = source.strip().lower() if source is not None else None
+    if src is not None and src not in ("px", "dump", "reproject"):
+        raise typer.BadParameter("--source must be px, dump, or reproject")
+
+    try:
+        payload = run_capture(
+            source=src,  # type: ignore[arg-type]
+            in_path=in_path,
+            out_path=out,
+            views_dir=views_dir,
+            pose=pose,
+            multi_figure=multi_figure,
+            merge_path=merge,
+            prefer_merge=prefer_merge,
+            default_confidence=default_confidence,
+            force=force,
+            emit_dump_script_path=emit_dump_script,
+            attach_session=attach_session,
+            work_root=work_root,
+        )
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    if json_out:
+        _emit_json(payload)
+    else:
+        counts = payload.get("counts") or {}
+        typer.echo(
+            f"capture source={payload.get('source')} "
+            f"landmarks={counts.get('landmarks', 0)} "
+            f"views={counts.get('views', 0)} "
+            f"skipped={counts.get('skipped', 0)}"
+        )
+        if payload.get("out"):
+            typer.echo(f"  wrote {payload['out']}")
+        for msg in payload.get("messages") or []:
+            if msg != CAPTURE_HONESTY:
+                typer.echo(f"  note: {msg}")
+        typer.echo(f"honesty: {CAPTURE_HONESTY}")
+        typer.echo("capture only — not mesh or print success")
     raise typer.Exit(0)
 
 
