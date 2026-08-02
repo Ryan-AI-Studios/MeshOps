@@ -771,8 +771,7 @@ def build_assist_from_reproject(
     if left_ids:
         torso_cx, _, left_sole_y, left_top_y = _left_anchors_from_merge(merge_doc)
 
-    dir_sizes = _view_sizes_from_dir(views_dir)
-    # Image center fallback for torso if needed already handled by anchors
+    _ = views_dir  # reserved: optional view size hints (anchors already supply stature)
 
     doc = blank_assist_document()
     # Start from merge so unfilled keys preserve via later merge; builder only new coords
@@ -855,10 +854,6 @@ def build_assist_from_reproject(
                 sole_y_use = left_sole_y if left_sole_y is not None else sole[1]
                 y_px = sole_y_use - 0.5 * left_h
                 messages.append(f"{lid}: missing z_m — y_px mid-span fallback")
-
-            # Optional: image center was already superseded by torso_cx anchors
-            if not dir_sizes and torso_cx is None:
-                pass
 
             _set_landmark(
                 doc,

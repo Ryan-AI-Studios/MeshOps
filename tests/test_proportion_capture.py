@@ -13,6 +13,8 @@ from meshops.cli import app
 from meshops.organic.session import create_session, load_session
 from meshops.proportion.capture import (
     NOTE_PREFIX_ASSIST,
+    NOTE_PREFIX_REPORT,
+    attach_report_to_organic_session,
     attach_to_organic_session,
     build_assist_from_dump,
     build_assist_from_px,
@@ -519,3 +521,81 @@ def test_capture__dump_views_dir_fills_sizes(tmp_path: Path) -> None:
     )
     doc, _msgs, _sk = build_assist_from_dump(dump, views_dir=views)
     assert doc["views"]["front"]["landmarks"]["chin"] == [60.0, 50.0]
+
+
+# ---------------------------------------------------------------------------
+# P2/P3 review follow-ups
+# ---------------------------------------------------------------------------
+
+
+def test_capture__dump_multi_figure_preserved_when_param_omitted(tmp_path: Path) -> None:
+    """MCP/CLI parity: multi_figure=None must not force-false dump/px source flag (P2-001)."""
+    from meshops.mcp.tools import mesh_proportion_capture
+
+    dump = _dump_doc(
+        [{"name": "ASSIST_front_chin", "x_px": 10, "y_px": 20}],
+    )
+    dump["multi_figure"] = True
+    src = tmp_path / "dump.json"
+    out = tmp_path / "assist.json"
+    src.write_text(json.dumps(dump) + "\n", encoding="utf-8")
+
+    # Omit multi_figure (default None) — same as MCP when client does not send the param.
+    payload = mesh_proportion_capture(
+        tmp_path,
+        source="dump",
+        in_path=str(src),
+        out=str(out),
+        force=True,
+    )
+    assert payload["ok"] is True
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    assert doc["multi_figure"] is True
+    assert any("multi_figure=true" in m for m in payload["messages"])
+
+
+def test_capture__px_edge_pairs_passthrough() -> None:
+    """Top-level edge_pairs from px capture survive into assist (P3-004)."""
+    px = _px_doc()
+    px["edge_pairs"] = {
+        "front": {
+            "waist": [[40, 100], [60, 100]],
+            "thigh_l": [[30, 140], [45, 140]],
+        }
+    }
+    doc, _messages = build_assist_from_px(px)
+    assert doc["edge_pairs"]["front"]["waist"] == [[40, 100], [60, 100]]
+    assert doc["edge_pairs"]["front"]["thigh_l"] == [[30, 140], [45, 140]]
+
+
+def test_attach_report__prefix_idempotent(tmp_path: Path) -> None:
+    """NOTE_PREFIX_REPORT replace is idempotent on double attach (P3-004)."""
+    work = tmp_path / "work"
+    create_session("report attach test", work_root=work, session_id="oabcdef01236")
+    report = tmp_path / "proportion_report.json"
+    report.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.1.0",
+                "honesty": "proportion_measurement_not_mesh_or_print_success",
+                "ok": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    dest1 = attach_report_to_organic_session(
+        "oabcdef01236",
+        report,
+        work_root=work,
+    )
+    dest2 = attach_report_to_organic_session(
+        "oabcdef01236",
+        report,
+        work_root=work,
+    )
+    assert dest1 == dest2
+    _, man = load_session("oabcdef01236", work_root=work)
+    notes = [n for n in man.notes if n.startswith(NOTE_PREFIX_REPORT)]
+    assert len(notes) == 1
+    assert notes[0].startswith(NOTE_PREFIX_REPORT)

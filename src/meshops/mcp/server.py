@@ -444,7 +444,7 @@ def build_server(work_root: Path | None = None) -> Any:
         """Write blank landmarks_assist.json template.
 
         Authoring aid only — not mesh reconstruction or print success (N6 /
-        proportion_capture_not_mesh_or_print_success).
+        proportion_measurement_not_mesh_or_print_success).
         """
         return T.mesh_proportion_template(wr, out=out)
 
@@ -533,7 +533,7 @@ def build_server(work_root: Path | None = None) -> Any:
         out: str | None = None,
         views_dir: str | None = None,
         pose: str | None = None,
-        multi_figure: bool = False,
+        multi_figure: bool | None = None,
         merge: str | None = None,
         prefer_merge: bool = False,
         default_confidence: float | None = None,

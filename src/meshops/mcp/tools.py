@@ -836,7 +836,7 @@ def mesh_proportion_capture(
     out: str | None = None,
     views_dir: str | None = None,
     pose: str | None = None,
-    multi_figure: bool = False,
+    multi_figure: bool | None = None,
     merge: str | None = None,
     prefer_merge: bool = False,
     default_confidence: float | None = None,
