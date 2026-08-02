@@ -1,10 +1,12 @@
-"""Track 0012 — pixel proportion analysis (offline; no new pytest markers)."""
+"""Track 0012+0013 — pixel proportion analysis (offline; no new pytest markers)."""
 
 from __future__ import annotations
 
 import json
+import math
 import struct
 import zlib
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -13,14 +15,16 @@ from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from meshops.cli import app
-from meshops.proportion.analyze import analyze_proportion, load_report
+from meshops.proportion.analyze import analyze_proportion, load_report, report_to_markdown
 from meshops.proportion.assist import load_assist_json, point_to_landmark2d
+from meshops.proportion.diameters import ortho_width
 from meshops.proportion.errors import ProportionError
 from meshops.proportion.fuse import compute_package_score, head_unit_frac_from_front
 from meshops.proportion.honesty import PROPORTION_HONESTY
 from meshops.proportion.load_views import load_views, png_size_from_bytes
 from meshops.proportion.models import (
     PROPORTION_SCHEMA_VERSION,
+    DiameterMeasure,
     Landmark2D,
     ProportionReport,
     ViewLandmarks,
@@ -369,14 +373,18 @@ def test_template_cli__writes(tmp_path: Path) -> None:
     assert payload["ok"] is True
     assert out.is_file()
     doc = json.loads(out.read_text(encoding="utf-8"))
-    assert doc["schema_version"] == "1.0.0"
+    assert doc["schema_version"] == "1.1.0"
     assert doc["pose"] == "unknown"
     assert doc["multi_figure"] is False
+    assert "edge_pairs" in doc
+    assert "front" in doc["edge_pairs"]
     for key in ("front", "left", "three_quarter", "back"):
         assert key in doc["views"]
         assert "landmarks" in doc["views"][key]
     blank = blank_assist_document()
     assert "cranial_vertex" in blank["views"]["front"]["landmarks"]
+    assert "glute_front" in blank["views"]["left"]["landmarks"]
+    assert "thigh_l" in blank["edge_pairs"]["front"]
 
 
 def test_meters_flag__scales(tmp_path: Path) -> None:
@@ -448,7 +456,7 @@ def test_show_cli(tmp_path: Path) -> None:
     assert r.exit_code == 0, r.output
     payload = json.loads(r.stdout)
     assert payload["ok"] is True
-    assert payload["schema_version"] == "1.0.0"
+    assert payload["schema_version"] == "1.1.0"
 
 
 def test_point_to_landmark_fracs() -> None:
@@ -582,6 +590,294 @@ def test_no_network_imports() -> None:
     """Sanity: proportion package modules import without network."""
     import meshops.proportion.analyze as a
     import meshops.proportion.checks as c
+    import meshops.proportion.diameters as d
     import meshops.proportion.fuse as f
 
-    assert a is not None and c is not None and f is not None
+    assert a is not None and c is not None and f is not None and d is not None
+
+
+# ---------------------------------------------------------------------------
+# Track 0013 — diameters / depth bands / cross-sections / schema 1.1.0
+# ---------------------------------------------------------------------------
+
+
+def test_literal_accepts_1_1_0() -> None:
+    r = ProportionReport.model_validate(
+        {
+            "schema_version": "1.1.0",
+            "honesty": PROPORTION_HONESTY,
+            "package_score": 0.0,
+            "diameters": [],
+            "depth_bands": [],
+            "cross_sections": [],
+        }
+    )
+    assert r.schema_version == "1.1.0"
+    assert PROPORTION_SCHEMA_VERSION == "1.1.0"
+
+
+def test_load_1_0_0_report_missing_new_fields() -> None:
+    """Old 1.0.0 reports load: new fields default empty/0 (missing ≠ extra)."""
+    raw = {
+        "schema_version": "1.0.0",
+        "honesty": PROPORTION_HONESTY,
+        "package_score": 40.0,
+        "pose": "a_pose",
+        "views": {},
+        "landmarks_xyz": {},
+        "checks": [],
+        "quality": {},
+        "messages": [],
+        "score_breakdown": {},
+    }
+    r = ProportionReport.model_validate(raw)
+    assert r.schema_version == "1.0.0"
+    assert r.diameters == []
+    assert r.depth_bands == []
+    assert r.cross_sections == []
+    assert r.thickness_band_count == 0
+    assert r.depth_band_count == 0
+
+
+def test_show_loads_1_1_0_report(tmp_path: Path) -> None:
+    assist = eight_head_assist()
+    assist["schema_version"] = "1.1.0"
+    assist["edge_pairs"] = {
+        "front": {
+            "thigh_l": [[200, 360], [250, 360]],
+        }
+    }
+    d = make_package(tmp_path, assist=assist)
+    out = tmp_path / "out"
+    report = analyze_proportion(d, out_dir=out, run_heuristic_frame=False)
+    assert report.schema_version == "1.1.0"
+    assert report.thickness_band_count >= 1
+    loaded = load_report(out / "proportion_report.json")
+    assert loaded.schema_version == "1.1.0"
+    assert len(loaded.diameters) >= 1
+    assert loaded.diameters[0].band_id == "thigh_l"
+    md = (out / "proportion_report.md").read_text(encoding="utf-8")
+    assert "## Diameters" in md
+    assert "## Depth bands" in md
+    assert "## Cross-sections" in md
+
+
+def test_edge_pairs_top_level__width(tmp_path: Path) -> None:
+    assist = eight_head_assist()
+    assist["edge_pairs"] = {
+        "front": {
+            "upper_arm_l": [[180, 200], [210, 202]],
+        }
+    }
+    d = make_package(tmp_path, assist=assist)
+    report = analyze_proportion(d, run_heuristic_frame=False)
+    bands = {x.band_id: x for x in report.diameters}
+    assert "upper_arm_l" in bands
+    m = bands["upper_arm_l"]
+    assert m.width_px > 0
+    assert m.width_frac > 0
+    # Injected landmarks for overlays
+    assert "upper_arm_l_edge0" in report.views["front"].landmarks
+    assert "upper_arm_l_edge1" in report.views["front"].landmarks
+
+
+def test_suffix_edge0_edge1(tmp_path: Path) -> None:
+    assist = eight_head_assist()
+    assist["views"]["front"]["landmarks"]["calf_l_edge0"] = [220, 440]
+    assist["views"]["front"]["landmarks"]["calf_l_edge1"] = [250, 440]
+    d = make_package(tmp_path, assist=assist)
+    report = analyze_proportion(d, run_heuristic_frame=False)
+    bands = {x.band_id: x for x in report.diameters}
+    assert "calf_l" in bands
+    assert bands["calf_l"].width_px == pytest.approx(30.0, abs=0.1)
+    # No spam notes for edge suffixes
+    assert not any("unknown landmark id 'calf_l_edge" in m for m in report.messages)
+
+
+def test_structured_wins_suffix(tmp_path: Path) -> None:
+    assist = eight_head_assist()
+    # Suffix says 20 px wide; structured says 50 px
+    assist["views"]["front"]["landmarks"]["thigh_l_edge0"] = [200, 360]
+    assist["views"]["front"]["landmarks"]["thigh_l_edge1"] = [220, 360]
+    assist["edge_pairs"] = {
+        "front": {
+            "thigh_l": [[200, 360], [250, 360]],
+        }
+    }
+    d = make_package(tmp_path, assist=assist)
+    report = analyze_proportion(d, run_heuristic_frame=False)
+    m = next(x for x in report.diameters if x.band_id == "thigh_l")
+    assert m.width_px == pytest.approx(50.0, abs=0.1)
+    assert m.method == "edge_pairs"
+    # Injected structured endpoints overwrite suffix
+    e0 = report.views["front"].landmarks["thigh_l_edge0"]
+    e1 = report.views["front"].landmarks["thigh_l_edge1"]
+    assert e1.x_px - e0.x_px == pytest.approx(50.0, abs=0.1)
+
+
+def test_angled_edge__ortho_lt_eucl() -> None:
+    # θ = 45° → ortho = eucl * cos(45) < eucl
+    w_ortho, w_eucl, theta = ortho_width(0.0, 0.0, 30.0, 30.0)
+    assert theta == pytest.approx(45.0, abs=0.1)
+    assert w_eucl == pytest.approx(math.hypot(30, 30), abs=1e-6)
+    assert w_ortho < w_eucl
+    assert w_ortho == pytest.approx(w_eucl * math.cos(math.radians(45)), abs=1e-6)
+
+
+def test_angled_edge__ortho_lt_eucl_in_report(tmp_path: Path) -> None:
+    assist = eight_head_assist()
+    # 40 px horizontal + ~40 px vertical → θ ≈ 45°
+    assist["edge_pairs"] = {
+        "front": {
+            "forearm_l": [[100, 200], [140, 240]],
+        }
+    }
+    d = make_package(tmp_path, assist=assist)
+    report = analyze_proportion(d, run_heuristic_frame=False)
+    m = next(x for x in report.diameters if x.band_id == "forearm_l")
+    assert m.theta_deg > 15.0
+    assert m.width_px < m.width_eucl_px
+
+
+def test_glute_inverted__swap_info(tmp_path: Path) -> None:
+    """Inverted glute front/back → orientation_swapped + info check."""
+    assist = eight_head_assist()
+    # With camera_left, y = +1*(x - torso_cx)/span.
+    # chest/hip give torso_cx ≈ 200. Put glute "front" left of center so y smaller.
+    assist["views"]["left"]["landmarks"]["glute_front"] = [160, 300]  # more back-ish
+    assist["views"]["left"]["landmarks"]["glute_back"] = [240, 300]  # more front-ish
+    d = make_package(tmp_path, assist=assist)
+    report = analyze_proportion(d, run_heuristic_frame=False)
+    glute = next(b for b in report.depth_bands if b.band_id == "glute")
+    assert glute.orientation_swapped is True
+    assert glute.y_front > glute.y_back
+    orient = [c for c in report.checks if c.name == "depth_band_orientation"]
+    assert orient
+    assert orient[0].severity == "info"
+    assert orient[0].ok is True
+
+
+def test_package_score_depth_chest_only(tmp_path: Path) -> None:
+    """Glute-only depth must NOT award depth package_score points (R8)."""
+    assist = eight_head_assist()
+    # Remove chest/hip depth; leave only glute
+    del assist["views"]["left"]["landmarks"]["chest_front"]
+    del assist["views"]["left"]["landmarks"]["chest_back"]
+    del assist["views"]["left"]["landmarks"]["hip_front"]
+    del assist["views"]["left"]["landmarks"]["hip_back"]
+    assist["views"]["left"]["landmarks"]["glute_front"] = [230, 300]
+    assist["views"]["left"]["landmarks"]["glute_back"] = [170, 300]
+    d = make_package(tmp_path, assist=assist)
+    report = analyze_proportion(d, run_heuristic_frame=False)
+    assert any(b.band_id == "glute" for b in report.depth_bands)
+    assert report.score_breakdown["depth"] == pytest.approx(0.0)
+    # Still has views + stature + width_pair = 40+25+15 = 80
+    assert report.package_score == pytest.approx(80.0, abs=0.1)
+
+
+def test_cross_section_when_z_match(tmp_path: Path) -> None:
+    assist = eight_head_assist()
+    # thigh diameter at y=360 → z ≈ (520-360)/480 = 0.333
+    assist["edge_pairs"] = {
+        "front": {
+            "thigh_l": [[200, 360], [250, 360]],
+        }
+    }
+    # left thigh depth near same image y → similar z_frac
+    assist["views"]["left"]["landmarks"]["thigh_front"] = [230, 360]
+    assist["views"]["left"]["landmarks"]["thigh_back"] = [170, 360]
+    d = make_package(tmp_path, assist=assist)
+    report = analyze_proportion(d, run_heuristic_frame=False)
+    assert report.cross_sections, "expected at least one cross-section when z match"
+    cs = next(c for c in report.cross_sections if c.level_id == "thigh")
+    assert cs.rx_frac > 0
+    assert cs.ry_frac > 0
+
+
+def test_no_pairs__empty(tmp_path: Path) -> None:
+    """0012-style assist without edge_pairs → empty diameters, still works."""
+    d = make_package(tmp_path, assist=eight_head_assist())
+    report = analyze_proportion(d, run_heuristic_frame=False)
+    assert report.diameters == []
+    assert report.thickness_band_count == 0
+    assert report.schema_version == "1.1.0"
+    # chest/hip depth bands still present from left landmarks
+    assert report.depth_band_count >= 2
+    assert report.package_score == pytest.approx(100.0, abs=0.1)
+    md = report_to_markdown(report)
+    assert "## Diameters" in md
+    assert "(none)" in md
+
+
+def test_meters_on_diameter(tmp_path: Path) -> None:
+    assist = eight_head_assist()
+    assist["edge_pairs"] = {
+        "front": {
+            "waist": [[220, 240], [292, 240]],  # 72 px
+        }
+    }
+    Hm = 1.80
+    d = make_package(tmp_path, assist=assist)
+    report = analyze_proportion(d, height_m=Hm, run_heuristic_frame=False)
+    m = next(x for x in report.diameters if x.band_id == "waist")
+    assert m.width_m is not None
+    assert m.width_m == pytest.approx(m.width_frac * Hm, abs=1e-9)
+    assert m.half_width_m is not None
+    assert m.half_width_m == pytest.approx(m.width_m / 2.0, abs=1e-9)
+    # Depth bands also scale
+    chest = next(b for b in report.depth_bands if b.band_id == "chest")
+    assert chest.depth_m is not None
+    assert chest.depth_m == pytest.approx(chest.depth_frac * Hm, abs=1e-9)
+
+
+def test_diameter_measure_model_fields() -> None:
+    d = DiameterMeasure(
+        band_id="neck",
+        view="front",
+        width_px=20.0,
+        width_eucl_px=20.0,
+        theta_deg=0.0,
+        width_frac=0.04,
+        mid_x_px=256.0,
+        mid_y_px=90.0,
+        sources=["test"],
+    )
+    raw = d.model_dump(mode="json")
+    back = DiameterMeasure.model_validate(raw)
+    assert back.band_id == "neck"
+
+
+def test_depth_bands_chest_hip_present(tmp_path: Path) -> None:
+    d = make_package(tmp_path, assist=eight_head_assist())
+    report = analyze_proportion(d, run_heuristic_frame=False)
+    ids = {b.band_id for b in report.depth_bands}
+    assert "chest" in ids
+    assert "hip" in ids
+    for b in report.depth_bands:
+        if not b.orientation_swapped:
+            assert b.y_front >= b.y_back
+
+
+def test_markdown_sections_always_present(tmp_path: Path) -> None:
+    d = make_package(tmp_path, assist=eight_head_assist())
+    report = analyze_proportion(d, run_heuristic_frame=False)
+    md = report_to_markdown(report)
+    assert "## Diameters" in md
+    assert "## Depth bands" in md
+    assert "## Cross-sections" in md
+
+
+def test_ortho_horizontal_unchanged() -> None:
+    w_ortho, w_eucl, theta = ortho_width(10.0, 100.0, 50.0, 100.0)
+    assert theta == pytest.approx(0.0, abs=1e-6)
+    assert w_ortho == pytest.approx(40.0)
+    assert w_eucl == pytest.approx(40.0)
+
+
+def test_glute_only_depth_band_built(tmp_path: Path) -> None:
+    assist = deepcopy(eight_head_assist())
+    assist["views"]["left"]["landmarks"]["glute_front"] = [235, 310]
+    assist["views"]["left"]["landmarks"]["glute_back"] = [165, 310]
+    d = make_package(tmp_path, assist=assist)
+    report = analyze_proportion(d, run_heuristic_frame=False)
+    assert any(b.band_id == "glute" for b in report.depth_bands)
