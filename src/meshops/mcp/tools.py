@@ -904,6 +904,38 @@ def mesh_proportion_depth_samples(
     )
 
 
+def mesh_proportion_templates(work_root: Path) -> dict[str, Any]:
+    """List body template ids. Authoring only — TEMPLATE_HONESTY / N6."""
+    from meshops.proportion.body_template import list_body_templates
+    from meshops.proportion.honesty import TEMPLATE_HONESTY
+
+    _ = work_root  # catalog tools always receive work_root
+    return {
+        "ok": True,
+        "templates": list_body_templates(),
+        "honesty": TEMPLATE_HONESTY,
+    }
+
+
+def mesh_proportion_apply_template(
+    work_root: Path,
+    *,
+    report: str,
+    template: str,
+    out: str,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Apply body template. Authoring only — TEMPLATE_HONESTY / N6."""
+    from meshops.proportion.body_template import apply_body_template
+
+    return apply_body_template(
+        _resolve_tool_path(report, work_root),
+        template,
+        _resolve_tool_path(out, work_root),
+        force=force,
+    )
+
+
 def mesh_proportion_blockout_recipe(
     work_root: Path,
     *,
@@ -913,6 +945,11 @@ def mesh_proportion_blockout_recipe(
     depth_at_landmarks: str | None = None,
     limbs: bool = True,
     force: bool = False,
+    torso: str = "trap",
+    glute: str = "oval",
+    nofuse: bool = False,
+    breast_tilt_deg: float | None = None,
+    template_applied: str | None = None,
 ) -> dict[str, Any]:
     """Emit RECIPE_* blockout primitives. Authoring only — RECIPE_HONESTY / N6."""
     from meshops.proportion.blockout_recipe import run_blockout_recipe
@@ -920,6 +957,12 @@ def mesh_proportion_blockout_recipe(
     fmt = (format or "both").strip().lower()
     if fmt not in ("bpy", "json", "both"):
         raise ValueError("--format must be bpy, json, or both")
+    torso_mode = (torso or "trap").strip().lower()
+    if torso_mode not in ("trap", "ovals"):
+        raise ValueError("--torso must be trap or ovals")
+    glute_mode = (glute or "oval").strip().lower()
+    if glute_mode not in ("oval", "two_spheres"):
+        raise ValueError("--glute must be oval or two_spheres")
     # Preserve trailing directory separator intent (R1); Path resolve strips it.
     ends_sep = out.endswith(("/", "\\"))
     out_base = out.rstrip("/\\") if ends_sep else out
@@ -936,6 +979,13 @@ def mesh_proportion_blockout_recipe(
         ),
         limbs=limbs,
         force=force,
+        torso=torso_mode,  # type: ignore[arg-type]
+        glute=glute_mode,  # type: ignore[arg-type]
+        nofuse=nofuse,
+        breast_tilt_deg=breast_tilt_deg,
+        template_applied=(
+            _resolve_tool_path(template_applied, work_root) if template_applied else None
+        ),
     )
 
 

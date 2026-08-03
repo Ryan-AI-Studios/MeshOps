@@ -86,16 +86,19 @@ app.add_typer(bench_app, name="bench")
 proportion_app = typer.Typer(
     name="proportion",
     help=(
-        "Pixel proportion analysis from multi-view RGB (tracks 0012-0021). "
-        "Verbs: template | analyze | show | scaffold | guides | capture | depth-samples | "
-        "blockout-recipe | depth-heatmap | depth-hint | silhouette-compare. "
+        "Pixel proportion analysis from multi-view RGB (tracks 0012-0022). "
+        "Verbs: template | templates | apply-template | analyze | show | scaffold | guides | "
+        "capture | depth-samples | blockout-recipe | depth-heatmap | depth-hint | "
+        "silhouette-compare. "
         "Assist-first landmarks + head-unit checks + blockout-grade XYZ; "
         "schema 1.1.0 diameters (edge pairs) + left depth bands + cross-sections; "
         "scaffold creates package layout + package_checklist.json only (not mesh/print success); "
         "guides emits proportion_guides.json + Blender 5.2 setup script (authoring aids only); "
         "capture fills landmarks_assist.json from px/dump/reproject (authoring only — N6); "
         "depth-samples exports depth_at_landmarks.json + optional mesh ray deltas (N6); "
-        "blockout-recipe emits trap/neck/bridge RECIPE primitives (authoring only — N6); "
+        "templates / apply-template: sex/archetype body priors (authoring only — N6); "
+        "blockout-recipe emits trap/ovals RECIPE primitives + topology flags "
+        "(--torso/--glute/--nofuse/--breast-tilt-deg/--template-applied; authoring only — N6); "
         "depth-heatmap glance PNG from samples/deltas (numbers SoT — N6); "
         "depth-hint external depth-channel assist hints + optional merge-into (conf floor — N6); "
         "silhouette-compare front-only binary IoU/Dice QA score (authoring only — N6). "
@@ -1637,6 +1640,83 @@ def proportion_template_cmd(
     raise typer.Exit(0)
 
 
+@proportion_app.command("templates")
+def proportion_templates_cmd(
+    json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
+) -> None:
+    """List body template ids + descriptions (authoring priors only — N6)."""
+    from meshops.proportion.body_template import list_body_templates
+    from meshops.proportion.errors import ProportionError
+    from meshops.proportion.honesty import TEMPLATE_HONESTY
+
+    try:
+        templates = list_body_templates()
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    if json_out:
+        _emit_json({"ok": True, "templates": templates, "honesty": TEMPLATE_HONESTY})
+    else:
+        for t in templates:
+            typer.echo(f"{t['id']}: {t['description']}")
+        typer.echo(f"honesty: {TEMPLATE_HONESTY}")
+        typer.echo("body templates only — not mesh or print success")
+    raise typer.Exit(0)
+
+
+@proportion_app.command("apply-template")
+def proportion_apply_template_cmd(
+    report: Path = typer.Option(
+        ...,
+        "--report",
+        help="Path to proportion_report.json",
+    ),
+    template: str = typer.Option(
+        ...,
+        "--template",
+        help="Body template id (female_adult_athletic | male_adult_athletic)",
+    ),
+    out: Path = typer.Option(
+        ...,
+        "--out",
+        help="Output directory for template_applied.json + template_constants.py",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite existing apply outputs",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
+) -> None:
+    """Scale body template priors by report stature (authoring only — N6)."""
+    from meshops.proportion.body_template import apply_body_template
+    from meshops.proportion.errors import ProportionError
+    from meshops.proportion.honesty import TEMPLATE_HONESTY
+
+    try:
+        payload = apply_body_template(report, template, out, force=force)
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    if json_out:
+        _emit_json(payload)
+    else:
+        typer.echo(
+            f"apply-template id={payload.get('template_id')} height_m={payload.get('height_m')}"
+        )
+        for p in payload.get("paths") or []:
+            typer.echo(f"  {p}")
+        for msg in payload.get("messages") or []:
+            typer.echo(f"  note: {msg}")
+        typer.echo(f"honesty: {TEMPLATE_HONESTY}")
+        typer.echo("body template only — not mesh or print success")
+    raise typer.Exit(0)
+
+
 @proportion_app.command("analyze")
 def proportion_analyze_cmd(
     views_dir: Path = typer.Option(
@@ -2225,6 +2305,31 @@ def proportion_blockout_recipe_cmd(
         "--limbs/--no-limbs",
         help="Emit SEED_SEGMENT_MAP limb capsules (default on)",
     ),
+    torso: str = typer.Option(
+        "trap",
+        "--torso",
+        help="Torso topology: trap | ovals (default trap)",
+    ),
+    glute: str = typer.Option(
+        "oval",
+        "--glute",
+        help="Glute topology: oval | two_spheres (default oval)",
+    ),
+    breast_tilt_deg: float | None = typer.Option(
+        None,
+        "--breast-tilt-deg",
+        help="Breast tilt degrees metadata only (not applied in bpy v1)",
+    ),
+    nofuse: bool = typer.Option(
+        False,
+        "--nofuse",
+        help="No join/boolean policy message (layout-only emit)",
+    ),
+    template_applied: Path | None = typer.Option(
+        None,
+        "--template-applied",
+        help="template_applied.json file or directory containing it (0022)",
+    ),
     force: bool = typer.Option(
         False,
         "--force",
@@ -2240,6 +2345,12 @@ def proportion_blockout_recipe_cmd(
     fmt = format.strip().lower()
     if fmt not in ("bpy", "json", "both"):
         raise typer.BadParameter("--format must be bpy, json, or both")
+    torso_mode = torso.strip().lower()
+    if torso_mode not in ("trap", "ovals"):
+        raise typer.BadParameter("--torso must be trap or ovals")
+    glute_mode = glute.strip().lower()
+    if glute_mode not in ("oval", "two_spheres"):
+        raise typer.BadParameter("--glute must be oval or two_spheres")
 
     try:
         # Keep --out as str so trailing directory separators survive (R1).
@@ -2250,6 +2361,11 @@ def proportion_blockout_recipe_cmd(
             depth_at_landmarks=depth_at_landmarks,
             limbs=limbs,
             force=force,
+            torso=torso_mode,  # type: ignore[arg-type]
+            glute=glute_mode,  # type: ignore[arg-type]
+            nofuse=nofuse,
+            breast_tilt_deg=breast_tilt_deg,
+            template_applied=template_applied,
         )
     except ProportionError as exc:
         _emit_error(exc, json_mode=json_out, code=1)

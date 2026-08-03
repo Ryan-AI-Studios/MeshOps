@@ -55,8 +55,10 @@ meshops-mcp = "meshops.mcp.__main__:main"
 packages = ["src/meshops"]
 
 # Flattened Orca default profiles (JSON) — not discovered as package data by default.
+# Body template JSON priors (0022) — ensure wheel includes non-.py package data.
 [tool.hatch.build.targets.wheel.force-include]
 "src/meshops/slice/profiles" = "meshops/slice/profiles"
+"src/meshops/proportion/body_templates" = "meshops/proportion/body_templates"
 
 [tool.ruff]
 target-version = "py313"

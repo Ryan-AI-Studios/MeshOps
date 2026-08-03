@@ -1,0 +1,47 @@
+{
+  "id": "female_adult_athletic",
+  "schema_version": "1.0.0",
+  "sex": "female",
+  "archetype": "adult_athletic",
+  "description": "Female adult athletic A-pose prior: dual tilted breasts, two-sphere glutes, waist taper, Q-angle thighs, thinned neck (v5 polish seeds).",
+  "honesty": "proportion_body_template_not_mesh_or_print_success",
+  "breast_mode": "dual_tilted",
+  "glute_mode_default": "two_spheres",
+  "torso_mode_default": "ovals",
+  "shoulder_widest": false,
+  "breast": {
+    "enabled": true,
+    "tilt_x_deg": 20.0,
+    "y_frac": -0.77,
+    "ry_scale": 1.4,
+    "rz_scale": 2.1,
+    "intermammary_gap_frac": 0.18,
+    "slant_deg": 8.0
+  },
+  "glute": {
+    "r_frac": 0.07180232558139535,
+    "y_frac": 0.029069767441860465,
+    "z_frac": 0.4965116279069767,
+    "cleft_frac": 0.12
+  },
+  "pelvis_y_m": 0.027,
+  "torso_waist_taper": 0.14,
+  "thigh_tilt_deg": 10.0,
+  "neck_thickness_scale": 0.72675,
+  "neck_thickness_notes": {
+    "stages": [0.95, 0.9, 0.85]
+  },
+  "head_depth_scale": 1.2,
+  "head_radius_scale": 1.05,
+  "foot": {
+    "foot_len_scale": 1.4,
+    "side_ankle_y_m": 0.015,
+    "heel_y_m": 0.03,
+    "ank_foot_r_frac": 0.01627906976744186
+  },
+  "soft_spacing_defaults": {
+    "intermammary_gap_frac": 0.18,
+    "glute_cleft_frac": 0.12
+  },
+  "frame_notes": "Z up soles~0, +X camera-right, face -Y, toes -Y, heels +Y"
+}
