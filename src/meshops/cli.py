@@ -86,10 +86,10 @@ app.add_typer(bench_app, name="bench")
 proportion_app = typer.Typer(
     name="proportion",
     help=(
-        "Pixel proportion analysis from multi-view RGB (tracks 0012-0022). "
+        "Pixel proportion analysis from multi-view RGB (tracks 0012-0023). "
         "Verbs: template | templates | apply-template | analyze | show | scaffold | guides | "
-        "capture | depth-samples | blockout-recipe | depth-heatmap | depth-hint | "
-        "silhouette-compare. "
+        "capture | depth-samples | blockout-recipe | blockout-validate-constraints | "
+        "blockout-optimize | depth-heatmap | depth-hint | silhouette-compare. "
         "Assist-first landmarks + head-unit checks + blockout-grade XYZ; "
         "schema 1.1.0 diameters (edge pairs) + left depth bands + cross-sections; "
         "scaffold creates package layout + package_checklist.json only (not mesh/print success); "
@@ -99,6 +99,9 @@ proportion_app = typer.Typer(
         "templates / apply-template: sex/archetype body priors (authoring only — N6); "
         "blockout-recipe emits trap/ovals RECIPE primitives + topology flags "
         "(--torso/--glute/--nofuse/--breast-tilt-deg/--template-applied; authoring only — N6); "
+        "blockout-validate-constraints named-role hard rules (CONSTRAINT_HONESTY — N6); "
+        "blockout-optimize constrained free-DOF adjust, --freeze-feet default "
+        "(OPTIMIZE_HONESTY — N6; free-name optimizers are NOT product); "
         "depth-heatmap glance PNG from samples/deltas (numbers SoT — N6); "
         "depth-hint external depth-channel assist hints + optional merge-into (conf floor — N6); "
         "silhouette-compare front-only binary IoU/Dice QA score (authoring only — N6). "
@@ -2394,6 +2397,161 @@ def proportion_blockout_recipe_cmd(
             typer.echo(f"  note: {msg}")
         typer.echo(f"honesty: {RECIPE_HONESTY}")
         typer.echo("blockout-recipe only — not mesh or print success")
+    raise typer.Exit(0)
+
+
+@proportion_app.command("blockout-validate-constraints")
+def proportion_blockout_validate_constraints_cmd(
+    recipe: Path = typer.Option(
+        ...,
+        "--recipe",
+        help="Path to blockout_recipe.json",
+    ),
+    out: str = typer.Option(
+        ...,
+        "--out",
+        help="Output constraints_report.json file or directory "
+        "(trailing sep marks a directory even if not yet created)",
+    ),
+    report: Path | None = typer.Option(
+        None,
+        "--report",
+        help="Optional proportion_report.json (axial depth plane landmarks)",
+    ),
+    template_applied: Path | None = typer.Option(
+        None,
+        "--template-applied",
+        help="Optional template_applied.json (soft gap priors)",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite existing constraints report",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
+) -> None:
+    """Validate named-role hard constraints on a blockout recipe (authoring only)."""
+    from meshops.proportion.constraints import run_blockout_validate_constraints
+    from meshops.proportion.errors import ProportionError
+    from meshops.proportion.honesty import CONSTRAINT_HONESTY
+
+    try:
+        payload = run_blockout_validate_constraints(
+            recipe,
+            out,
+            report=report,
+            template_applied=template_applied,
+            force=force,
+        )
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    if json_out:
+        _emit_json(payload)
+    else:
+        typer.echo(
+            f"blockout-validate-constraints constraints_ok="
+            f"{payload.get('constraints_ok')} "
+            f"rules={len(payload.get('rules') or [])}"
+        )
+        for p in payload.get("paths") or []:
+            typer.echo(f"  {p}")
+        for msg in payload.get("messages") or []:
+            typer.echo(f"  note: {msg}")
+        for rule in payload.get("rules") or []:
+            typer.echo(f"  {rule.get('id')}: {rule.get('status')} — {rule.get('message')}")
+        typer.echo(f"honesty: {CONSTRAINT_HONESTY}")
+        typer.echo("constraints authoring QA only — not mesh or print success")
+    raise typer.Exit(0)
+
+
+@proportion_app.command("blockout-optimize")
+def proportion_blockout_optimize_cmd(
+    recipe: Path = typer.Option(
+        ...,
+        "--recipe",
+        help="Path to blockout_recipe.json",
+    ),
+    out: str = typer.Option(
+        ...,
+        "--out",
+        help="Output directory (or result .json) for adjusted recipe + optimize_result "
+        "(trailing sep marks a directory even if not yet created)",
+    ),
+    mode: str = typer.Option(
+        "fast",
+        "--mode",
+        help="Optimize mode: fast | slow (default fast; slow needs --mesh)",
+    ),
+    freeze_feet: bool = typer.Option(
+        True,
+        "--freeze-feet/--no-freeze-feet",
+        help="Freeze foot_plate/heel/ankle_bridge/calf_distal (default true)",
+    ),
+    mesh: Path | None = typer.Option(
+        None,
+        "--mesh",
+        help="Blockout mesh STL for slow depth-samples band score (required for slow)",
+    ),
+    report: Path | None = typer.Option(
+        None,
+        "--report",
+        help="Optional proportion_report.json (targets / slow depth-samples)",
+    ),
+    template_applied: Path | None = typer.Option(
+        None,
+        "--template-applied",
+        help="Optional template_applied.json (soft gap / mild targets)",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite existing optimize outputs",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
+) -> None:
+    """Constrained free-DOF blockout adjust (authoring only; freeze-feet default)."""
+    from meshops.proportion.constraints import run_blockout_optimize
+    from meshops.proportion.errors import ProportionError
+    from meshops.proportion.honesty import OPTIMIZE_HONESTY
+
+    mode_n = mode.strip().lower()
+    if mode_n not in ("fast", "slow"):
+        raise typer.BadParameter("--mode must be fast or slow")
+
+    try:
+        payload = run_blockout_optimize(
+            recipe,
+            out,
+            mode=mode_n,
+            freeze_feet=freeze_feet,
+            mesh=mesh,
+            report=report,
+            template_applied=template_applied,
+            force=force,
+        )
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    if json_out:
+        _emit_json(payload)
+    else:
+        typer.echo(
+            f"blockout-optimize mode={payload.get('mode')} "
+            f"freeze_feet={payload.get('freeze_feet')} "
+            f"score_before={payload.get('score_before')} "
+            f"score_after={payload.get('score_after')}"
+        )
+        for p in payload.get("paths") or []:
+            typer.echo(f"  {p}")
+        for msg in payload.get("messages") or []:
+            typer.echo(f"  note: {msg}")
+        typer.echo(f"honesty: {OPTIMIZE_HONESTY}")
+        typer.echo("optimize authoring QA only — not mesh or print success")
     raise typer.Exit(0)
 
 

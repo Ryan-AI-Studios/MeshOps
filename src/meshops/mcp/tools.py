@@ -989,6 +989,70 @@ def mesh_proportion_blockout_recipe(
     )
 
 
+def mesh_proportion_blockout_validate_constraints(
+    work_root: Path,
+    *,
+    recipe: str,
+    out: str,
+    report: str | None = None,
+    template_applied: str | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Validate named-role hard constraints. Authoring only — CONSTRAINT_HONESTY / N6."""
+    from meshops.proportion.constraints import run_blockout_validate_constraints
+
+    ends_sep = out.endswith(("/", "\\"))
+    out_base = out.rstrip("/\\") if ends_sep else out
+    out_resolved = _resolve_tool_path(out_base, work_root)
+    out_arg: str | Path = (
+        str(out_resolved) + ("\\" if ends_sep else "") if ends_sep else out_resolved
+    )
+    return run_blockout_validate_constraints(
+        _resolve_tool_path(recipe, work_root),
+        out_arg,
+        report=_resolve_tool_path(report, work_root) if report else None,
+        template_applied=(
+            _resolve_tool_path(template_applied, work_root) if template_applied else None
+        ),
+        force=force,
+    )
+
+
+def mesh_proportion_blockout_optimize(
+    work_root: Path,
+    *,
+    recipe: str,
+    out: str,
+    mode: str = "fast",
+    freeze_feet: bool = True,
+    mesh: str | None = None,
+    report: str | None = None,
+    template_applied: str | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Constrained free-DOF optimize. Authoring only — OPTIMIZE_HONESTY / N6."""
+    from meshops.proportion.constraints import run_blockout_optimize
+
+    ends_sep = out.endswith(("/", "\\"))
+    out_base = out.rstrip("/\\") if ends_sep else out
+    out_resolved = _resolve_tool_path(out_base, work_root)
+    out_arg: str | Path = (
+        str(out_resolved) + ("\\" if ends_sep else "") if ends_sep else out_resolved
+    )
+    return run_blockout_optimize(
+        _resolve_tool_path(recipe, work_root),
+        out_arg,
+        mode=mode,
+        freeze_feet=freeze_feet,
+        mesh=_resolve_tool_path(mesh, work_root) if mesh else None,
+        report=_resolve_tool_path(report, work_root) if report else None,
+        template_applied=(
+            _resolve_tool_path(template_applied, work_root) if template_applied else None
+        ),
+        force=force,
+    )
+
+
 def mesh_proportion_depth_heatmap(
     work_root: Path,
     *,
