@@ -1,0 +1,50 @@
+{
+  "id": "male_adult_athletic",
+  "schema_version": "1.0.0",
+  "sex": "male",
+  "archetype": "adult_athletic",
+  "description": "Male adult athletic A-pose prior (art-canon): pec ovals, mild glute, low waist taper, thicker neck, shoulder-widest bias.",
+  "honesty": "proportion_body_template_not_mesh_or_print_success",
+  "breast_mode": "pec_ovals",
+  "glute_mode_default": "mild_oval",
+  "torso_mode_default": "ovals",
+  "shoulder_widest": true,
+  "breast": {
+    "enabled": true,
+    "tilt_x_deg": 0.0,
+    "y_frac": -0.35,
+    "ry_scale": 1.0,
+    "rz_scale": 1.0,
+    "intermammary_gap_frac": 0.22,
+    "slant_deg": 0.0
+  },
+  "glute": {
+    "r_frac": 0.055,
+    "y_frac": 0.025,
+    "z_frac": 0.49,
+    "cleft_frac": 0.06
+  },
+  "pelvis_y_m": 0.02,
+  "torso_waist_taper": 0.05,
+  "thigh_tilt_deg": 4.0,
+  "neck_thickness_scale": 1.0,
+  "neck_thickness_notes": {
+    "stages": [1.0]
+  },
+  "head_depth_scale": 1.1,
+  "head_radius_scale": 1.0,
+  "foot": {
+    "foot_len_scale": 1.35,
+    "side_ankle_y_m": 0.016,
+    "heel_y_m": 0.032,
+    "ank_foot_r_frac": 0.018
+  },
+  "soft_spacing_defaults": {
+    "intermammary_gap_frac": 0.22,
+    "glute_cleft_frac": 0.06
+  },
+  "frame_notes": "Z up soles~0, +X camera-right, face -Y, toes -Y, heels +Y",
+  "messages": [
+    "male_adult_athletic v1 is art-canon prior, not measured — retune from report"
+  ]
+}

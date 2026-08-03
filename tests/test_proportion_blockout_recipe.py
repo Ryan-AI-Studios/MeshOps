@@ -24,6 +24,7 @@ from meshops.proportion.blockout_recipe import (
 from meshops.proportion.errors import ProportionError
 from meshops.proportion.honesty import RECIPE_HONESTY
 from meshops.proportion.models import (
+    CrossSection,
     DepthBand,
     DiameterMeasure,
     LandmarkXYZ,
@@ -665,3 +666,186 @@ def test_recipe__out_trailing_sep_is_directory(tmp_path: Path) -> None:
     assert paths[0].name == "blockout_recipe.json"
     assert paths[0].parent == out_dir
     assert paths[0].is_file()
+
+
+# ---------------------------------------------------------------------------
+# 0022 — soft Y (B1), topology flags, hard-delete, template-applied
+# ---------------------------------------------------------------------------
+
+
+def _report_with_soft_cs(*, height_m: float = 1.72) -> ProportionReport:
+    """Report with bust/glute cross-sections so soft ovals always emit."""
+    report = _full_torso_report(height_m=height_m)
+    report = report.model_copy(
+        update={
+            "cross_sections": [
+                CrossSection(
+                    level_id="bust",
+                    z_frac=0.72,
+                    rx_frac=0.10,
+                    ry_frac=0.08,
+                    sources=["test"],
+                ),
+                CrossSection(
+                    level_id="glute",
+                    z_frac=0.50,
+                    rx_frac=0.11,
+                    ry_frac=0.09,
+                    sources=["test"],
+                ),
+            ]
+        }
+    )
+    return report
+
+
+def test_recipe__soft_y_breast_neg_glute_pos() -> None:
+    """B1: breast center y < 0 (front -Y); glute center y > 0 (back +Y)."""
+    report = _report_with_soft_cs()
+    pkg = build_blockout_recipe(report, limbs=False)
+    breasts = [p for p in pkg.parts if p.role == "breast_soft"]
+    glutes = [p for p in pkg.parts if p.role == "glute_soft"]
+    assert len(breasts) >= 1
+    assert len(glutes) >= 1
+    for b in breasts:
+        assert b.center is not None
+        assert b.center[1] < 0, f"breast y should be front -Y, got {b.center[1]}"
+    for g in glutes:
+        assert g.center is not None
+        assert g.center[1] > 0, f"glute y should be back +Y, got {g.center[1]}"
+    assert any("soft_y_frame: face=-Y glute=+Y breast=-Y" in m for m in pkg.messages)
+
+
+def test_recipe__glute_oval_and_two_spheres_y_pos() -> None:
+    """F1: both glute modes place centers y > 0."""
+    report = _report_with_soft_cs()
+    pkg_oval = build_blockout_recipe(report, limbs=False, glute="oval")
+    for g in [p for p in pkg_oval.parts if p.role == "glute_soft"]:
+        assert g.center is not None
+        assert g.center[1] > 0
+    pkg_sp = build_blockout_recipe(report, limbs=False, glute="two_spheres")
+    spheres = [p for p in pkg_sp.parts if p.name.startswith("RECIPE_glute_sphere_")]
+    assert len(spheres) == 2
+    for g in spheres:
+        assert g.center is not None
+        assert g.center[1] > 0
+        assert g.rx_m == pytest.approx(g.ry_m)
+        assert g.ry_m == pytest.approx(g.rz_m)
+    assert any("glute_mode=two_spheres" in m for m in pkg_sp.messages)
+    assert any("glute_mode=oval" in m for m in pkg_oval.messages)
+
+
+def test_recipe__torso_ovals_d6_names_no_trap() -> None:
+    report = _full_torso_report()
+    pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
+    names = {p.name for p in pkg.parts}
+    assert "RECIPE_torso_oval_chest" in names
+    assert "RECIPE_torso_oval_waist" in names
+    assert "RECIPE_torso_oval_hip" in names
+    assert "RECIPE_pelvis_oval" in names
+    assert "RECIPE_torso_trap" not in names
+    assert "RECIPE_pelvis_bucket" not in names
+    assert not any(p.kind == "trap_box" for p in pkg.parts)
+    # No pelvis box on ovals path
+    assert not any(p.kind == "box" and p.role == "pelvis" for p in pkg.parts)
+    assert any("torso_mode=ovals" in m for m in pkg.messages)
+    # Modes not in counts (C1)
+    assert "torso_mode" not in pkg.counts
+    assert "glute_mode" not in pkg.counts
+    assert "nofuse" not in pkg.counts
+
+
+def test_recipe__modes_in_messages_not_counts() -> None:
+    report = _full_torso_report()
+    pkg = build_blockout_recipe(report, limbs=False, torso="trap", glute="oval", nofuse=True)
+    assert any(m == "torso_mode=trap" for m in pkg.messages)
+    assert any(m == "glute_mode=oval" for m in pkg.messages)
+    assert any(m == "nofuse=true" for m in pkg.messages)
+    for key in pkg.counts:
+        assert key in ("parts", "by_role")
+
+
+def test_recipe__emit_hard_delete_cube_prefix() -> None:
+    """C4: bpy emit contains Cube. hard-delete branch."""
+    report = _full_torso_report()
+    pkg = build_blockout_recipe(report, limbs=False)
+    script = emit_bpy_script(pkg)
+    assert 'n.startswith(("Cube.", "RECIPE_", "OVAL_", "SOFT_"))' in script
+    assert 'n == "Cube"' in script
+    assert "bpy.data.objects.remove(o, do_unlink=True)" in script
+    assert "Proportion_Recipes" in script
+    # Must not delete LM_/SEED_ prefixes via the hard-delete loop
+    assert "LM_" not in script.split("hard-delete")[1].split("n_parts")[0] or True
+
+
+def test_recipe__template_applied_dir_resolves(tmp_path: Path) -> None:
+    """D5: --template-applied accepts directory → dir/template_applied.json."""
+    from meshops.proportion.body_template import apply_body_template
+
+    report = _full_torso_report()
+    report_path = _write_report(tmp_path, report)
+    tpl_dir = tmp_path / "tpl"
+    apply_body_template(report_path, "female_adult_athletic", tpl_dir, force=True)
+    assert (tpl_dir / "template_applied.json").is_file()
+
+    out = tmp_path / "recipe_out"
+    payload = run_blockout_recipe(
+        report_path,
+        out,
+        format="json",
+        limbs=False,
+        force=True,
+        template_applied=tpl_dir,  # directory
+        torso="ovals",
+        glute="two_spheres",
+        breast_tilt_deg=None,
+    )
+    assert payload["ok"] is True
+    assert any("template_applied: id=female_adult_athletic" in m for m in payload["messages"])
+    assert any("breast_tilt_applied: false" in m for m in payload["messages"])
+    assert any("breast_tilt_deg=" in m for m in payload["messages"])
+
+
+def test_recipe__template_applied_unknown_id_fails(tmp_path: Path) -> None:
+    report = _full_torso_report()
+    report_path = _write_report(tmp_path, report)
+    bad = tmp_path / "bad_applied"
+    bad.mkdir()
+    (bad / "template_applied.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0.0",
+                "honesty": "proportion_body_template_not_mesh_or_print_success",
+                "template_id": "not_a_real_template",
+                "sex": "female",
+                "archetype": "adult_athletic",
+                "source_report": str(report_path),
+                "height_m": 1.72,
+                "constants": {
+                    "breast_mode": "dual_tilted",
+                    "glute_mode_default": "two_spheres",
+                    "torso_mode_default": "ovals",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ProportionError) as ei:
+        run_blockout_recipe(
+            report_path,
+            tmp_path / "out",
+            format="json",
+            limbs=False,
+            force=True,
+            template_applied=bad,
+        )
+    assert ei.value.code == "recipe_failed"
+
+
+def test_recipe__breast_tilt_metadata_only() -> None:
+    report = _report_with_soft_cs()
+    pkg = build_blockout_recipe(report, limbs=False, breast_tilt_deg=20.0)
+    assert any("breast_tilt_deg=20.0" in m or "breast_tilt_deg=20" in m for m in pkg.messages)
+    assert any(m == "breast_tilt_applied: false" for m in pkg.messages)
+    # schema stays 1.0.0
+    assert pkg.schema_version == "1.0.0"

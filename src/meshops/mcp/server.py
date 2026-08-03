@@ -51,6 +51,8 @@ TOOL_NAMES: frozenset[str] = frozenset(
         "organic_finalize",
         "design_organic_api",
         "mesh_proportion_template",
+        "mesh_proportion_templates",
+        "mesh_proportion_apply_template",
         "mesh_proportion_analyze",
         "mesh_proportion_show",
         "mesh_proportion_scaffold",
@@ -454,6 +456,36 @@ def build_server(work_root: Path | None = None) -> Any:
         return T.mesh_proportion_template(wr, out=out)
 
     @mcp.tool()
+    def mesh_proportion_templates() -> dict[str, Any]:
+        """List body template ids + descriptions.
+
+        Authoring priors only — proportion_body_template_not_mesh_or_print_success (N6).
+        Raises ProportionError on failure (never ok:false success).
+        """
+        return T.mesh_proportion_templates(wr)
+
+    @mcp.tool()
+    def mesh_proportion_apply_template(
+        report: str,
+        template: str,
+        out: str,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Apply sex/archetype body template to a proportion report.
+
+        Writes template_applied.json + template_constants.py. Authoring only —
+        proportion_body_template_not_mesh_or_print_success (N6). Raises ProportionError
+        on failure (never ok:false success).
+        """
+        return T.mesh_proportion_apply_template(
+            wr,
+            report=report,
+            template=template,
+            out=out,
+            force=force,
+        )
+
+    @mcp.tool()
     def mesh_proportion_analyze(
         views_dir: str,
         landmarks: str | None = None,
@@ -601,10 +633,16 @@ def build_server(work_root: Path | None = None) -> Any:
         depth_at_landmarks: str | None = None,
         limbs: bool = True,
         force: bool = False,
+        torso: str = "trap",
+        glute: str = "oval",
+        nofuse: bool = False,
+        breast_tilt_deg: float | None = None,
+        template_applied: str | None = None,
     ) -> dict[str, Any]:
-        """Emit RECIPE_* blockout primitives (trap/neck/bridges) from a report.
+        """Emit RECIPE_* blockout primitives (trap/ovals/softs) from a report.
 
         Authoring layout only — proportion_blockout_recipe_not_mesh_or_print_success (N6).
+        Topology: torso trap|ovals, glute oval|two_spheres, optional template-applied.
         Raises ProportionError on failure (never ok:false success).
         """
         return T.mesh_proportion_blockout_recipe(
@@ -615,6 +653,11 @@ def build_server(work_root: Path | None = None) -> Any:
             depth_at_landmarks=depth_at_landmarks,
             limbs=limbs,
             force=force,
+            torso=torso,
+            glute=glute,
+            nofuse=nofuse,
+            breast_tilt_deg=breast_tilt_deg,
+            template_applied=template_applied,
         )
 
     @mcp.tool()

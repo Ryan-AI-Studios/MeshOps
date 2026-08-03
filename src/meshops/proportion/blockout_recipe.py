@@ -24,6 +24,7 @@ from meshops.proportion.models import (
 )
 
 if TYPE_CHECKING:
+    from meshops.proportion.body_template import TemplateAppliedPackage
     from meshops.proportion.depth_samples import DepthSamplesPackage
 
 RECIPE_SCHEMA_VERSION: Final[Literal["1.0.0"]] = "1.0.0"
@@ -40,8 +41,12 @@ _GIRAFFE_ABS_NO_H: Final[float] = 0.35
 _MICHELIN_FRAC: Final[float] = 0.45
 _CHEST_HALF_DEPTH_FALLBACK_FRAC: Final[float] = 0.12
 _HIP_HALF_DEPTH_FALLBACK_FRAC: Final[float] = 0.13
+_DEFAULT_WAIST_TAPER: Final[float] = 0.14
+_COLUMNAR_WIDTH_RATIO: Final[float] = 0.1
 
 RecipeFormat = Literal["bpy", "json", "both"]
+TorsoMode = Literal["trap", "ovals"]
+GluteMode = Literal["oval", "two_spheres"]
 RecipeRole = Literal[
     "torso",
     "pelvis",
@@ -842,16 +847,46 @@ def _build_soft_ovals(
     m: _ResolvedMetrics,
     messages: list[str],
     crotch_z: float | None,
+    *,
+    glute_mode: GluteMode = "oval",
+    template_applied: TemplateAppliedPackage | None = None,
 ) -> list[RecipePart]:
-    """Breast / glute / iliac soft ellipsoids when CS or depth available."""
+    """Breast / glute / iliac soft ellipsoids when CS or depth available.
+
+    Body frame (B1): breast center y = -abs(offset) (front -Y);
+    glute center y = +abs(offset) (back +Y).
+    """
     parts: list[RecipePart] = []
     h = m.height_m
+    soft_y_msg = "soft_y_frame: face=-Y glute=+Y breast=-Y"
+    if soft_y_msg not in messages:
+        messages.append(soft_y_msg)
 
     def _cs_level(level_id: str) -> Any | None:
         for cs in report.cross_sections:
             if cs.level_id == level_id:
                 return cs
         return None
+
+    # Optional template scales for soft bulk
+    breast_ry_scale = 1.0
+    breast_rz_scale = 1.0
+    breast_y_override: float | None = None
+    gap_frac: float | None = None
+    glute_r_override: float | None = None
+    glute_y_override: float | None = None
+    glute_z_override: float | None = None
+    cleft_frac: float | None = None
+    if template_applied is not None:
+        tc = template_applied.constants
+        breast_ry_scale = float(tc.breast_ry_scale)
+        breast_rz_scale = float(tc.breast_rz_scale)
+        breast_y_override = tc.breast_y_m
+        gap_frac = tc.intermammary_gap_frac
+        glute_r_override = tc.glute_r_m
+        glute_y_override = tc.glute_y_m
+        glute_z_override = tc.glute_z_m
+        cleft_frac = tc.glute_cleft_frac
 
     # Breast soft (single midline or paired via bust depth)
     breast_cs = _cs_level("bust") or _cs_level("chest") or _cs_level("breast")
@@ -860,12 +895,20 @@ def _build_soft_ovals(
     if breast_cs is not None and h is not None:
         z_m = float(breast_cs.z_frac) * h
         rx = float(breast_cs.rx_frac) * h * 0.35
-        ry = float(breast_cs.ry_frac) * h * 0.5
-        rz = max(0.02, (m.head_unit_m or 0.2) * 0.12)
-        # paired softs offset from midline
-        offset = (m.shoulder_hw or 0.15) * 0.35
+        ry = float(breast_cs.ry_frac) * h * 0.5 * breast_ry_scale
+        rz = max(0.02, (m.head_unit_m or 0.2) * 0.12) * breast_rz_scale
+        # paired softs offset from midline; gap from bust_hw when available (C6)
+        bust_hw = _half_width_from_diameter(bust_diam) if bust_diam else None
+        if bust_hw is not None and gap_frac is not None:
+            half_gap = (gap_frac * bust_hw) / 2.0
+            offset = max(half_gap + rx * 0.5, (m.shoulder_hw or 0.15) * 0.25)
+        else:
+            offset = (m.shoulder_hw or 0.15) * 0.35
+        breast_y = (
+            -abs(float(breast_y_override)) if breast_y_override is not None else -abs(ry * 0.3)
+        )
         for side, sign in (("l", -1.0), ("r", 1.0)):
-            center = [sign * offset, ry * 0.3, z_m]
+            center = [sign * offset, breast_y, z_m]
             name = f"RECIPE_breast_soft_{side}"
             if _midline_blocked(center, "breast_soft", crotch_z):
                 messages.append(f"midline below crotch skipped: {name}")
@@ -888,12 +931,23 @@ def _build_soft_ovals(
         if hw is not None and breast_band.z_frac is not None:
             z_m = float(breast_band.z_frac) * h
             depth = float(breast_band.depth_m) if breast_band.depth_m is not None else 0.08 * h
-            offset = hw * 0.45
+            if gap_frac is not None:
+                offset = max((gap_frac * hw) / 2.0 + hw * 0.12, hw * 0.35)
+            else:
+                offset = hw * 0.45
             rx = hw * 0.25
-            ry = depth * 0.35
-            rz = 0.04 * h
+            ry = depth * 0.35 * breast_ry_scale
+            rz = 0.04 * h * breast_rz_scale
+            # Force front -Y (B1); ignore unsigned band.y_mid sign
+            breast_y = (
+                -abs(float(breast_y_override))
+                if breast_y_override is not None
+                else -abs(float(breast_band.y_mid) * h * 0.1 if breast_band.y_mid else ry * 0.3)
+            )
+            if breast_y == 0.0:
+                breast_y = -abs(ry * 0.3)
             for side, sign in (("l", -1.0), ("r", 1.0)):
-                center = [sign * offset, float(breast_band.y_mid) * h * 0.1, z_m]
+                center = [sign * offset, breast_y, z_m]
                 name = f"RECIPE_breast_soft_{side}"
                 if _midline_blocked(center, "breast_soft", crotch_z):
                     messages.append(f"midline below crotch skipped: {name}")
@@ -914,41 +968,83 @@ def _build_soft_ovals(
     else:
         messages.append("breast softs skipped: no CS/depth/bust")
 
-    # Glute softs
+    # Glute softs — oval ellipsoids or two equal-axis spheres
     glute_cs = _cs_level("glute") or _cs_level("hip")
     glute_band = _depth_band(report, "glute") or _depth_band(report, "hip")
-    if glute_cs is not None and h is not None:
-        z_m = float(glute_cs.z_frac) * h
-        rx = float(glute_cs.rx_frac) * h * 0.3
-        ry = float(glute_cs.ry_frac) * h * 0.45
-        rz = max(0.02, (m.head_unit_m or 0.2) * 0.15)
-        offset = (m.hip_hw or 0.12) * 0.45
-        for side, sign in (("l", -1.0), ("r", 1.0)):
-            center = [sign * offset, -abs(ry) * 0.4, z_m]
-            name = f"RECIPE_glute_soft_{side}"
-            if _midline_blocked(center, "glute_soft", crotch_z):
-                messages.append(f"midline below crotch skipped: {name}")
-                continue
-            parts.append(
-                RecipePart(
-                    name=name,
-                    role="glute_soft",
-                    kind="ellipsoid",
-                    center=center,
-                    rx_m=rx,
-                    ry_m=ry,
-                    rz_m=rz,
-                    placement="full3d",
-                    label=name,
+    glute_parts_built = False
+
+    if glute_mode == "two_spheres":
+        # Equal-axis ellipsoids RECIPE_glute_sphere_l/r; centers y > 0 (back)
+        r = glute_r_override
+        if r is None and h is not None:
+            r = 0.0718 * h  # female seed scale; not inventing absolute meters without H
+        if r is None and m.hip_hw is not None:
+            r = m.hip_hw * 0.55
+        if r is not None and (m.hip_z is not None or glute_z_override is not None or h is not None):
+            z_m = (
+                float(glute_z_override)
+                if glute_z_override is not None
+                else (
+                    float(glute_cs.z_frac) * h
+                    if glute_cs is not None and h is not None
+                    else (
+                        float(glute_band.z_frac) * h
+                        if glute_band is not None
+                        and glute_band.z_frac is not None
+                        and h is not None
+                        else (m.hip_z if m.hip_z is not None else 0.5 * (h or 1.0))
+                    )
                 )
             )
-    elif glute_band is not None and m.hip_hw is not None and h is not None:
-        if glute_band.z_frac is not None:
-            z_m = float(glute_band.z_frac) * h
-            depth = float(glute_band.depth_m) if glute_band.depth_m is not None else 0.10 * h
-            offset = m.hip_hw * 0.5
+            hip_hw = m.hip_hw or (r * 1.6)
+            # Outer toward hip_bridge: center so outer tip ≈ hip_hw
+            if cleft_frac is not None:
+                half_gap = (cleft_frac * hip_hw) / 2.0
+                offset = half_gap + r
+            else:
+                offset = max(hip_hw - r, r * 0.9)
+            glute_y = abs(float(glute_y_override)) if glute_y_override is not None else abs(r * 0.4)
             for side, sign in (("l", -1.0), ("r", 1.0)):
-                center = [sign * offset, -depth * 0.25, z_m]
+                center = [sign * offset, glute_y, z_m]
+                name = f"RECIPE_glute_sphere_{side}"
+                if _midline_blocked(center, "glute_soft", crotch_z):
+                    messages.append(f"midline below crotch skipped: {name}")
+                    continue
+                parts.append(
+                    RecipePart(
+                        name=name,
+                        role="glute_soft",
+                        kind="ellipsoid",
+                        center=center,
+                        rx_m=r,
+                        ry_m=r,
+                        rz_m=r,
+                        placement="full3d",
+                        label=name,
+                    )
+                )
+            glute_parts_built = True
+        else:
+            messages.append("glute two_spheres skipped: need radius and z")
+
+    if not glute_parts_built and glute_mode == "oval":
+        if glute_cs is not None and h is not None:
+            z_m = (
+                float(glute_z_override)
+                if glute_z_override is not None
+                else float(glute_cs.z_frac) * h
+            )
+            rx = float(glute_cs.rx_frac) * h * 0.3
+            ry = float(glute_cs.ry_frac) * h * 0.45
+            rz = max(0.02, (m.head_unit_m or 0.2) * 0.15)
+            if glute_r_override is not None:
+                rx = ry = rz = float(glute_r_override)
+            offset = (m.hip_hw or 0.12) * 0.45
+            glute_y = (
+                abs(float(glute_y_override)) if glute_y_override is not None else abs(ry) * 0.4
+            )
+            for side, sign in (("l", -1.0), ("r", 1.0)):
+                center = [sign * offset, glute_y, z_m]
                 name = f"RECIPE_glute_soft_{side}"
                 if _midline_blocked(center, "glute_soft", crotch_z):
                     messages.append(f"midline below crotch skipped: {name}")
@@ -959,14 +1055,50 @@ def _build_soft_ovals(
                         role="glute_soft",
                         kind="ellipsoid",
                         center=center,
-                        rx_m=m.hip_hw * 0.35,
-                        ry_m=depth * 0.3,
-                        rz_m=0.05 * h,
+                        rx_m=rx,
+                        ry_m=ry,
+                        rz_m=rz,
                         placement="full3d",
                         label=name,
                     )
                 )
-    else:
+            glute_parts_built = True
+        elif glute_band is not None and m.hip_hw is not None and h is not None:
+            if glute_band.z_frac is not None:
+                z_m = (
+                    float(glute_z_override)
+                    if glute_z_override is not None
+                    else float(glute_band.z_frac) * h
+                )
+                depth = float(glute_band.depth_m) if glute_band.depth_m is not None else 0.10 * h
+                offset = m.hip_hw * 0.5
+                glute_y = (
+                    abs(float(glute_y_override))
+                    if glute_y_override is not None
+                    else abs(depth) * 0.25
+                )
+                for side, sign in (("l", -1.0), ("r", 1.0)):
+                    center = [sign * offset, glute_y, z_m]
+                    name = f"RECIPE_glute_soft_{side}"
+                    if _midline_blocked(center, "glute_soft", crotch_z):
+                        messages.append(f"midline below crotch skipped: {name}")
+                        continue
+                    parts.append(
+                        RecipePart(
+                            name=name,
+                            role="glute_soft",
+                            kind="ellipsoid",
+                            center=center,
+                            rx_m=m.hip_hw * 0.35,
+                            ry_m=depth * 0.3,
+                            rz_m=0.05 * h,
+                            placement="full3d",
+                            label=name,
+                        )
+                    )
+                glute_parts_built = True
+
+    if not glute_parts_built and glute_mode == "oval":
         messages.append("glute softs skipped: no CS/depth/hip_hw")
 
     # Iliac soft optional — needs H for z offset (no invent 1.7m)
@@ -998,6 +1130,110 @@ def _build_soft_ovals(
     elif m.hip_hw is not None and m.hip_z is not None and h is None:
         messages.append("iliac softs skipped: need height_m for z offset")
 
+    return parts
+
+
+def _waist_width_at(
+    z_norm: float,
+    w_shoulder: float,
+    w_hip: float,
+    taper: float,
+) -> float:
+    """W(z) = lerp(W_s, W_h, z) * (1 - taper * sin(π·z)) for z∈[0,1] shoulder→hip."""
+    z = max(0.0, min(1.0, z_norm))
+    lerp = w_shoulder * (1.0 - z) + w_hip * z
+    return lerp * (1.0 - taper * math.sin(math.pi * z))
+
+
+def _build_torso_ovals(
+    m: _ResolvedMetrics,
+    messages: list[str],
+    *,
+    taper: float,
+) -> list[RecipePart]:
+    """RECIPE_torso_oval_{chest,waist,hip} + RECIPE_pelvis_oval (D6)."""
+    parts: list[RecipePart] = []
+    if m.shoulder_hw is None or m.hip_hw is None:
+        messages.append("torso ovals skipped: need shoulder_hw and hip_hw")
+        return parts
+    if m.hip_z is None:
+        messages.append("torso ovals skipped: need hip_z")
+        return parts
+    z_candidates = [z for z in (m.shoulder_z, m.chest_z) if z is not None]
+    if not z_candidates:
+        messages.append("torso ovals skipped: need shoulder_z or chest_z")
+        return parts
+    z_top = max(z_candidates)
+    z_bottom = m.hip_z
+    if z_top <= z_bottom:
+        messages.append("torso ovals skipped: z_top <= z_bottom")
+        return parts
+    half_depth = m.chest_half_depth
+    if half_depth is None:
+        messages.append("torso ovals skipped: need chest half_depth")
+        return parts
+    y = m.chest_y if m.chest_y is not None else 0.0
+    placement: Literal["full3d", "front_plane"] = (
+        "full3d" if m.chest_y is not None else "front_plane"
+    )
+    w_s = m.shoulder_hw
+    w_h = m.hip_hw
+    # F5 near-columnar
+    max_w = max(abs(w_s), abs(w_h), 1e-9)
+    if abs(w_s - w_h) / max_w < _COLUMNAR_WIDTH_RATIO:
+        messages.append("torso ovals: shoulder≈hip near-columnar")
+
+    span = z_top - z_bottom
+    # z_norm 0 at shoulder (top), 1 at hip (bottom)
+    layers: list[tuple[str, float]] = [
+        ("RECIPE_torso_oval_chest", 0.15),
+        ("RECIPE_torso_oval_waist", 0.50),
+        ("RECIPE_torso_oval_hip", 0.85),
+    ]
+    for name, z_norm in layers:
+        z_m = z_top - z_norm * span
+        hw = _waist_width_at(z_norm, w_s, w_h, taper)
+        # Vertical radius ~ 1/6 of span; depth slightly less than half_depth
+        rz = max(0.02, span * 0.12)
+        ry = half_depth * 0.9
+        parts.append(
+            RecipePart(
+                name=name,
+                role="torso",
+                kind="ellipsoid",
+                center=[0.0, y, z_m],
+                rx_m=hw,
+                ry_m=ry,
+                rz_m=rz,
+                placement=placement,
+                label=name,
+            )
+        )
+
+    # Pelvis oval below hip
+    hip_half = m.hip_half_depth if m.hip_half_depth is not None else half_depth
+    if m.height_m is not None:
+        h = m.height_m
+        z_pelvis = m.hip_z - 0.04 * h
+        if z_pelvis < 0.0:
+            z_pelvis = max(0.02, m.hip_z * 0.5)
+        y_pelvis = m.hip_y if m.hip_y is not None else y
+        p_place: Literal["full3d", "front_plane"] = "full3d" if m.hip_y is not None else placement
+        parts.append(
+            RecipePart(
+                name="RECIPE_pelvis_oval",
+                role="pelvis",
+                kind="ellipsoid",
+                center=[0.0, y_pelvis, z_pelvis],
+                rx_m=w_h * 1.05,
+                ry_m=hip_half * 0.85,
+                rz_m=max(0.03, 0.06 * h),
+                placement=p_place,
+                label="RECIPE_pelvis_oval",
+            )
+        )
+    else:
+        messages.append("RECIPE_pelvis_oval skipped: need height_m")
     return parts
 
 
@@ -1073,10 +1309,16 @@ def build_blockout_recipe(
     *,
     depth_package: DepthSamplesPackage | None = None,
     limbs: bool = True,
+    torso: TorsoMode = "trap",
+    glute: GluteMode = "oval",
+    nofuse: bool = False,
+    breast_tilt_deg: float | None = None,
+    template_applied: TemplateAppliedPackage | None = None,
 ) -> BlockoutRecipePackage:
     """Build BlockoutRecipePackage from a loaded ProportionReport.
 
     Raises ProportionError(code=recipe_empty) when zero parts.
+    Topology modes only in messages (C1) — not in counts.
     """
     messages: list[str] = []
 
@@ -1085,29 +1327,73 @@ def build_blockout_recipe(
     if report.quality.multi_figure:
         messages.append("quality.multi_figure: recipe still emitted — confirm primary figure")
 
+    # Mode messages (C1)
+    messages.append(f"torso_mode={torso}")
+    messages.append(f"glute_mode={glute}")
+    messages.append(f"nofuse={str(bool(nofuse)).lower()}")
+    if nofuse:
+        messages.append("nofuse=true: no join/boolean (emit layout only)")
+
+    if template_applied is not None:
+        messages.append(f"template_applied: id={template_applied.template_id}")
+
+    # Breast tilt metadata only (C2) — no bpy rotation in v1
+    tilt_val: float | None = breast_tilt_deg
+    if tilt_val is None and template_applied is not None:
+        tilt_val = float(template_applied.constants.breast_tilt_x_deg)
+    if tilt_val is not None:
+        messages.append(f"breast_tilt_deg={tilt_val}")
+        messages.append("breast_tilt_applied: false")
+
     resolved = _resolve_metrics(report, depth_package=depth_package, messages=messages)
     crotch_z = _crotch_z(report, resolved.height_m, messages)
 
+    # Waist taper from template or default
+    taper = _DEFAULT_WAIST_TAPER
+    if template_applied is not None:
+        taper = float(template_applied.constants.torso_waist_taper)
+
     parts: list[RecipePart] = []
 
-    # 1 torso
-    torso = _build_torso_trap(resolved, messages)
-    if torso is not None:
-        _append_part(parts, torso)
-
-    # 2 pelvis
-    pelvis = _build_pelvis(resolved, messages)
-    if pelvis is not None:
-        _append_part(parts, pelvis)
+    # 1-2 torso + pelvis
+    if torso == "ovals":
+        for p in _build_torso_ovals(resolved, messages, taper=taper):
+            _append_part(parts, p)
+    else:
+        torso_part = _build_torso_trap(resolved, messages)
+        if torso_part is not None:
+            _append_part(parts, torso_part)
+        pelvis = _build_pelvis(resolved, messages)
+        if pelvis is not None:
+            _append_part(parts, pelvis)
 
     # 3 neck
     neck = _build_neck(report, resolved, messages)
     if neck is not None:
+        # Apply template neck thickness scale when present
+        if template_applied is not None and neck.radius_m is not None:
+            scale = float(template_applied.constants.neck_thickness_scale)
+            if scale != 1.0:
+                neck = neck.model_copy(update={"radius_m": float(neck.radius_m) * scale})
+                messages.append(f"neck_thickness_scale={scale} applied to RECIPE_neck")
         _append_part(parts, neck)
 
     # 4 head
     head = _build_head(report, resolved, messages)
     if head is not None:
+        if template_applied is not None:
+            hd = float(template_applied.constants.head_depth_scale)
+            hr = float(template_applied.constants.head_radius_scale)
+            updates: dict[str, Any] = {}
+            if head.rx_m is not None and hr != 1.0:
+                updates["rx_m"] = float(head.rx_m) * hr
+            if head.ry_m is not None and hd != 1.0:
+                updates["ry_m"] = float(head.ry_m) * hd
+            if head.rz_m is not None and hr != 1.0:
+                updates["rz_m"] = float(head.rz_m) * hr
+            if updates:
+                head = head.model_copy(update=updates)
+                messages.append(f"head scales depth={hd} radius={hr} applied to RECIPE_head")
         _append_part(parts, head)
 
     # 5-6 shoulder bridges
@@ -1123,7 +1409,14 @@ def build_blockout_recipe(
         _append_part(parts, p)
 
     # 11+ breast/glute/iliac
-    for p in _build_soft_ovals(report, resolved, messages, crotch_z):
+    for p in _build_soft_ovals(
+        report,
+        resolved,
+        messages,
+        crotch_z,
+        glute_mode=glute,
+        template_applied=template_applied,
+    ):
         _append_part(parts, p)
 
     # 13+ limbs
@@ -1151,6 +1444,7 @@ def build_blockout_recipe(
         hip_depth_m=resolved.hip_depth_m,
     )
 
+    # counts: numeric only — no mode strings (C1)
     return BlockoutRecipePackage(
         schema_version=RECIPE_SCHEMA_VERSION,
         honesty=RECIPE_HONESTY,
@@ -1463,6 +1757,13 @@ def emit_bpy_script(package: BlockoutRecipePackage) -> str:
         "",
         "recipes_col = ensure_collection('Proportion_Recipes')",
         "",
+        "# hard-delete startup Cube + prior RECIPE_/OVAL_/SOFT_ (0022 C3/C4)",
+        "# keep LM_/SEED_/HU_/LM_HEIGHT/cameras/lights",
+        "for o in list(bpy.data.objects):",
+        "    n = o.name",
+        '    if n == "Cube" or n.startswith(("Cube.", "RECIPE_", "OVAL_", "SOFT_")):',
+        "        bpy.data.objects.remove(o, do_unlink=True)",
+        "",
         "n_parts = 0",
         "for p in PARTS:",
         "    kind = p['kind']",
@@ -1615,16 +1916,33 @@ def run_blockout_recipe(
     depth_at_landmarks: Path | str | None = None,
     limbs: bool = True,
     force: bool = False,
+    torso: TorsoMode = "trap",
+    glute: GluteMode = "oval",
+    nofuse: bool = False,
+    breast_tilt_deg: float | None = None,
+    template_applied: Path | str | None = None,
 ) -> dict[str, Any]:
     """CLI helper: load report → build → write; return success payload."""
     report = load_report(report_path)
     depth_pkg: DepthSamplesPackage | None = None
     if depth_at_landmarks is not None:
         depth_pkg = _load_depth_at_landmarks(depth_at_landmarks)
+
+    tpl: TemplateAppliedPackage | None = None
+    if template_applied is not None:
+        from meshops.proportion.body_template import load_template_applied
+
+        tpl = load_template_applied(template_applied)
+
     package = build_blockout_recipe(
         report,
         depth_package=depth_pkg,
         limbs=limbs,
+        torso=torso,
+        glute=glute,
+        nofuse=nofuse,
+        breast_tilt_deg=breast_tilt_deg,
+        template_applied=tpl,
     )
     paths = write_blockout_recipe(out, package, format=format, force=force)
     return {

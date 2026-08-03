@@ -34,6 +34,9 @@ ProportionErrorCode = Literal[
     "invalid_depth_deltas",
     "silhouette_empty",
     "silhouette_failed",
+    "template_unknown",
+    "template_empty",
+    "template_failed",
     "unknown",
 ]
 
