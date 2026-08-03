@@ -38,6 +38,10 @@ ProportionErrorCode = Literal[
     "template_unknown",
     "template_empty",
     "template_failed",
+    "optimize_slow_needs_mesh",
+    "optimize_no_free_dofs",
+    "optimize_failed",
+    "constraint_report_failed",
     "unknown",
 ]
 

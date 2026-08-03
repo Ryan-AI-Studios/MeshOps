@@ -60,6 +60,8 @@ TOOL_NAMES: frozenset[str] = frozenset(
         "mesh_proportion_capture",
         "mesh_proportion_depth_samples",
         "mesh_proportion_blockout_recipe",
+        "mesh_proportion_blockout_validate_constraints",
+        "mesh_proportion_blockout_optimize",
         "mesh_proportion_depth_heatmap",
         "mesh_proportion_depth_hint",
         "mesh_proportion_silhouette_compare",
@@ -658,6 +660,57 @@ def build_server(work_root: Path | None = None) -> Any:
             nofuse=nofuse,
             breast_tilt_deg=breast_tilt_deg,
             template_applied=template_applied,
+        )
+
+    @mcp.tool()
+    def mesh_proportion_blockout_validate_constraints(
+        recipe: str,
+        out: str,
+        report: str | None = None,
+        template_applied: str | None = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Validate named-role hard constraints on a blockout recipe.
+
+        Authoring QA only — proportion_blockout_constraints_not_mesh_or_print_success (N6).
+        Raises ProportionError on failure (never ok:false success). Report ok=false is data.
+        """
+        return T.mesh_proportion_blockout_validate_constraints(
+            wr,
+            recipe=recipe,
+            out=out,
+            report=report,
+            template_applied=template_applied,
+            force=force,
+        )
+
+    @mcp.tool()
+    def mesh_proportion_blockout_optimize(
+        recipe: str,
+        out: str,
+        mode: str = "fast",
+        freeze_feet: bool = True,
+        mesh: str | None = None,
+        report: str | None = None,
+        template_applied: str | None = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Constrained free-DOF blockout adjust (freeze-feet default true).
+
+        Authoring QA only — proportion_blockout_optimize_not_mesh_or_print_success (N6).
+        Free-name random optimizers are NOT product. Slow mode requires mesh.
+        Raises ProportionError on failure (never ok:false success).
+        """
+        return T.mesh_proportion_blockout_optimize(
+            wr,
+            recipe=recipe,
+            out=out,
+            mode=mode,
+            freeze_feet=freeze_feet,
+            mesh=mesh,
+            report=report,
+            template_applied=template_applied,
+            force=force,
         )
 
     @mcp.tool()
