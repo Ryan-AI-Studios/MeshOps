@@ -42,6 +42,8 @@ ProportionErrorCode = Literal[
     "optimize_no_free_dofs",
     "optimize_failed",
     "constraint_report_failed",
+    "skeleton_empty",
+    "skeleton_failed",
     "unknown",
 ]
 

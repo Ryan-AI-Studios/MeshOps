@@ -65,16 +65,17 @@ def test_tool_catalog_complete_and_no_forbidden() -> None:
             assert "mesh_proportion_blockout_recipe" in names
             assert "mesh_proportion_blockout_validate_constraints" in names
             assert "mesh_proportion_blockout_optimize" in names
+            assert "mesh_proportion_skeleton_build" in names
             assert "mesh_proportion_depth_heatmap" in names
             assert "mesh_proportion_depth_hint" in names
             assert "mesh_proportion_silhouette_compare" in names
-            assert len(names) >= 41
+            assert len(names) >= 42
 
     _run(_body())
 
 
 def test_mcp__proportion_tools_in_catalog() -> None:
-    """Explicit 0023 catalog freeze: fifteen proportion tools; len >= 41."""
+    """Explicit 0026 catalog freeze: sixteen proportion tools; len >= 42."""
 
     async def _body() -> None:
         server = build_server()
@@ -94,12 +95,13 @@ def test_mcp__proportion_tools_in_catalog() -> None:
                 "mesh_proportion_blockout_recipe",
                 "mesh_proportion_blockout_validate_constraints",
                 "mesh_proportion_blockout_optimize",
+                "mesh_proportion_skeleton_build",
                 "mesh_proportion_depth_heatmap",
                 "mesh_proportion_depth_hint",
                 "mesh_proportion_silhouette_compare",
             ):
                 assert n in names
-            assert len(names) >= 41
+            assert len(names) >= 42
             assert names >= TOOL_NAMES
 
     _run(_body())

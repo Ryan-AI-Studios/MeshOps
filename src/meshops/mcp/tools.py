@@ -1053,6 +1053,38 @@ def mesh_proportion_blockout_optimize(
     )
 
 
+def mesh_proportion_skeleton_build(
+    work_root: Path,
+    *,
+    report: str,
+    out: str,
+    format: str = "json",
+    template_applied: str | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Emit joint/bone skeleton graph. Authoring only — SKELETON_HONESTY / N6."""
+    from meshops.proportion.skeleton import run_skeleton_build
+
+    fmt = (format or "json").strip().lower()
+    if fmt not in ("json", "bpy", "both"):
+        raise ValueError("--format must be json, bpy, or both")
+    ends_sep = out.endswith(("/", "\\"))
+    out_base = out.rstrip("/\\") if ends_sep else out
+    out_resolved = _resolve_tool_path(out_base, work_root)
+    out_arg: str | Path = (
+        str(out_resolved) + ("\\" if ends_sep else "") if ends_sep else out_resolved
+    )
+    return run_skeleton_build(
+        _resolve_tool_path(report, work_root),
+        out_arg,
+        format=fmt,  # type: ignore[arg-type]
+        force=force,
+        template_applied=(
+            _resolve_tool_path(template_applied, work_root) if template_applied else None
+        ),
+    )
+
+
 def mesh_proportion_depth_heatmap(
     work_root: Path,
     *,

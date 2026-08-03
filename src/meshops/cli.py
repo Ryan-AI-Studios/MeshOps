@@ -86,10 +86,10 @@ app.add_typer(bench_app, name="bench")
 proportion_app = typer.Typer(
     name="proportion",
     help=(
-        "Pixel proportion analysis from multi-view RGB (tracks 0012-0023). "
+        "Pixel proportion analysis from multi-view RGB (tracks 0012-0026). "
         "Verbs: template | templates | apply-template | analyze | show | scaffold | guides | "
         "capture | depth-samples | blockout-recipe | blockout-validate-constraints | "
-        "blockout-optimize | depth-heatmap | depth-hint | silhouette-compare. "
+        "blockout-optimize | skeleton-build | depth-heatmap | depth-hint | silhouette-compare. "
         "Assist-first landmarks + head-unit checks + blockout-grade XYZ; "
         "schema 1.1.0 diameters (edge pairs) + left depth bands + cross-sections; "
         "scaffold creates package layout + package_checklist.json only (not mesh/print success); "
@@ -102,6 +102,8 @@ proportion_app = typer.Typer(
         "blockout-validate-constraints named-role hard rules (CONSTRAINT_HONESTY — N6); "
         "blockout-optimize constrained free-DOF adjust, --freeze-feet default "
         "(OPTIMIZE_HONESTY — N6; free-name optimizers are NOT product); "
+        "skeleton-build emits joint/bone blockout_skeleton.json + optional SKEL_* bpy "
+        "(SKELETON_HONESTY — authoring scaffold only, not animation rig — N6); "
         "depth-heatmap glance PNG from samples/deltas (numbers SoT — N6); "
         "depth-hint external depth-channel assist hints + optional merge-into (conf floor — N6); "
         "silhouette-compare front-only binary IoU/Dice QA score (authoring only — N6). "
@@ -2397,6 +2399,78 @@ def proportion_blockout_recipe_cmd(
             typer.echo(f"  note: {msg}")
         typer.echo(f"honesty: {RECIPE_HONESTY}")
         typer.echo("blockout-recipe only — not mesh or print success")
+    raise typer.Exit(0)
+
+
+@proportion_app.command("skeleton-build")
+def proportion_skeleton_build_cmd(
+    report: Path = typer.Option(
+        ...,
+        "--report",
+        help="Path to proportion_report.json",
+    ),
+    out: Path = typer.Option(
+        ...,
+        "--out",
+        help="Output directory for blockout_skeleton.json / setup_skeleton.py",
+    ),
+    format: str = typer.Option(
+        "json",
+        "--format",
+        help="Output format: json | bpy | both (default json)",
+    ),
+    template_applied: Path | None = typer.Option(
+        None,
+        "--template-applied",
+        help="template_applied.json file or directory containing it (template_id only)",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite blockout_skeleton.json / setup_skeleton.py only",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
+) -> None:
+    """Emit joint/bone skeleton graph from report (scaffold only — not mesh/print/rig)."""
+    from meshops.proportion.errors import ProportionError
+    from meshops.proportion.honesty import SKELETON_HONESTY
+    from meshops.proportion.skeleton import run_skeleton_build
+
+    fmt = format.strip().lower()
+    if fmt not in ("json", "bpy", "both"):
+        raise typer.BadParameter("--format must be json, bpy, or both")
+
+    try:
+        payload = run_skeleton_build(
+            report,
+            out,
+            format=fmt,  # type: ignore[arg-type]
+            force=force,
+            template_applied=template_applied,
+        )
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    if json_out:
+        _emit_json(payload)
+    else:
+        counts = payload.get("counts") or {}
+        typer.echo(
+            f"skeleton-build format={payload.get('format')} "
+            f"joints={counts.get('joints', 0)} "
+            f"bones={counts.get('bones', 0)} "
+            f"measured={counts.get('measured', 0)} "
+            f"estimated={counts.get('estimated', 0)} "
+            f"missing={counts.get('missing', 0)}"
+        )
+        for p in payload.get("paths") or []:
+            typer.echo(f"  {p}")
+        for msg in payload.get("messages") or []:
+            typer.echo(f"  note: {msg}")
+        typer.echo(f"honesty: {SKELETON_HONESTY}")
+        typer.echo("skeleton-build only — not mesh or print success")
     raise typer.Exit(0)
 
 
