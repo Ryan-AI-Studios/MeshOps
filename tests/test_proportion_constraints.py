@@ -1126,6 +1126,79 @@ def test_optimize_unscored_only_leaves_y_identical_or_refuses() -> None:
     assert result.n_kept == 0
 
 
+def test_axial_depth_plane_closer_to_chest_front_fails() -> None:
+    """C_axial_depth_plane: neck Y closer to chest_front than chest_mid fails."""
+    pkg = _pkg(
+        [
+            _part(
+                "RECIPE_neck",
+                role="neck",
+                kind="cylinder",
+                center=[0.0, -0.12, 1.45],
+                rx_m=0.04,
+                ry_m=0.04,
+                rz_m=0.06,
+            ),
+            _part(
+                "RECIPE_torso",
+                role="torso",
+                kind="ellipsoid",
+                center=[0.0, 0.0, 1.2],
+                rx_m=0.15,
+                ry_m=0.1,
+                rz_m=0.2,
+            ),
+        ]
+    )
+
+    class _Lm:
+        def __init__(self, y: float) -> None:
+            self.y_m = y
+
+    class _R:
+        def __init__(self) -> None:
+            self.landmarks_xyz = {
+                "chest_mid": _Lm(0.0),
+                "chest_front": _Lm(-0.12),
+            }
+
+    report = validate_constraints(pkg, report=_R())
+    by_id = {r.id: r for r in report.rules}
+    assert by_id["C_axial_depth_plane"].status == "fail"
+    assert report.ok is False
+
+
+def test_axial_depth_plane_near_chest_mid_passes() -> None:
+    pkg = _pkg(
+        [
+            _part(
+                "RECIPE_neck",
+                role="neck",
+                kind="cylinder",
+                center=[0.0, 0.01, 1.45],
+                rx_m=0.04,
+                ry_m=0.04,
+                rz_m=0.06,
+            ),
+        ]
+    )
+
+    class _Lm:
+        def __init__(self, y: float) -> None:
+            self.y_m = y
+
+    class _R:
+        def __init__(self) -> None:
+            self.landmarks_xyz = {
+                "chest_mid": _Lm(0.0),
+                "chest_front": _Lm(-0.12),
+            }
+
+    report = validate_constraints(pkg, report=_R())
+    by_id = {r.id: r for r in report.rules}
+    assert by_id["C_axial_depth_plane"].status == "pass"
+
+
 def test_validate_entrypoint_writes_report(tmp_path: Path) -> None:
     pkg = _pkg(
         [
