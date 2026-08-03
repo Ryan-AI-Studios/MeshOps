@@ -128,6 +128,9 @@ def _emit_error(exc: BaseException, *, json_mode: bool, code: int = 1) -> NoRetu
             val = getattr(exc, attr)
             if val is not None:
                 payload[attr] = str(val) if not isinstance(val, (str, int, bool)) else val
+    details = getattr(exc, "details", None)
+    if isinstance(details, dict) and details:
+        payload["details"] = details
     if hasattr(exc, "result") and exc.result is not None:  # type: ignore[attr-defined]
         with contextlib.suppress(Exception):
             payload["result"] = exc.result.model_dump(mode="json")  # type: ignore[attr-defined]
@@ -2596,11 +2599,17 @@ def proportion_silhouette_compare_cmd(
         "--force",
         help="Overwrite existing JSON / overlay",
     ),
+    require_trusted: bool = typer.Option(
+        False,
+        "--require-trusted",
+        help="Exit 1 when silhouette_trusted is false (code silhouette_untrusted)",
+    ),
     json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
 ) -> None:
     """Front-only binary silhouette IoU/Dice between Package A front and mesh front.
 
     Authoring QA score only — not mesh or print success (N6 / SILHOUETTE_HONESTY).
+    Untrusted scores write package by default (exit 0); use --require-trusted to hard-fail.
     """
     from meshops.proportion.errors import ProportionError
     from meshops.proportion.honesty import SILHOUETTE_HONESTY
@@ -2615,6 +2624,7 @@ def proportion_silhouette_compare_cmd(
             view_role=view_role,
             overlay=overlay,
             force=force,
+            require_trusted=require_trusted,
         )
     except ProportionError as exc:
         _emit_error(exc, json_mode=json_out, code=1)
@@ -2624,14 +2634,25 @@ def proportion_silhouette_compare_cmd(
     if json_out:
         _emit_json(payload)
     else:
-        typer.echo(
-            f"silhouette-compare iou={payload.get('score_iou', 0):.4f} "
-            f"dice={payload.get('score_dice', 0):.4f}"
-        )
+        trusted = bool(payload.get("silhouette_trusted", False))
+        reasons = payload.get("trust_reasons") or []
+        if trusted:
+            typer.echo(
+                f"silhouette-compare iou={payload.get('score_iou', 0):.4f} "
+                f"dice={payload.get('score_dice', 0):.4f} trusted=true"
+            )
+        else:
+            reason_s = ",".join(str(r) for r in reasons) if reasons else "unknown"
+            typer.echo(
+                f"silhouette-compare UNTRUSTED iou={payload.get('score_iou', 0):.4f} "
+                f"dice={payload.get('score_dice', 0):.4f} reasons={reason_s}"
+            )
         counts = payload.get("counts") or {}
         typer.echo(
             f"  ref_fg_grid_px={counts.get('ref_fg_grid_px', 0)} "
-            f"mesh_fg_grid_px={counts.get('mesh_fg_grid_px', 0)}"
+            f"mesh_fg_grid_px={counts.get('mesh_fg_grid_px', 0)} "
+            f"ref_cov={payload.get('ref_coverage_frac', 0):.4f} "
+            f"mesh_cov={payload.get('mesh_coverage_frac', 0):.4f}"
         )
         for p in payload.get("paths") or []:
             typer.echo(f"  {p}")
@@ -2639,6 +2660,8 @@ def proportion_silhouette_compare_cmd(
             typer.echo(f"  note: {msg}")
         typer.echo(f"honesty: {SILHOUETTE_HONESTY}")
         typer.echo("silhouette-compare authoring QA only — not mesh or print success")
+        if not trusted:
+            typer.echo("Do not thrash mesh geometry to chase an untrusted silhouette score")
     raise typer.Exit(0)
 
 

@@ -724,12 +724,14 @@ def build_server(work_root: Path | None = None) -> Any:
         view_role: str = "front",
         overlay: bool = True,
         force: bool = False,
+        require_trusted: bool = False,
     ) -> dict[str, Any]:
         """Front-only binary silhouette IoU/Dice (Package A front vs mesh front).
 
         Authoring QA only — proportion_silhouette_compare_not_mesh_or_print_success (N6).
         Not print success. Front-vs-front only. Raises ProportionError on failure
-        (never ok:false success).
+        (never ok:false success). Payload includes silhouette_trusted / trust_reasons
+        (schema 1.1.0). require_trusted → silhouette_untrusted when untrusted.
         """
         return T.mesh_proportion_silhouette_compare(
             wr,
@@ -740,6 +742,7 @@ def build_server(work_root: Path | None = None) -> Any:
             view_role=view_role,
             overlay=overlay,
             force=force,
+            require_trusted=require_trusted,
         )
 
     return mcp
