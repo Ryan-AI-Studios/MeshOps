@@ -14,11 +14,11 @@ from meshops.cli import app
 from meshops.proportion.errors import ProportionError
 from meshops.proportion.honesty import SILHOUETTE_HONESTY
 from meshops.proportion.silhouette import (
+    _OTSU_MIN_SIGMA_B2,
     GRID_PX,
     SILHOUETTE_SCHEMA_VERSION,
     TRUST_REASON_CODES,
     SilhouetteComparePackage,
-    _OTSU_MIN_SIGMA_B2,
     _keep_large_blob_union,
     _otsu_fg_mask,
     _otsu_threshold,
@@ -709,7 +709,7 @@ def test_silhouette__0025_frame_bg_threshold_unchanged() -> None:
 
 
 def test_silhouette__0025_otsu_flat_unimodal_low_bimodality() -> None:
-    """Flat/unimodal hist → Otsu σb² below floor; extract tags otsu_low_histogram_bimodality."""
+    """Unimodal hist: Otsu fails floor; extract tags otsu_low_histogram_bimodality."""
     # Unimodal spike: between-class variance collapses
     hist = np.zeros(256, dtype=np.float64)
     hist[128] = 10_000.0
@@ -730,10 +730,10 @@ def test_silhouette__0025_otsu_flat_unimodal_low_bimodality() -> None:
 def test_silhouette__0025_multi_blob_union_keeps_both_large() -> None:
     """Recovery large-blob union keeps ALL components ≥2% area, not only largest."""
     mask = np.zeros((100, 100), dtype=bool)
-    # Two equal large blobs: 30×30 = 900 px = 9% each (≥ 2%)
+    # Two equal large blobs: 30*30 = 900 px = 9% each (>= 2%)
     mask[5:35, 5:35] = True
     mask[65:95, 65:95] = True
-    # One noise speck below 2% floor (10×10 = 1%)
+    # One noise speck below 2% floor (10*10 = 1%)
     mask[45:55, 45:55] = True
 
     kept, count, msgs = _keep_large_blob_union(mask)
