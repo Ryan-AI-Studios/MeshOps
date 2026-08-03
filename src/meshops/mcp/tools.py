@@ -1063,8 +1063,13 @@ def mesh_proportion_silhouette_compare(
     view_role: str = "front",
     overlay: bool = True,
     force: bool = False,
+    require_trusted: bool = False,
 ) -> dict[str, Any]:
-    """Front-only silhouette IoU/Dice. Authoring only — SILHOUETTE_HONESTY / N6."""
+    """Front-only silhouette IoU/Dice. Authoring only — SILHOUETTE_HONESTY / N6.
+
+    Payload includes silhouette_trusted, trust_reasons, coverage fracs, mask methods
+    (schema 1.1.0). require_trusted raises silhouette_untrusted when untrusted.
+    """
     from meshops.proportion.silhouette import run_silhouette_compare
 
     # Preserve trailing directory separator intent (R1); Path resolve strips it.
@@ -1082,4 +1087,5 @@ def mesh_proportion_silhouette_compare(
         view_role=view_role,
         overlay=overlay,
         force=force,
+        require_trusted=require_trusted,
     )

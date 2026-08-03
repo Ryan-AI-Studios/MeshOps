@@ -1,7 +1,9 @@
-"""Front-only binary silhouette IoU/Dice compare (track 0021).
+"""Front-only binary silhouette IoU/Dice compare (track 0021 + 0025 trust).
 
 Authoring QA score between Package A front ref and mesh front view.
 Not mesh or print success (Difficulty §12 / N6). Front-vs-front only.
+
+0025: studio-gray recovery cascade + silhouette_trusted / trust_reasons.
 """
 
 from __future__ import annotations
@@ -12,20 +14,21 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Any, Final, Literal
+from typing import Any, Final, Literal, NamedTuple
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
 from meshops.proportion.errors import ProportionError
 from meshops.proportion.frame import (
+    _LARGE_BLOB_FRAC,
     _load_rgba_array,
     connected_large_blobs,
     silhouette_mask,
 )
 from meshops.proportion.honesty import SILHOUETTE_HONESTY
 
-SILHOUETTE_SCHEMA_VERSION: Final[Literal["1.0.0"]] = "1.0.0"
+SILHOUETTE_SCHEMA_VERSION: Final[Literal["1.1.0"]] = "1.1.0"
 SILHOUETTE_JSON_BASENAME: Final[str] = "silhouette_compare.json"
 SILHOUETTE_OVERLAY_BASENAME: Final[str] = "silhouette_overlay.png"
 GRID_PX: Final[int] = 256
@@ -33,6 +36,33 @@ LUMA_THR: Final[int] = 18
 METHOD: Final[Literal["binary_mask_iou_dice"]] = "binary_mask_iou_dice"
 ALIGNMENT_MODE: Final[Literal["content_bbox"]] = "content_bbox"
 RESIZE_LABEL: Final[Literal["nearest_256"]] = "nearest_256"
+
+# Trust band for final post-recovery coverage (inclusive).
+_COV_LO: Final[float] = 0.02
+_COV_HI: Final[float] = 0.90
+# Otsu between-class variance floor (AI2 A) — flat/unimodal hist fails.
+_OTSU_MIN_SIGMA_B2: Final[float] = 10.0
+# Corner std above this → bg_uncertain when still out of band.
+_BG_STD_UNCERTAIN: Final[float] = 25.0
+# Alpha matte usefulness thresholds.
+_ALPHA_FRAC_TRANS: Final[float] = 0.01
+_ALPHA_STD_MIN: Final[float] = 5.0
+_ALPHA_OPAQUE_THR: Final[int] = 16
+
+MaskMethod = Literal["primary", "alpha_matte", "corner_median", "otsu_luma", "empty"]
+
+TRUST_REASON_CODES: Final[frozenset[str]] = frozenset(
+    {
+        "coverage_high",
+        "coverage_low",
+        "coverage_high_after_recovery",
+        "recovery_failed",
+        "bg_uncertain",
+        "otsu_low_histogram_bimodality",
+        "ref_untrusted",
+        "mesh_untrusted",
+    }
+)
 
 _NON_FRONT_STEM_TOKENS: Final[tuple[str, ...]] = (
     "left",
@@ -55,7 +85,7 @@ _IDENTICAL_MSG: Final[str] = "ref and mesh-view are identical — score is trivi
 
 
 class SilhouetteScores(BaseModel):
-    """IoU + Dice on the 256² aligned grid."""
+    """IoU + Dice on the 256^2 aligned grid."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -89,11 +119,11 @@ class SilhouetteAlignment(BaseModel):
 
 
 class SilhouetteComparePackage(BaseModel):
-    """silhouette_compare.json package (schema 1.0.0)."""
+    """silhouette_compare.json package (schema 1.1.0 — write-only)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["1.0.0"] = SILHOUETTE_SCHEMA_VERSION
+    schema_version: Literal["1.1.0"] = SILHOUETTE_SCHEMA_VERSION
     honesty: str = SILHOUETTE_HONESTY
     view_role: Literal["front"] = "front"
     ref_path: str
@@ -106,6 +136,24 @@ class SilhouetteComparePackage(BaseModel):
     alignment: SilhouetteAlignment
     messages: list[str] = Field(default_factory=list)
     overlay_path: str | None = None
+    # 0025 trust fields (R1)
+    silhouette_trusted: bool = False
+    trust_reasons: list[str] = Field(default_factory=list)
+    mask_method_ref: MaskMethod = "primary"
+    mask_method_mesh: MaskMethod = "primary"
+    ref_coverage_frac: float = 0.0
+    mesh_coverage_frac: float = 0.0
+
+
+class _MaskExtractResult(NamedTuple):
+    """Per-side mask extraction outcome (post-recovery when triggered)."""
+
+    mask: np.ndarray
+    messages: list[str]
+    method: MaskMethod
+    trust_reasons: list[str]
+    coverage_frac: float
+    recovery_ran: bool
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +266,38 @@ def _luma(rgba: np.ndarray) -> np.ndarray:
     return 0.299 * rgb[:, :, 0] + 0.587 * rgb[:, :, 1] + 0.114 * rgb[:, :, 2]
 
 
+def _coverage_frac(mask: np.ndarray) -> float:
+    h, w = mask.shape
+    return float(mask.sum()) / float(max(h * w, 1))
+
+
+def _in_trust_band(coverage: float) -> bool:
+    return _COV_LO <= coverage <= _COV_HI
+
+
+def _alpha_channel(rgba: np.ndarray) -> np.ndarray:
+    if rgba.shape[2] >= 4:
+        return rgba[:, :, 3]
+    return np.full(rgba.shape[:2], 255, dtype=np.uint8)
+
+
+def _alpha_useful(rgba: np.ndarray) -> bool:
+    """Prefer alpha matte when channel has real transparency / variance."""
+    alpha = _alpha_channel(rgba)
+    frac_trans = float(np.mean(alpha.astype(np.float64) < 250.0))
+    std = float(np.std(alpha.astype(np.float64)))
+    return frac_trans >= _ALPHA_FRAC_TRANS or std >= _ALPHA_STD_MIN
+
+
+def _alpha_matte_mask(rgba: np.ndarray) -> np.ndarray:
+    """FG from alpha; exclude near-white RGB when present (optional and-not)."""
+    alpha = _alpha_channel(rgba)
+    opaque = alpha > _ALPHA_OPAQUE_THR
+    rgb = rgba[:, :, :3].astype(np.int16)
+    near_white = (rgb[:, :, 0] >= 250) & (rgb[:, :, 1] >= 250) & (rgb[:, :, 2] >= 250)
+    return opaque & ~near_white
+
+
 def _corner_median_luma(luma: np.ndarray) -> tuple[float, float, list[float]]:
     """Return (bg_median, std_of_corners, [tl, tr, bl, br])."""
     h, w = luma.shape
@@ -238,49 +318,283 @@ def _corner_median_luma(luma: np.ndarray) -> tuple[float, float, list[float]]:
     return bg, std, corners
 
 
-def _corner_median_mask(rgba: np.ndarray) -> tuple[np.ndarray, list[str]]:
-    """Fallback FG mask via corner-median luma (C1). Only when primary empty."""
+def _corner_median_mask(
+    rgba: np.ndarray,
+) -> tuple[np.ndarray, float, float, list[str]]:
+    """Corner-median luma FG mask; returns (mask, bg_median, std, messages)."""
     messages: list[str] = []
     luma = _luma(rgba)
     bg, std, _corners = _corner_median_luma(luma)
     mask = np.abs(luma - bg) > float(LUMA_THR)
     messages.append("primary silhouette_mask empty — used corner-median fallback")
-    if std > 25.0:
+    if std > _BG_STD_UNCERTAIN:
         messages.append("background estimate uncertain — busy frame")
-    return mask, messages
+    return mask, bg, std, messages
+
+
+def _otsu_threshold(hist: np.ndarray) -> tuple[int, float]:
+    """Classic Otsu on 256-bin histogram → (threshold, max between-class variance).
+
+    Uses class probabilities so sigma_b2 is scale-free vs image size (AI2 A floor 10.0).
+    """
+    total = float(hist.sum())
+    if total <= 0.0:
+        return 0, 0.0
+
+    levels = np.arange(256, dtype=np.float64)
+    sum_total = float(np.dot(levels, hist.astype(np.float64)))
+
+    sum_b = 0.0
+    w_b = 0.0
+    max_var = -1.0
+    best_t = 0
+
+    for t in range(256):
+        w_b += float(hist[t])
+        if w_b <= 0.0:
+            continue
+        w_f = total - w_b
+        if w_f <= 0.0:
+            break
+        sum_b += float(t) * float(hist[t])
+        m_b = sum_b / w_b
+        m_f = (sum_total - sum_b) / w_f
+        # Probability-weighted between-class variance
+        omega0 = w_b / total
+        omega1 = w_f / total
+        var = omega0 * omega1 * (m_b - m_f) ** 2
+        if var > max_var:
+            max_var = var
+            best_t = t
+
+    if max_var < 0.0:
+        return 0, 0.0
+    return best_t, float(max_var)
+
+
+def _otsu_fg_mask(
+    luma_u8: np.ndarray,
+    t: int,
+    *,
+    bg_median: float | None,
+    bg_std: float | None,
+) -> tuple[np.ndarray, list[str]]:
+    """Pick FG side of Otsu threshold (B2: corner BG sign preferred).
+
+    Classic Otsu ``t`` is the last level of the low class (levels 0..t). Light-BG
+    FG therefore uses ``luma <= t`` (equivalent to freeze ``luma < t'`` with
+    t' = t+1) so mode pixels at exactly ``t`` stay in the low class.
+    """
+    messages: list[str] = []
+    use_bg_sign = bg_median is not None and bg_std is not None and bg_std <= _BG_STD_UNCERTAIN
+    if use_bg_sign:
+        assert bg_median is not None
+        if bg_median >= 128.0:
+            mask = luma_u8 <= t
+            messages.append(f"otsu FG = luma <= {t} (bg_median={bg_median:.1f})")
+        else:
+            mask = luma_u8 > t
+            messages.append(f"otsu FG = luma > {t} (bg_median={bg_median:.1f})")
+        return mask, messages
+
+    # Ambiguous / no corner: coverage closest to 0.25 in band, else max <=0.90
+    low = luma_u8 <= t
+    high = luma_u8 > t
+    candidates: list[tuple[np.ndarray, float]] = [
+        (low, _coverage_frac(low)),
+        (high, _coverage_frac(high)),
+    ]
+    in_band = [(m, c) for m, c in candidates if _in_trust_band(c)]
+    if in_band:
+        chosen, cov = min(in_band, key=lambda x: abs(x[1] - 0.25))
+        messages.append(f"otsu FG side by coverage~0.25 (cov={cov:.4f})")
+        return chosen, messages
+
+    under = [(m, c) for m, c in candidates if c <= _COV_HI]
+    if under:
+        chosen, cov = max(under, key=lambda x: x[1])
+        messages.append(f"otsu FG side max cov<=0.90 (cov={cov:.4f})")
+        return chosen, messages
+
+    # Both sides > 0.90 — best-effort lower coverage
+    chosen, cov = min(candidates, key=lambda x: x[1])
+    messages.append(f"otsu FG side best-effort high cov (cov={cov:.4f})")
+    return chosen, messages
+
+
+def _keep_large_blob_union(mask: np.ndarray) -> tuple[np.ndarray, int, list[str]]:
+    """Keep union of ALL components with area >= _LARGE_BLOB_FRAC (AI2 B).
+
+    Never keeps only the single largest when multiple large exist.
+    """
+    from scipy import ndimage
+
+    messages: list[str] = []
+    if not mask.any():
+        return mask, 0, messages
+
+    label_out: tuple[np.ndarray, int] = ndimage.label(mask)  # type: ignore[assignment]
+    labeled, n_components = label_out
+    if n_components == 0:
+        return mask, 0, messages
+
+    area_min = max(1, int(mask.size * _LARGE_BLOB_FRAC))
+    keep = np.zeros_like(mask, dtype=bool)
+    count = 0
+    for idx in range(1, n_components + 1):
+        component = labeled == idx
+        if int(component.sum()) >= area_min:
+            keep |= component
+            count += 1
+
+    if count > 1:
+        messages.append(
+            f"multi_figure: kept union of {count} large blobs (area>={_LARGE_BLOB_FRAC:.0%} each)"
+        )
+    if count == 0:
+        # No component met the large-blob floor — leave original for best-effort.
+        return mask.astype(bool), 0, messages
+    return keep, count, messages
 
 
 def extract_silhouette_mask(
     rgba: np.ndarray,
     *,
     side: str,
-) -> tuple[np.ndarray, list[str]]:
-    """Primary ``silhouette_mask`` + corner-median fallback (B1 / R3).
+) -> _MaskExtractResult:
+    """Primary ``silhouette_mask`` + recovery cascade (0025 R2/R4).
 
-    Raises ``silhouette_empty`` if still empty after fallback.
+    Cascade (each side always):
+      0 primary → 1 alpha_matte if useful → if empty or coverage>0.90:
+      3 corner-median → 4 Otsu luma → 5 large-blob union → 6 empty raises
+      → 7 out-of-band best-effort + trust reason codes
+
+    Raises ``silhouette_empty`` if still empty after cascade.
     """
     messages: list[str] = []
-    mask = silhouette_mask(rgba)
-    if not mask.any():
-        mask, fb_msgs = _corner_median_mask(rgba)
-        messages.extend(fb_msgs)
+    reasons: list[str] = []
+    recovery_ran = False
+    bg_median: float | None = None
+    bg_std: float | None = None
 
+    # 0 Primary
+    primary = silhouette_mask(rgba)
+    mask = primary
+    method: MaskMethod = "primary"
+
+    # 1 Alpha prefer when useful
+    if _alpha_useful(rgba):
+        alpha_mask = _alpha_matte_mask(rgba)
+        if alpha_mask.any():
+            mask = alpha_mask
+            method = "alpha_matte"
+            messages.append("alpha matte preferred (useful transparency/variance)")
+
+    cov = _coverage_frac(mask)
+    need_recovery = (not mask.any()) or cov > _COV_HI
+
+    if need_recovery:
+        recovery_ran = True
+        was_empty = not mask.any()
+
+        # 3 Corner-median
+        corner_mask, bg_median, bg_std, corner_msgs = _corner_median_mask(rgba)
+        if was_empty:
+            messages.extend(corner_msgs)
+        else:
+            messages.append(f"primary/alpha coverage {cov * 100.0:.1f}% high — recovery cascade")
+            if bg_std is not None and bg_std > _BG_STD_UNCERTAIN:
+                messages.append("background estimate uncertain — busy frame")
+        mask = corner_mask
+        method = "corner_median"
+        cov = _coverage_frac(mask)
+
+        # 4 Otsu if still out-of-band or empty
+        if (not mask.any()) or (not _in_trust_band(cov)):
+            luma_u8 = _luma(rgba).astype(np.uint8)
+            hist, _ = np.histogram(luma_u8, bins=256, range=(0, 256))
+            t, sigma_b2 = _otsu_threshold(hist)
+            messages.append(f"otsu_luma threshold={t} sigma_b2={sigma_b2:.4f}")
+
+            if sigma_b2 < _OTSU_MIN_SIGMA_B2:
+                reasons.append("otsu_low_histogram_bimodality")
+                messages.append(f"Otsu rejected: sigma_b2={sigma_b2:.4f} < {_OTSU_MIN_SIGMA_B2}")
+                # Keep corner mask (may be empty/high); do not invent 50% FG
+            else:
+                otsu_mask, otsu_msgs = _otsu_fg_mask(
+                    luma_u8,
+                    t,
+                    bg_median=bg_median,
+                    bg_std=bg_std,
+                )
+                messages.extend(otsu_msgs)
+                if otsu_mask.any():
+                    mask = otsu_mask
+                    method = "otsu_luma"
+                    cov = _coverage_frac(mask)
+                else:
+                    messages.append("otsu FG empty — keeping prior recovery mask as best-effort")
+
+        # 5 Large-blob keep on recovery mask
+        if mask.any():
+            mask, n_large, blob_msgs = _keep_large_blob_union(mask)
+            messages.extend(blob_msgs)
+            cov = _coverage_frac(mask)
+            if n_large == 0 and not _in_trust_band(cov):
+                # Noise-only recovery mask
+                messages.append("no large blobs after recovery cleanup")
+
+    # 6 Still empty → hard fail
     if not mask.any():
+        reasons.append("recovery_failed")
         raise ProportionError(
             f"empty silhouette mask for {side}",
             code="silhouette_empty",
-            details={"side": side},
+            details={"side": side, "trust_reasons": list(reasons)},
         )
 
-    h, w = mask.shape
-    coverage = float(mask.sum()) / float(max(h * w, 1))
-    if coverage < 0.02 or coverage > 0.90:
-        kind = "low" if coverage < 0.02 else "high"
+    # 7 Final trust reasons for this side
+    cov = _coverage_frac(mask)
+    if cov > _COV_HI:
+        reasons.append("coverage_high")
+        if recovery_ran:
+            reasons.append("coverage_high_after_recovery")
+            reasons.append("recovery_failed")
         messages.append(
-            f"Foreground coverage ({coverage * 100.0:.1f}%) is unusually {kind} "
+            f"Foreground coverage ({cov * 100.0:.1f}%) is unusually high "
             "— check background lighting or provide RGBA"
         )
-    return mask, messages
+    elif cov < _COV_LO:
+        reasons.append("coverage_low")
+        messages.append(
+            f"Foreground coverage ({cov * 100.0:.1f}%) is unusually low "
+            "— check background lighting or provide RGBA"
+        )
+
+    if (
+        recovery_ran
+        and bg_std is not None
+        and bg_std > _BG_STD_UNCERTAIN
+        and not _in_trust_band(cov)
+    ):
+        reasons.append("bg_uncertain")
+
+    # Deduplicate reasons preserving order
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for r in reasons:
+        if r in TRUST_REASON_CODES and r not in seen:
+            seen.add(r)
+            ordered.append(r)
+
+    return _MaskExtractResult(
+        mask=mask.astype(bool),
+        messages=messages,
+        method=method,
+        trust_reasons=ordered,
+        coverage_frac=cov,
+        recovery_ran=recovery_ran,
+    )
 
 
 def _content_bbox(
@@ -325,7 +639,7 @@ def _crop_and_resize_mask(
     *,
     grid_px: int = GRID_PX,
 ) -> np.ndarray:
-    """Crop mask to bbox, nearest-resize to grid_px², re-binarize."""
+    """Crop mask to bbox, nearest-resize to grid_px^2, re-binarize."""
     x0, y0, x1, y1 = bbox
     crop = mask[y0 : y1 + 1, x0 : x1 + 1]
     if crop.size == 0:
@@ -398,7 +712,7 @@ def _build_overlay(ref_grid: np.ndarray, mesh_grid: np.ndarray) -> Any:
 def _render_mesh_front(mesh_path: Path) -> Path:
     """Render mesh front view via F3D; return path to front.png (R5 / B2).
 
-    Forces white background so ``frame.silhouette_mask`` (near-white ≥ 250)
+    Forces white background so ``frame.silhouette_mask`` (near-white >= 250)
     classifies the backdrop as background, not full-frame foreground.
 
     Caller must delete the returned path when finished (temp copy).
@@ -469,6 +783,34 @@ def _normalize_view_role(view_role: str) -> None:
         )
 
 
+def _aggregate_trust(
+    ref: _MaskExtractResult,
+    mesh: _MaskExtractResult,
+) -> tuple[bool, list[str]]:
+    """Combine per-side outcomes into package silhouette_trusted + trust_reasons.
+
+    Trusted iff both sides final coverage in [0.02, 0.90] (R1). When trusted,
+    trust_reasons is always empty.
+    """
+    ref_ok = _in_trust_band(ref.coverage_frac)
+    mesh_ok = _in_trust_band(mesh.coverage_frac)
+    if ref_ok and mesh_ok:
+        return True, []
+
+    reasons: list[str] = []
+    for ext in (ref, mesh):
+        for r in ext.trust_reasons:
+            if r in TRUST_REASON_CODES and r not in reasons:
+                reasons.append(r)
+    if not ref_ok and "ref_untrusted" not in reasons:
+        reasons.append("ref_untrusted")
+    if not mesh_ok and "mesh_untrusted" not in reasons:
+        reasons.append("mesh_untrusted")
+    if not reasons:
+        reasons = ["recovery_failed"]
+    return False, reasons
+
+
 # ---------------------------------------------------------------------------
 # Engine
 # ---------------------------------------------------------------------------
@@ -483,11 +825,15 @@ def run_silhouette_compare(
     view_role: str = "front",
     overlay: bool = True,
     force: bool = False,
+    require_trusted: bool = False,
 ) -> dict[str, Any]:
     """Compare front silhouettes: Package A ref vs mesh front view.
 
-    Returns CLI/MCP success payload with ok/paths/counts/score_iou/score_dice/messages.
+    Returns CLI/MCP success payload with ok/paths/counts/score_iou/score_dice/
+    silhouette_trusted/trust_reasons/messages.
     Raises :class:`ProportionError` on failure.
+    When ``require_trusted`` and result is untrusted, raises
+    ``ProportionError(code="silhouette_untrusted")``.
     """
     _require_pillow()
     _normalize_view_role(view_role)
@@ -583,10 +929,16 @@ def run_silhouette_compare(
         if rendered_mesh_view is not None:
             rendered_mesh_view.unlink(missing_ok=True)
 
-    ref_mask, ref_msgs = extract_silhouette_mask(ref_rgba, side="ref")
-    messages.extend(ref_msgs)
-    mesh_mask, mesh_msgs = extract_silhouette_mask(mesh_rgba, side="mesh_view")
-    messages.extend(mesh_msgs)
+    # Full cascade both sides (C6)
+    ref_ext = extract_silhouette_mask(ref_rgba, side="ref")
+    messages.extend(ref_ext.messages)
+    mesh_ext = extract_silhouette_mask(mesh_rgba, side="mesh_view")
+    messages.extend(mesh_ext.messages)
+
+    ref_mask = ref_ext.mask
+    mesh_mask = mesh_ext.mask
+
+    trusted, trust_reasons = _aggregate_trust(ref_ext, mesh_ext)
 
     # Multi-figure on ref (F5)
     large_count, _ = connected_large_blobs(ref_mask)
@@ -645,6 +997,12 @@ def run_silhouette_compare(
         ),
         messages=messages,
         overlay_path=overlay_written,
+        silhouette_trusted=trusted,
+        trust_reasons=trust_reasons,
+        mask_method_ref=ref_ext.method,
+        mask_method_mesh=mesh_ext.method,
+        ref_coverage_frac=ref_ext.coverage_frac,
+        mesh_coverage_frac=mesh_ext.coverage_frac,
     )
 
     payload_pkg = package.model_dump(mode="json")
@@ -654,7 +1012,7 @@ def run_silhouette_compare(
     if overlay_written is not None:
         paths.append(overlay_written)
 
-    return {
+    payload: dict[str, Any] = {
         "ok": True,
         "paths": paths,
         "counts": {
@@ -664,7 +1022,32 @@ def run_silhouette_compare(
         "score_iou": iou,
         "score_dice": dice,
         "messages": messages,
+        "silhouette_trusted": trusted,
+        "trust_reasons": trust_reasons,
+        "ref_coverage_frac": ref_ext.coverage_frac,
+        "mesh_coverage_frac": mesh_ext.coverage_frac,
+        "mask_method_ref": ref_ext.method,
+        "mask_method_mesh": mesh_ext.method,
     }
+
+    if require_trusted and not trusted:
+        raise ProportionError(
+            "silhouette compare result is untrusted "
+            f"(reasons={','.join(trust_reasons) or 'unknown'})",
+            code="silhouette_untrusted",
+            details={
+                "trust_reasons": trust_reasons,
+                "score_iou": iou,
+                "score_dice": dice,
+                "ref_coverage_frac": ref_ext.coverage_frac,
+                "mesh_coverage_frac": mesh_ext.coverage_frac,
+                "mask_method_ref": ref_ext.method,
+                "mask_method_mesh": mesh_ext.method,
+                "paths": paths,
+            },
+        )
+
+    return payload
 
 
 __all__ = [
@@ -674,6 +1057,8 @@ __all__ = [
     "SILHOUETTE_JSON_BASENAME",
     "SILHOUETTE_OVERLAY_BASENAME",
     "SILHOUETTE_SCHEMA_VERSION",
+    "TRUST_REASON_CODES",
+    "MaskMethod",
     "SilhouetteAlignment",
     "SilhouetteComparePackage",
     "SilhouetteCounts",
