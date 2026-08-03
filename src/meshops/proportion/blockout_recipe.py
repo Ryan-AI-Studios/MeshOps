@@ -974,12 +974,23 @@ def _build_soft_ovals(
     glute_parts_built = False
 
     if glute_mode == "two_spheres":
-        # Equal-axis ellipsoids RECIPE_glute_sphere_l/r; centers y > 0 (back)
-        r = glute_r_override
-        if r is None and h is not None:
+        # Equal-axis ellipsoids RECIPE_glute_sphere_l/r; centers y > 0 (back).
+        # Measured hip_hw / CS radii win over template glute_r (binding scale rule).
+        r: float | None = None
+        if m.hip_hw is not None and m.hip_hw > 0:
+            r = float(m.hip_hw) * 0.55
+            if glute_r_override is not None:
+                messages.append(
+                    "glute two_spheres: measured hip_hw preferred over template glute_r"
+                )
+        elif glute_cs is not None and h is not None:
+            r = float(glute_cs.rx_frac) * h * 0.3
+            if glute_r_override is not None:
+                messages.append("glute two_spheres: measured CS preferred over template glute_r")
+        elif glute_r_override is not None:
+            r = float(glute_r_override)
+        elif h is not None:
             r = 0.0718 * h  # female seed scale; not inventing absolute meters without H
-        if r is None and m.hip_hw is not None:
-            r = m.hip_hw * 0.55
         if r is not None and (m.hip_z is not None or glute_z_override is not None or h is not None):
             z_m = (
                 float(glute_z_override)
@@ -1034,11 +1045,12 @@ def _build_soft_ovals(
                 if glute_z_override is not None
                 else float(glute_cs.z_frac) * h
             )
+            # Prefer measured CS radii; do not replace with template glute_r.
             rx = float(glute_cs.rx_frac) * h * 0.3
             ry = float(glute_cs.ry_frac) * h * 0.45
             rz = max(0.02, (m.head_unit_m or 0.2) * 0.15)
             if glute_r_override is not None:
-                rx = ry = rz = float(glute_r_override)
+                messages.append("glute oval: measured CS radii preferred over template glute_r")
             offset = (m.hip_hw or 0.12) * 0.45
             glute_y = (
                 abs(float(glute_y_override)) if glute_y_override is not None else abs(ry) * 0.4
@@ -1099,7 +1111,40 @@ def _build_soft_ovals(
                 glute_parts_built = True
 
     if not glute_parts_built and glute_mode == "oval":
-        messages.append("glute softs skipped: no CS/depth/hip_hw")
+        # Template prior only when no measured CS/depth/hip path.
+        if glute_r_override is not None and h is not None:
+            r = float(glute_r_override)
+            z_m = (
+                float(glute_z_override)
+                if glute_z_override is not None
+                else (m.hip_z if m.hip_z is not None else 0.5 * h)
+            )
+            offset = (m.hip_hw or r * 1.6) * 0.45
+            glute_y = abs(float(glute_y_override)) if glute_y_override is not None else abs(r) * 0.4
+            for side, sign in (("l", -1.0), ("r", 1.0)):
+                center = [sign * offset, glute_y, z_m]
+                name = f"RECIPE_glute_soft_{side}"
+                if _midline_blocked(center, "glute_soft", crotch_z):
+                    messages.append(f"midline below crotch skipped: {name}")
+                    continue
+                parts.append(
+                    RecipePart(
+                        name=name,
+                        role="glute_soft",
+                        kind="ellipsoid",
+                        center=center,
+                        rx_m=r,
+                        ry_m=r,
+                        rz_m=r,
+                        placement="full3d",
+                        label=name,
+                        notes="template glute_r prior (no measured CS/depth)",
+                    )
+                )
+            glute_parts_built = True
+            messages.append("glute oval: template glute_r prior (no measured CS/depth/hip)")
+        else:
+            messages.append("glute softs skipped: no CS/depth/hip_hw")
 
     # Iliac soft optional — needs H for z offset (no invent 1.7m)
     if m.hip_hw is not None and m.hip_z is not None and h is not None:

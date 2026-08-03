@@ -310,6 +310,7 @@ def _resolve_applied_constants(
     breast_y_m = float(breast.y_frac) * h
     breast_y_frac = float(breast.y_frac)
 
+    # Template prior for glute radius (frac * H); may be replaced by measured hip_hw.
     glute_r_m = float(glute.r_frac) * h
     glute_r_frac = float(glute.r_frac)
     if glute.y_m is not None:
@@ -345,23 +346,42 @@ def _resolve_applied_constants(
     else:
         scale_notes.append("intermammary_gap: no bust_hw — gap_m unresolved; gap_frac prior kept")
 
-    # Prefer measured hip for glute radius / cleft when available
-    hip = _resolve_diameter(report.diameters, "waist")  # fallback band
+    # Prefer measured hip half-width for glute radius / cleft (binding scale rule).
+    # hip_hw from landmarks wins; else hip/waist diameter; else template r_frac * H.
+    _GLUTE_R_FROM_HIP_FRAC = 0.55
+    hip = _resolve_diameter(report.diameters, "hip") or _resolve_diameter(report.diameters, "waist")
     hip_hw_lm: float | None = None
     lms = report.landmarks_xyz
     left = lms.get("hip_l")
     right = lms.get("hip_r")
     if left is not None and right is not None and left.x_m is not None and right.x_m is not None:
         hip_hw_lm = (abs(float(left.x_m)) + abs(float(right.x_m))) / 2.0
-    if hip_hw_lm is not None:
-        # Prefer measured half-width as scale check; keep template r unless far off
-        scale_notes.append(f"hip_hw measured={hip_hw_lm:.4f}m (report); glute_r prior kept")
+    if hip_hw_lm is not None and hip_hw_lm > 0:
+        glute_r_m = float(hip_hw_lm) * _GLUTE_R_FROM_HIP_FRAC
+        glute_r_frac = glute_r_m / h if h > 0 else glute_r_frac
+        scale_notes.append(
+            f"glute_r_m={glute_r_m:.4f} from measured hip_hw={hip_hw_lm:.4f}m "
+            f"* {_GLUTE_R_FROM_HIP_FRAC} (prefer measured over template r_frac)"
+        )
     elif hip is not None:
         hw = _half_width(hip)
-        if hw is not None:
-            scale_notes.append(f"hip_hw from waist diameter={hw:.4f}m; glute_r prior kept")
+        if hw is not None and hw > 0:
+            glute_r_m = float(hw) * _GLUTE_R_FROM_HIP_FRAC
+            glute_r_frac = glute_r_m / h if h > 0 else glute_r_frac
+            scale_notes.append(
+                f"glute_r_m={glute_r_m:.4f} from diameter hip/waist_hw={hw:.4f}m "
+                f"* {_GLUTE_R_FROM_HIP_FRAC} (prefer measured)"
+            )
+        else:
+            scale_notes.append(
+                f"glute_r_m={glute_r_m:.4f} from template r_frac*{h:.4f} (no usable hip measure)"
+            )
+    else:
+        scale_notes.append(
+            f"glute_r_m={glute_r_m:.4f} from template r_frac*{h:.4f} (no hip measure)"
+        )
 
-    # Depth bands: note prefer for glute y if band present
+    # Depth bands: prefer measured depth note for recipe soft bulk
     for band in report.depth_bands:
         if band.band_id in ("glute", "hip") and band.depth_m is not None:
             scale_notes.append(

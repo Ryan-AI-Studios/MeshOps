@@ -849,3 +849,51 @@ def test_recipe__breast_tilt_metadata_only() -> None:
     assert any(m == "breast_tilt_applied: false" for m in pkg.messages)
     # schema stays 1.0.0
     assert pkg.schema_version == "1.0.0"
+
+
+def test_recipe__template_does_not_override_measured_glute_cs() -> None:
+    """Measured CS glute radii win over template glute_r when template_applied present."""
+    from meshops.proportion.body_template import (
+        AppliedConstants,
+        TemplateAppliedPackage,
+    )
+
+    report = _report_with_soft_cs()
+    # Force a large template prior that would change radii if wrongly preferred
+    constants = AppliedConstants(
+        breast_mode="dual_tilted",
+        glute_mode_default="oval",
+        torso_mode_default="trap",
+        glute_r_m=0.5,  # deliberately huge prior
+        glute_y_m=0.05,
+        glute_z_m=None,
+        glute_cleft_frac=0.12,
+        intermammary_gap_frac=0.18,
+        breast_ry_scale=1.0,
+        breast_rz_scale=1.0,
+        breast_y_m=-0.1,
+        breast_tilt_x_deg=20.0,
+        torso_waist_taper=0.14,
+        neck_thickness_scale=0.72675,
+        head_depth_scale=1.2,
+        head_radius_scale=1.05,
+    )
+    applied = TemplateAppliedPackage(
+        template_id="female_adult_athletic",
+        sex="female",
+        archetype="adult_athletic",
+        source_report="mem",
+        height_m=1.72,
+        constants=constants,
+    )
+    pkg_no = build_blockout_recipe(report, limbs=False, glute="oval")
+    pkg_tpl = build_blockout_recipe(report, limbs=False, glute="oval", template_applied=applied)
+    glute_no = [p for p in pkg_no.parts if p.name.startswith("RECIPE_glute_soft_")]
+    glute_tpl = [p for p in pkg_tpl.parts if p.name.startswith("RECIPE_glute_soft_")]
+    assert glute_no and glute_tpl
+    # CS path radii must match (template must not force equal-axis 0.5)
+    for a, b in zip(glute_no, glute_tpl, strict=True):
+        assert a.rx_m == pytest.approx(b.rx_m)
+        assert a.ry_m == pytest.approx(b.ry_m)
+        assert b.rx_m != pytest.approx(0.5)
+    assert any("measured CS" in m for m in pkg_tpl.messages)

@@ -39,6 +39,7 @@ def _report(
     height_m: float | None = 1.72,
     head_unit_frac: float | None = 1.0 / 7.5,
     bust_hw: float = 0.16,
+    hip_x: float = 0.14,
 ) -> ProportionReport:
     return ProportionReport(
         schema_version="1.1.0",
@@ -49,8 +50,8 @@ def _report(
             "chin": _lm("chin", x_m=0.0, y_m=-0.02, z_m=1.50),
             "shoulder_l": _lm("shoulder_l", x_m=-0.20, y_m=0.0, z_m=1.38),
             "shoulder_r": _lm("shoulder_r", x_m=0.20, y_m=0.0, z_m=1.38),
-            "hip_l": _lm("hip_l", x_m=-0.14, y_m=0.0, z_m=0.95),
-            "hip_r": _lm("hip_r", x_m=0.14, y_m=0.0, z_m=0.95),
+            "hip_l": _lm("hip_l", x_m=-hip_x, y_m=0.0, z_m=0.95),
+            "hip_r": _lm("hip_r", x_m=hip_x, y_m=0.0, z_m=0.95),
         },
         diameters=[
             DiameterMeasure(
@@ -190,3 +191,19 @@ def test_female_seeds__neck_and_breast() -> None:
     assert doc.glute.y_frac > 0
     assert doc.breast_mode == "dual_tilted"
     assert doc.glute_mode_default == "two_spheres"
+
+
+def test_apply__glute_r_prefers_measured_hip_hw(tmp_path: Path) -> None:
+    """Binding scale rule: measured hip_hw wins over template r_frac * H."""
+    hip_x = 0.25  # hip_hw_lm = 0.25
+    report = _report(height_m=1.72, hip_x=hip_x)
+    report_path = _write_report(tmp_path, report)
+    out = tmp_path / "measured_glute"
+    payload = apply_body_template(report_path, "female_adult_athletic", out, force=True)
+    expected = 0.25 * 0.55
+    assert payload["constants"]["glute_r_m"] == pytest.approx(expected)
+    assert any("prefer measured" in n for n in payload["scale_notes"])
+    # Pure template prior would be r_frac * 1.72 ≈ 0.1235 — must not win when hip measured
+    doc = load_body_template("female_adult_athletic")
+    pure_prior = float(doc.glute.r_frac) * 1.72
+    assert abs(payload["constants"]["glute_r_m"] - pure_prior) > 1e-4
