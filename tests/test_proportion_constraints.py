@@ -27,6 +27,7 @@ from meshops.proportion.constraints import (
     OPTIMIZE_SLOW_SEED,
     OUTER_X_TOL_M,
     SOFT_GAP_FRAC,
+    _band_weighted_free_dof_score,
     classify_part_name,
     optimize_package,
     part_y,
@@ -223,6 +224,256 @@ def test_ankle_over_heel_pass() -> None:
     assert by_id["C_ankle_over_heel"].status == "pass"
 
 
+def test_ankle_plate_mid_heel_side_not_rear_third_fails() -> None:
+    """B4 pure rear-third: plate cy=0, ry=0.08 → rear≈[0.0267, 0.08]; y=0.02 fails."""
+    pkg = _pkg(
+        [
+            _part(
+                "RECIPE_foot_plate_l",
+                kind="ellipsoid",
+                center=[0.08, 0.0, 0.02],
+                rx_m=0.04,
+                ry_m=0.08,
+                rz_m=0.02,
+            ),
+            _part(
+                "RECIPE_ank_foot_l",
+                kind="ellipsoid",
+                center=[0.08, 0.02, 0.05],
+                rx_m=0.03,
+                ry_m=0.03,
+                rz_m=0.03,
+            ),
+        ]
+    )
+    report = validate_constraints(pkg)
+    by_id = {r.id: r for r in report.rules}
+    rule = by_id["C_ankle_over_heel"]
+    assert rule.status == "fail"
+    assert rule.metrics is not None
+    assert rule.metrics["rear_third_l"][0] == pytest.approx(0.08 / 3.0)
+    assert rule.metrics["rear_third_l"][1] == pytest.approx(0.08)
+
+
+def test_ankle_plate_in_rear_third_pass() -> None:
+    """B4 plate path: ankle y=0.05 is inside rear third of plate cy=0, ry=0.08."""
+    pkg = _pkg(
+        [
+            _part(
+                "RECIPE_foot_plate_l",
+                kind="ellipsoid",
+                center=[0.08, 0.0, 0.02],
+                rx_m=0.04,
+                ry_m=0.08,
+                rz_m=0.02,
+            ),
+            _part(
+                "RECIPE_ank_foot_l",
+                kind="ellipsoid",
+                center=[0.08, 0.05, 0.05],
+                rx_m=0.03,
+                ry_m=0.03,
+                rz_m=0.03,
+            ),
+        ]
+    )
+    report = validate_constraints(pkg)
+    by_id = {r.id: r for r in report.rules}
+    assert by_id["C_ankle_over_heel"].status == "pass"
+
+
+def test_foot_width_far_from_ankle_diam_fails() -> None:
+    pkg = _pkg(
+        [
+            _part(
+                "RECIPE_foot_plate_l",
+                kind="ellipsoid",
+                center=[0.08, 0.04, 0.02],
+                rx_m=0.08,  # width 0.16
+                ry_m=0.08,
+                rz_m=0.02,
+            ),
+            _part(
+                "RECIPE_ank_foot_l",
+                kind="ellipsoid",
+                center=[0.08, 0.04, 0.06],
+                rx_m=0.03,  # diam 0.06
+                ry_m=0.03,
+                rz_m=0.03,
+            ),
+        ]
+    )
+    report = validate_constraints(pkg)
+    by_id = {r.id: r for r in report.rules}
+    assert by_id["C_foot_width"].status == "fail"
+
+
+def test_thigh_outer_far_from_hip_bridge_fails() -> None:
+    pkg = _pkg(
+        [
+            _part(
+                "RECIPE_hip_bridge",
+                role="hip_bridge",
+                kind="ellipsoid",
+                center=[0.0, 0.0, 0.95],
+                rx_m=0.15,
+                ry_m=0.06,
+                rz_m=0.05,
+            ),
+            _part(
+                "RECIPE_limb_thigh_r",
+                kind="capsule",
+                center=None,
+                rx_m=None,
+                ry_m=None,
+                rz_m=None,
+                radius_m=0.05,
+                # outer tip = 0.35 + 0.05 = 0.40; hip outer = 0.15 → far
+                p0=[0.35, 0.0, 0.5],
+                p1=[0.35, 0.0, 0.9],
+            ),
+        ]
+    )
+    report = validate_constraints(pkg)
+    by_id = {r.id: r for r in report.rules}
+    assert by_id["C_thigh_outer"].status == "fail"
+
+
+def test_glute_outer_far_from_hip_bridge_fails() -> None:
+    pkg = _pkg(
+        [
+            _part(
+                "RECIPE_hip_bridge",
+                role="hip_bridge",
+                kind="ellipsoid",
+                center=[0.0, 0.0, 0.95],
+                rx_m=0.15,
+                ry_m=0.06,
+                rz_m=0.05,
+            ),
+            _part(
+                "RECIPE_glute_r",
+                role="glute_soft",
+                kind="ellipsoid",
+                center=[0.40, 0.08, 0.9],
+                rx_m=0.05,
+                ry_m=0.05,
+                rz_m=0.05,
+            ),
+        ]
+    )
+    report = validate_constraints(pkg)
+    by_id = {r.id: r for r in report.rules}
+    assert by_id["C_glute_outer"].status == "fail"
+
+
+def test_role_classified_unknown_critical_ankle_name_fails() -> None:
+    # Bare "ankle" is not a classifier hit, but is a critical foot-stack token.
+    pkg = _pkg(
+        [
+            _part(
+                "RECIPE_ankle_mystery_l",
+                kind="ellipsoid",
+                center=[0.08, 0.04, 0.06],
+                rx_m=0.03,
+                ry_m=0.03,
+                rz_m=0.03,
+            ),
+        ]
+    )
+    role, _side = classify_part_name("RECIPE_ankle_mystery_l")
+    assert role == "unknown"
+    report = validate_constraints(pkg)
+    by_id = {r.id: r for r in report.rules}
+    assert by_id["C_role_classified"].status == "fail"
+
+
+def test_glute_cleft_coincident_fails() -> None:
+    pkg = _pkg(
+        [
+            _part(
+                "RECIPE_glute_l",
+                role="glute_soft",
+                kind="ellipsoid",
+                center=[0.0, 0.08, 0.9],
+                rx_m=0.05,
+                ry_m=0.05,
+                rz_m=0.05,
+            ),
+            _part(
+                "RECIPE_glute_r",
+                role="glute_soft",
+                kind="ellipsoid",
+                center=[0.0, 0.08, 0.9],
+                rx_m=0.05,
+                ry_m=0.05,
+                rz_m=0.05,
+            ),
+        ]
+    )
+
+    class _C:
+        intermammary_gap_m = None
+        glute_cleft_m = 0.06
+
+    class _T:
+        constants = _C()
+
+    report = validate_constraints(pkg, template_applied=_T())
+    by_id = {r.id: r for r in report.rules}
+    assert by_id["C_glute_cleft"].status == "fail"
+
+
+def test_breast_gap_frac_times_bust_fallback_fails() -> None:
+    """P3: when gap_m missing, use intermammary_gap_frac * bust half-width."""
+    pkg = _pkg(
+        [
+            _part(
+                "RECIPE_breast_l",
+                role="breast_soft",
+                kind="ellipsoid",
+                center=[0.0, -0.05, 1.2],
+                rx_m=0.05,
+                ry_m=0.04,
+                rz_m=0.05,
+            ),
+            _part(
+                "RECIPE_breast_r",
+                role="breast_soft",
+                kind="ellipsoid",
+                center=[0.0, -0.05, 1.2],
+                rx_m=0.05,
+                ry_m=0.04,
+                rz_m=0.05,
+            ),
+        ]
+    )
+
+    class _C:
+        intermammary_gap_m = None
+        intermammary_gap_frac = 0.2
+        glute_cleft_m = None
+
+    class _T:
+        constants = _C()
+
+    class _D:
+        band_id = "bust"
+        half_width_m = 0.15
+        width_m = 0.30
+
+    class _R:
+        def __init__(self) -> None:
+            self.diameters = [_D()]
+
+    report = validate_constraints(pkg, report=_R(), template_applied=_T())
+    by_id = {r.id: r for r in report.rules}
+    assert by_id["C_breast_gap"].status == "fail"
+    # min_gap = 0.9 * 0.2 * 0.15 = 0.027
+    assert by_id["C_breast_gap"].metrics is not None
+    assert by_id["C_breast_gap"].metrics["template_gap_m"] == pytest.approx(0.03)
+
+
 def test_breast_gap_coincident_fails() -> None:
     # Dual breasts at same X with template gap prior → fail
     pkg = _pkg(
@@ -395,6 +646,14 @@ def test_freeze_feet_ankle_and_foot_y_unchanged(tmp_path: Path) -> None:
                 rz_m=0.02,
             ),
             _part(
+                "RECIPE_calf_b_l",
+                kind="ellipsoid",
+                center=[0.1, 0.04, 0.15],
+                rx_m=0.035,
+                ry_m=0.035,
+                rz_m=0.05,
+            ),
+            _part(
                 "RECIPE_limb_thigh_l",
                 kind="capsule",
                 center=None,
@@ -447,7 +706,10 @@ def test_freeze_feet_ankle_and_foot_y_unchanged(tmp_path: Path) -> None:
     )
     ankle_y0 = part_y(pkg.parts[1])
     foot_y0 = part_y(pkg.parts[0])
+    heel_y0 = part_y(pkg.parts[2])
+    calf_distal_y0 = part_y(pkg.parts[3])
     assert ankle_y0 is not None and foot_y0 is not None
+    assert heel_y0 is not None and calf_distal_y0 is not None
 
     optimized, result = optimize_package(pkg, mode="fast", freeze_feet=True)
     assert result.honesty == OPTIMIZE_HONESTY
@@ -458,6 +720,8 @@ def test_freeze_feet_ankle_and_foot_y_unchanged(tmp_path: Path) -> None:
     by_name = {p.name: p for p in optimized.parts}
     assert part_y(by_name["RECIPE_ank_foot_l"]) == pytest.approx(ankle_y0)
     assert part_y(by_name["RECIPE_foot_plate_l"]) == pytest.approx(foot_y0)
+    assert part_y(by_name["RECIPE_heel_l"]) == pytest.approx(heel_y0)
+    assert part_y(by_name["RECIPE_calf_b_l"]) == pytest.approx(calf_distal_y0)
 
     # Also via CLI entrypoint
     recipe_path = _write_recipe(tmp_path / "in" / "blockout_recipe.json", pkg)
@@ -477,6 +741,95 @@ def test_freeze_feet_ankle_and_foot_y_unchanged(tmp_path: Path) -> None:
     wnames = {p.name: p for p in written.parts}
     assert part_y(wnames["RECIPE_ank_foot_l"]) == pytest.approx(ankle_y0)
     assert part_y(wnames["RECIPE_foot_plate_l"]) == pytest.approx(foot_y0)
+    assert part_y(wnames["RECIPE_heel_l"]) == pytest.approx(heel_y0)
+    assert part_y(wnames["RECIPE_calf_b_l"]) == pytest.approx(calf_distal_y0)
+
+
+def test_band_weighted_free_dof_score_ranks_glute_y() -> None:
+    """Free-DOF band score differs without mesh when free soft Y differs."""
+
+    class _C:
+        glute_y_m = 0.08
+        intermammary_gap_m = None
+        glute_cleft_m = None
+
+    class _T:
+        constants = _C()
+
+    near = _pkg(
+        [
+            _part(
+                "RECIPE_glute_l",
+                role="glute_soft",
+                kind="ellipsoid",
+                center=[-0.08, 0.08, 0.9],
+                rx_m=0.05,
+                ry_m=0.05,
+                rz_m=0.05,
+            ),
+            _part(
+                "RECIPE_glute_r",
+                role="glute_soft",
+                kind="ellipsoid",
+                center=[0.08, 0.08, 0.9],
+                rx_m=0.05,
+                ry_m=0.05,
+                rz_m=0.05,
+            ),
+            _part(
+                "RECIPE_limb_thigh_l",
+                kind="capsule",
+                center=None,
+                rx_m=None,
+                ry_m=None,
+                rz_m=None,
+                radius_m=0.05,
+                p0=[0.1, 0.0, 0.5],
+                p1=[0.1, 0.0, 0.9],
+            ),
+        ]
+    )
+    far = _pkg(
+        [
+            _part(
+                "RECIPE_glute_l",
+                role="glute_soft",
+                kind="ellipsoid",
+                center=[-0.08, 0.20, 0.9],
+                rx_m=0.05,
+                ry_m=0.05,
+                rz_m=0.05,
+            ),
+            _part(
+                "RECIPE_glute_r",
+                role="glute_soft",
+                kind="ellipsoid",
+                center=[0.08, 0.20, 0.9],
+                rx_m=0.05,
+                ry_m=0.05,
+                rz_m=0.05,
+            ),
+            _part(
+                "RECIPE_limb_thigh_l",
+                kind="capsule",
+                center=None,
+                rx_m=None,
+                ry_m=None,
+                rz_m=None,
+                radius_m=0.05,
+                p0=[0.1, 0.0, 0.5],
+                p1=[0.1, 0.0, 0.9],
+            ),
+        ]
+    )
+    s_near = _band_weighted_free_dof_score(
+        near, freeze_feet=True, report=None, template_applied=_T()
+    )
+    s_far = _band_weighted_free_dof_score(far, freeze_feet=True, report=None, template_applied=_T())
+    assert s_near < s_far
+    assert s_near == pytest.approx(0.0)
+    # weight 1.5 * |0.20-0.08| * 2 glutes
+    assert s_far == pytest.approx(1.5 * 0.12 * 2)
 
 
 def test_slow_without_mesh_raises() -> None:
@@ -498,6 +851,48 @@ def test_slow_without_mesh_raises() -> None:
     with pytest.raises(ProportionError) as ei:
         optimize_package(pkg, mode="slow", freeze_feet=True, mesh=None)
     assert ei.value.code == "optimize_slow_needs_mesh"
+
+
+def test_slow_with_mesh_uses_band_weighted_free_dof_message(tmp_path: Path) -> None:
+    pkg = _pkg(
+        [
+            _part(
+                "RECIPE_limb_thigh_l",
+                kind="capsule",
+                center=None,
+                rx_m=None,
+                ry_m=None,
+                rz_m=None,
+                radius_m=0.05,
+                p0=[0.1, 0.0, 0.5],
+                p1=[0.1, 0.0, 0.9],
+            ),
+            _part(
+                "RECIPE_glute_l",
+                role="glute_soft",
+                kind="ellipsoid",
+                center=[-0.08, 0.20, 0.9],
+                rx_m=0.05,
+                ry_m=0.05,
+                rz_m=0.05,
+            ),
+        ]
+    )
+    dummy_mesh = tmp_path / "joined.stl"
+    dummy_mesh.write_bytes(b"solid empty\nendsolid empty\n")
+    dummy_report = tmp_path / "report.json"
+    dummy_report.write_text("{}", encoding="utf-8")
+    _optimized, result = optimize_package(
+        pkg,
+        mode="slow",
+        freeze_feet=True,
+        mesh=dummy_mesh,
+        report=None,  # avoid load_report fail; mesh contract still satisfied
+    )
+    joined = " ".join(result.messages)
+    assert "band_weighted_free_dof" in joined
+    assert "mesh static baseline not used for trial ranking" in joined
+    assert result.mode == "slow"
 
 
 def test_optimize_no_free_dofs_when_only_frozen() -> None:

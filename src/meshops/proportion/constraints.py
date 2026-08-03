@@ -425,6 +425,40 @@ def _template_gap_m(tpl: Any | None, field: str) -> float | None:
     return None if val is None else float(val)
 
 
+def _bust_half_width_m(report: Any | None) -> float | None:
+    """Bust half-width from report diameters (band_id=bust) when present."""
+    if report is None:
+        return None
+    diameters = getattr(report, "diameters", None) or []
+    for d in diameters:
+        if getattr(d, "band_id", None) != "bust":
+            continue
+        hw = getattr(d, "half_width_m", None)
+        if hw is not None:
+            return float(hw)
+        width = getattr(d, "width_m", None)
+        if width is not None:
+            return float(width) / 2.0
+    return None
+
+
+def _intermammary_gap_m(
+    template_applied: Any | None,
+    report: Any | None = None,
+) -> float | None:
+    """Resolved intermammary gap meters: gap_m, else frac * bust half-width."""
+    gap = _template_gap_m(template_applied, "intermammary_gap_m")
+    if gap is not None:
+        return gap
+    frac = _template_gap_m(template_applied, "intermammary_gap_frac")
+    if frac is None:
+        return None
+    bust_hw = _bust_half_width_m(report)
+    if bust_hw is None or bust_hw <= 0.0:
+        return None
+    return float(frac) * float(bust_hw)
+
+
 # ---------------------------------------------------------------------------
 # Hard rules
 # ---------------------------------------------------------------------------
@@ -485,13 +519,14 @@ def _check_ankle_over_heel(
             continue
 
         if plate_y is not None and extent is not None and extent > 0:
-            # Heel direction +Y: rear third = [cy + (1/3)*ext, cy + ext]
+            # B4(2): heel direction +Y — rear third only = [cy+(1/3)*ext, cy+ext]
             rear0 = plate_y + (1.0 / 3.0) * extent
             rear1 = plate_y + extent
             front0 = plate_y - extent
             front1 = plate_y - (1.0 / 3.0) * extent
             metrics[f"foot_plate_y_{side}"] = plate_y
             metrics[f"extent_y_{side}"] = extent
+            metrics[f"rear_third_{side}"] = [rear0, rear1]
             in_rear = rear0 <= ay <= rear1 or abs(ay - rear1) <= 1e-9
             # Fail if closer to toe-side front third than rear when both ends known
             mid_rear = 0.5 * (rear0 + rear1)
@@ -503,20 +538,12 @@ def _check_ankle_over_heel(
                     f"ankle_{side}: closer to toe front-third than heel rear "
                     f"(y={ay:.4f}, plate_y={plate_y:.4f})"
                 )
-            elif in_rear or ay >= plate_y + (1.0 / 3.0) * extent * 0.5:
-                # Pass if in rear third; also soft-pass if clearly heel-side of center
-                if ay >= plate_y:  # heel half (+Y)
-                    statuses.append("pass")
-                    messages.append(f"ankle_{side}: on heel-side of foot plate y={ay:.4f}")
-                elif in_rear:
-                    statuses.append("pass")
-                    messages.append(f"ankle_{side}: in rear third of foot plate y={ay:.4f}")
-                else:
-                    statuses.append("fail")
-                    messages.append(
-                        f"ankle_{side}: not in rear third (y={ay:.4f}, "
-                        f"rear=[{rear0:.4f},{rear1:.4f}])"
-                    )
+            elif in_rear:
+                statuses.append("pass")
+                messages.append(
+                    f"ankle_{side}: in rear third of foot plate "
+                    f"(y={ay:.4f}, rear=[{rear0:.4f},{rear1:.4f}])"
+                )
             else:
                 statuses.append("fail")
                 messages.append(
@@ -932,7 +959,14 @@ def _check_no_dup_limb(
 def _check_role_classified(
     indexed: list[tuple[RecipePart, ConstraintRole, Side]],
 ) -> ConstraintRuleResult:
-    """Critical foot-stack name patterns must not remain unknown."""
+    """Critical foot-stack name patterns must not remain unknown.
+
+    Fail when a part is still ``unknown`` but its name contains a critical
+    foot-stack token (``ank_foot`` / ``heel`` / ``foot`` / ``ankle``). Note
+    that normal names like ``RECIPE_foot_plate_*`` classify as ``foot_plate``
+    before this rule runs; unknowns that still contain those tokens are
+    fail-closed (e.g. garbled names that never matched the ordered classifier).
+    """
     critical_substrings = ("ank_foot", "heel", "foot", "ankle")
     bad: list[str] = []
     for part, role, _side in indexed:
@@ -948,7 +982,6 @@ def _check_role_classified(
             f"critical foot-stack names left unknown: {bad}",
             {"unknown_critical": bad},
         )
-    # Also fail if any unknown that looks like a RECIPE_ limb/foot
     return _rule(
         "C_role_classified",
         "pass",
@@ -966,7 +999,7 @@ def validate_constraints(
     """Run hard constraint rules; ok=false if any rule fails (skips OK)."""
     indexed = _index_parts(package)
     classified = [{"name": p.name, "role": r, "side": s} for p, r, s in indexed]
-    breast_gap = _template_gap_m(template_applied, "intermammary_gap_m")
+    breast_gap = _intermammary_gap_m(template_applied, report)
     glute_gap = _template_gap_m(template_applied, "glute_cleft_m")
 
     rules = [
@@ -1089,13 +1122,18 @@ def _role_target_y(
     return None
 
 
-def _geometric_score(
+def _band_weighted_free_dof_score(
     package: BlockoutRecipePackage,
     *,
     freeze_feet: bool,
     report: Any | None,
     template_applied: Any | None,
 ) -> float:
+    """C4 band-weighted residual of free recipe part Y/X vs role targets.
+
+    Primary trial ranking driver for both fast and slow optimize. Mesh depth
+    deltas are not used here — they are static across recipe-center trials.
+    """
     indexed = _index_parts(package)
     total = 0.0
     for part, role, side in indexed:
@@ -1109,12 +1147,15 @@ def _geometric_score(
         if target is None:
             continue
         total += w * abs(y - target)
-    # Soft gap penalties (duals)
+    # Soft gap penalties (duals) — breast uses frac*bust fallback when needed
     for role, field, weight in (
         ("breast", "intermammary_gap_m", BAND_W_BREAST),
         ("glute", "glute_cleft_m", BAND_W_GLUTE),
     ):
-        gap_m = _template_gap_m(template_applied, field)
+        if role == "breast":
+            gap_m = _intermammary_gap_m(template_applied, report)
+        else:
+            gap_m = _template_gap_m(template_applied, field)
         left = _find(indexed, role, "l")  # type: ignore[arg-type]
         right = _find(indexed, role, "r")  # type: ignore[arg-type]
         if gap_m is None or not left or not right:
@@ -1129,6 +1170,22 @@ def _geometric_score(
     return total
 
 
+def _geometric_score(
+    package: BlockoutRecipePackage,
+    *,
+    freeze_feet: bool,
+    report: Any | None,
+    template_applied: Any | None,
+) -> float:
+    """Alias of band-weighted free-DOF score (fast/slow share the same ranking)."""
+    return _band_weighted_free_dof_score(
+        package,
+        freeze_feet=freeze_feet,
+        report=report,
+        template_applied=template_applied,
+    )
+
+
 def _depth_samples_score(
     report_path: Path | str,
     mesh_path: Path | str,
@@ -1136,7 +1193,12 @@ def _depth_samples_score(
     freeze_feet: bool,
     force: bool = True,
 ) -> float:
-    """Band-weighted score from in-process depth-samples mesh deltas (C3/C4)."""
+    """One-shot mesh-vs-report depth residual (baseline only — not trial ranking).
+
+    Recipe optimize mutates part centers only and does not re-bake mesh, so this
+    value is constant across trials. Prefer ``_band_weighted_free_dof_score`` for
+    keep/reject ranking.
+    """
     from meshops.proportion.analyze import load_report
     from meshops.proportion.depth_samples import (
         compute_mesh_deltas,
@@ -1280,28 +1342,16 @@ def optimize_package(
     if rep is None and report is not None:
         rep = _optional_report(report)
 
-    score_fn_geo = lambda pkg: _geometric_score(  # noqa: E731
-        pkg,
-        freeze_feet=freeze_feet,
-        report=rep,
-        template_applied=template_applied,
-    )
-
-    use_depth = mode == "slow" and mesh is not None and report is not None
-
     def score_fn(pkg: BlockoutRecipePackage) -> float:
-        if use_depth:
-            # Depth score is mesh-vs-report; geometric residual added lightly
-            # so free Y targets still matter between trials (mesh static).
-            try:
-                return _depth_samples_score(
-                    report,  # type: ignore[arg-type]
-                    mesh,  # type: ignore[arg-type]
-                    freeze_feet=freeze_feet,
-                ) + 0.25 * score_fn_geo(pkg)
-            except ProportionError:
-                return score_fn_geo(pkg)
-        return score_fn_geo(pkg)
+        # Trial ranking is always band-weighted free-DOF residual (C4 weights).
+        # Mesh depth deltas are static across recipe-center moves — not used for
+        # keep/reject (optionally logged once as baseline below).
+        return _band_weighted_free_dof_score(
+            pkg,
+            freeze_feet=freeze_feet,
+            report=rep,
+            template_applied=template_applied,
+        )
 
     score_before = float(score_fn(work))
     seed = OPTIMIZE_FAST_SEED if mode == "fast" else OPTIMIZE_SLOW_SEED
@@ -1315,9 +1365,24 @@ def optimize_package(
         f"freeze_feet={freeze_feet}",
         f"free_parts={len(free)}",
         f"seed={seed}",
+        "score=band_weighted_free_dof",
     ]
-    if mode == "slow" and not use_depth:
-        messages.append("slow without report — geometric score only (depth-samples skipped)")
+    if mode == "slow":
+        # Product contract: mesh required (already enforced). Ranking is free-DOF;
+        # optional one-shot mesh baseline is informational only.
+        messages.append(
+            "score=band_weighted_free_dof (mesh static baseline not used for trial ranking)"
+        )
+        if report is not None and mesh is not None:
+            try:
+                baseline = _depth_samples_score(
+                    report,
+                    mesh,
+                    freeze_feet=freeze_feet,
+                )
+                messages.append(f"mesh_depth_baseline={baseline:.6f} (info only)")
+            except Exception as exc:
+                messages.append(f"mesh_depth_baseline_skipped: {exc}")
 
     # Initial projection + mild target pull
     for part, role, side in free:
