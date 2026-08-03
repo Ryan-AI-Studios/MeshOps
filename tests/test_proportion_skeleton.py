@@ -356,3 +356,82 @@ def test_skeleton__no_parent_bone_in_schema() -> None:
     dumped = pkg.model_dump(mode="json")
     for b in dumped["bones"]:
         assert "parent_bone" not in b
+
+
+def test_skeleton__template_applied_sets_template_id(tmp_path: Path) -> None:
+    """B3: --template-applied / run_skeleton_build sets template_id from package; else null."""
+    from meshops.proportion.body_template import (
+        TEMPLATE_HONESTY,
+        AppliedConstants,
+        TemplateAppliedPackage,
+    )
+
+    report = _report(_full_landmarks())
+    report_path = _write_report(tmp_path, report)
+
+    # Without template_applied → null on package and payload.
+    out_none = tmp_path / "skel_no_tpl"
+    payload_none = run_skeleton_build(report_path, out_none, format="json", force=True)
+    assert payload_none["template_id"] is None
+    pkg_none = BlockoutSkeleton.model_validate(
+        json.loads((out_none / JSON_BASENAME).read_text(encoding="utf-8"))
+    )
+    assert pkg_none.template_id is None
+
+    # Minimal template_applied.json accepted by load_template_applied.
+    constants = AppliedConstants(
+        breast_mode="dual_tilted",
+        glute_mode_default="oval",
+        torso_mode_default="trap",
+    )
+    applied = TemplateAppliedPackage(
+        template_id="female_adult_athletic",
+        sex="female",
+        archetype="adult_athletic",
+        source_report=str(report_path),
+        height_m=1.72,
+        constants=constants,
+        honesty=TEMPLATE_HONESTY,
+    )
+    tpl_path = tmp_path / "template_applied.json"
+    tpl_path.write_text(
+        json.dumps(applied.model_dump(mode="json"), indent=2),
+        encoding="utf-8",
+    )
+
+    out_tpl = tmp_path / "skel_with_tpl"
+    payload_tpl = run_skeleton_build(
+        report_path,
+        out_tpl,
+        format="json",
+        force=True,
+        template_applied=tpl_path,
+    )
+    assert payload_tpl["template_id"] == "female_adult_athletic"
+    pkg_tpl = BlockoutSkeleton.model_validate(
+        json.loads((out_tpl / JSON_BASENAME).read_text(encoding="utf-8"))
+    )
+    assert pkg_tpl.template_id == "female_adult_athletic"
+
+
+def test_skeleton__measured_joint_y_m_as_is_no_sign_flip() -> None:
+    """B1: measured joint y_m equals landmark y_m as-is (no sign flip / axis remap).
+
+    Landmark uses y_m != 0 and y_m != -x_m so naive flip-to--x or sign-flip would fail.
+    """
+    y_as_is = -0.07
+    x_m = -0.28  # y_as_is != -x_m (0.28) and y_as_is != 0
+    assert y_as_is != 0.0
+    assert y_as_is != -x_m
+    assert y_as_is != x_m
+
+    lms = _full_landmarks()
+    lms["elbow_l"] = _lm("elbow_l", x_m=x_m, y_m=y_as_is, z_m=1.10)
+    pkg = build_blockout_skeleton(_report(lms))
+    elbow = _by_id(pkg)["elbow_l"]
+    assert elbow.source == "measured"
+    assert elbow.y_m == pytest.approx(y_as_is)
+    assert elbow.x_m == pytest.approx(x_m)
+    # Explicit anti-flip checks (would pass if someone remapped Y).
+    assert elbow.y_m != pytest.approx(-y_as_is)
+    assert elbow.y_m != pytest.approx(-x_m)
