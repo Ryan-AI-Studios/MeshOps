@@ -1073,6 +1073,11 @@ def _role_weight(role: ConstraintRole, freeze_feet: bool) -> float:
     return 0.2
 
 
+def _side_or_none(side: Side) -> Side | None:
+    """Pass side into ``_find``; ``none`` means any-side lookup."""
+    return None if side == "none" else side
+
+
 def _role_target_y(
     role: ConstraintRole,
     side: Side,
@@ -1080,12 +1085,17 @@ def _role_target_y(
     report: Any | None,
     template_applied: Any | None,
 ) -> float | None:
-    """Mild role Y targets for fast optimize (authoring pull, not IK)."""
+    """Mild role Y targets for fast optimize (authoring pull, not IK).
+
+    Unanchored roles (hip_bridge, pelvis, arms, …) intentionally return None so
+    they stay out of the free set and cannot score-neutral-walk (P1 / 0023).
+    """
+    side_q = _side_or_none(side)
     if role in ("ankle_bridge", "heel"):
-        heels = _find(indexed, "heel", side if side != "none" else None)
+        heels = _find(indexed, "heel", side_q)
         if heels:
             return part_y(heels[0])
-        plates = _find(indexed, "foot_plate", side if side != "none" else None)
+        plates = _find(indexed, "foot_plate", side_q)
         if plates:
             py = part_y(plates[0])
             ext = _depth_extent_y(plates[0])
@@ -1094,14 +1104,44 @@ def _role_target_y(
             return py
         return None
     if role == "calf_distal":
-        ankles = _find(indexed, "ankle_bridge", side if side != "none" else None)
+        ankles = _find(indexed, "ankle_bridge", side_q)
         if ankles:
             return part_y(ankles[0])
         return None
     if role == "calf_proximal":
-        thighs = _find(indexed, "thigh", side if side != "none" else None)
+        thighs = _find(indexed, "thigh", side_q)
         if thighs:
             return part_y(thighs[0])
+        return None
+    if role == "thigh":
+        # Mid Y of hip_bridge (or pelvis) and ankle_bridge (or foot_plate).
+        upper_y: float | None = None
+        hips = _find(indexed, "hip_bridge")
+        if hips:
+            upper_y = part_y(hips[0])
+        if upper_y is None:
+            pelvis = _find(indexed, "pelvis")
+            if pelvis:
+                upper_y = part_y(pelvis[0])
+        lower_y: float | None = None
+        ankles = _find(indexed, "ankle_bridge", side_q)
+        if ankles:
+            lower_y = part_y(ankles[0])
+        if lower_y is None:
+            plates = _find(indexed, "foot_plate", side_q)
+            if plates:
+                lower_y = part_y(plates[0])
+        if upper_y is not None and lower_y is not None:
+            return 0.5 * (upper_y + lower_y)
+        return None
+    if role == "calf":
+        # Whole calf: mid Y of thigh and ankle_bridge on same side.
+        thighs = _find(indexed, "thigh", side_q)
+        ankles = _find(indexed, "ankle_bridge", side_q)
+        ty = part_y(thighs[0]) if thighs else None
+        ay = part_y(ankles[0]) if ankles else None
+        if ty is not None and ay is not None:
+            return 0.5 * (ty + ay)
         return None
     if role == "breast":
         y = _template_gap_m(template_applied, "breast_y_m")  # reuse helper
@@ -1241,18 +1281,51 @@ def _depth_samples_score(
     return total
 
 
+def _has_dual_sides(
+    indexed: list[tuple[RecipePart, ConstraintRole, Side]],
+    role: ConstraintRole,
+) -> bool:
+    return bool(_find(indexed, role, "l")) and bool(_find(indexed, role, "r"))
+
+
 def _free_parts(
-    package: BlockoutRecipePackage, *, freeze_feet: bool
+    package: BlockoutRecipePackage,
+    *,
+    freeze_feet: bool,
+    report: Any | None = None,
+    template_applied: Any | None = None,
 ) -> list[tuple[RecipePart, ConstraintRole, Side]]:
+    """Parts allowed in random Y trials.
+
+    Only include roles that can change score or soft-gap residual:
+    - ``_role_target_y`` is not None, or
+    - breast/glute with dual L/R present (soft-gap residual path).
+
+    Unscored roles (hip_bridge, pelvis, arms, thigh without anchors, …) are
+    excluded so score-neutral random walks cannot drift them (P1 / 0023).
+    Outer-X projection still runs on thigh/glute independently of free set.
+    """
     free: list[tuple[RecipePart, ConstraintRole, Side]] = []
-    for part, role, side in _index_parts(package):
+    indexed = _index_parts(package)
+    breast_dual = _has_dual_sides(indexed, "breast")
+    glute_dual = _has_dual_sides(indexed, "glute")
+    for part, role, side in indexed:
         if role == "unknown":
             continue
         if _is_frozen(role, freeze_feet):
             continue
         if part_y(part) is None and part_x(part) is None:
             continue
-        free.append((part, role, side))
+        target = _role_target_y(role, side, indexed, report, template_applied)
+        if target is not None:
+            free.append((part, role, side))
+            continue
+        if role == "breast" and breast_dual:
+            free.append((part, role, side))
+            continue
+        if role == "glute" and glute_dual:
+            free.append((part, role, side))
+            continue
     return free
 
 
@@ -1329,18 +1402,23 @@ def optimize_package(
             code="optimize_slow_needs_mesh",
         )
 
-    work = package.model_copy(deep=True)
-    free = _free_parts(work, freeze_feet=freeze_feet)
-    if not free:
-        raise ProportionError(
-            "no free DOFs to optimize (all movable parts frozen or missing)",
-            code="optimize_no_free_dofs",
-            details={"freeze_feet": freeze_feet},
-        )
-
     rep = report_obj
     if rep is None and report is not None:
         rep = _optional_report(report)
+
+    work = package.model_copy(deep=True)
+    free = _free_parts(
+        work,
+        freeze_feet=freeze_feet,
+        report=rep,
+        template_applied=template_applied,
+    )
+    if not free:
+        raise ProportionError(
+            "no free DOFs to optimize (all movable parts frozen, missing, or unscored)",
+            code="optimize_no_free_dofs",
+            details={"freeze_feet": freeze_feet},
+        )
 
     def score_fn(pkg: BlockoutRecipePackage) -> float:
         # Trial ranking is always band-weighted free-DOF residual (C4 weights).
@@ -1400,7 +1478,12 @@ def optimize_package(
 
     for _ in range(n_trials):
         trial = best.model_copy(deep=True)
-        trial_free = _free_parts(trial, freeze_feet=freeze_feet)
+        trial_free = _free_parts(
+            trial,
+            freeze_feet=freeze_feet,
+            report=rep,
+            template_applied=template_applied,
+        )
         if not trial_free:
             break
         part, role, side = trial_free[rng.randrange(len(trial_free))]
@@ -1432,7 +1515,8 @@ def optimize_package(
             if violated:
                 continue
         s = float(score_fn(trial))
-        if s <= best_score + 1e-12:
+        # Strict improvement only — refuse score-neutral random walks (P1).
+        if s < best_score - 1e-12:
             best = trial
             best_score = s
             n_kept += 1

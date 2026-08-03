@@ -854,6 +854,13 @@ def test_slow_without_mesh_raises() -> None:
 
 
 def test_slow_with_mesh_uses_band_weighted_free_dof_message(tmp_path: Path) -> None:
+    # Dual glutes + Y target so free set is non-empty after unscored-role filter.
+    class _C:
+        glute_y_m = 0.08
+
+    class _T:
+        constants = _C()
+
     pkg = _pkg(
         [
             _part(
@@ -876,18 +883,26 @@ def test_slow_with_mesh_uses_band_weighted_free_dof_message(tmp_path: Path) -> N
                 ry_m=0.05,
                 rz_m=0.05,
             ),
+            _part(
+                "RECIPE_glute_r",
+                role="glute_soft",
+                kind="ellipsoid",
+                center=[0.08, 0.20, 0.9],
+                rx_m=0.05,
+                ry_m=0.05,
+                rz_m=0.05,
+            ),
         ]
     )
     dummy_mesh = tmp_path / "joined.stl"
     dummy_mesh.write_bytes(b"solid empty\nendsolid empty\n")
-    dummy_report = tmp_path / "report.json"
-    dummy_report.write_text("{}", encoding="utf-8")
     _optimized, result = optimize_package(
         pkg,
         mode="slow",
         freeze_feet=True,
         mesh=dummy_mesh,
         report=None,  # avoid load_report fail; mesh contract still satisfied
+        template_applied=_T(),
     )
     joined = " ".join(result.messages)
     assert "band_weighted_free_dof" in joined
@@ -919,6 +934,196 @@ def test_optimize_no_free_dofs_when_only_frozen() -> None:
     with pytest.raises(ProportionError) as ei:
         optimize_package(pkg, mode="fast", freeze_feet=True)
     assert ei.value.code == "optimize_no_free_dofs"
+
+
+def test_optimize_thigh_without_ankle_anchor_no_free_dofs() -> None:
+    """P1: thigh + hip_bridge only (no ankle/foot) → no thigh Y target → refuse."""
+    pkg = _pkg(
+        [
+            _part(
+                "RECIPE_limb_thigh_l",
+                kind="capsule",
+                center=None,
+                rx_m=None,
+                ry_m=None,
+                rz_m=None,
+                radius_m=0.05,
+                p0=[0.1, 0.0, 0.5],
+                p1=[0.1, 0.0, 0.9],
+            ),
+            _part(
+                "RECIPE_hip_bridge",
+                role="hip_bridge",
+                kind="ellipsoid",
+                center=[0.0, 0.0, 0.95],
+                rx_m=0.15,
+                ry_m=0.06,
+                rz_m=0.05,
+            ),
+        ]
+    )
+    thigh_y0 = part_y(pkg.parts[0])
+    hip_y0 = part_y(pkg.parts[1])
+    assert thigh_y0 is not None and hip_y0 is not None
+    with pytest.raises(ProportionError) as ei:
+        optimize_package(pkg, mode="fast", freeze_feet=True)
+    assert ei.value.code == "optimize_no_free_dofs"
+    # Input package unchanged when refuse (work is a deep copy).
+    assert part_y(pkg.parts[0]) == pytest.approx(thigh_y0)
+    assert part_y(pkg.parts[1]) == pytest.approx(hip_y0)
+
+
+def test_optimize_thigh_with_anchors_moves_thigh_not_hip_bridge_y() -> None:
+    """P1: thigh mid target from hip+ankle; hip_bridge Y never free-walks."""
+    pkg = _pkg(
+        [
+            _part(
+                "RECIPE_limb_thigh_l",
+                kind="capsule",
+                center=None,
+                rx_m=None,
+                ry_m=None,
+                rz_m=None,
+                radius_m=0.05,
+                # Far from mid of hip_y=0 and ankle_y=0.04 → mid≈0.02
+                p0=[0.1, 0.15, 0.5],
+                p1=[0.1, 0.15, 0.9],
+            ),
+            _part(
+                "RECIPE_hip_bridge",
+                role="hip_bridge",
+                kind="ellipsoid",
+                center=[0.0, 0.0, 0.95],
+                rx_m=0.15,
+                ry_m=0.06,
+                rz_m=0.05,
+            ),
+            _part(
+                "RECIPE_ank_foot_l",
+                kind="ellipsoid",
+                center=[0.1, 0.04, 0.06],
+                rx_m=0.03,
+                ry_m=0.03,
+                rz_m=0.03,
+            ),
+        ]
+    )
+    thigh_y0 = part_y(pkg.parts[0])
+    hip_y0 = part_y(pkg.parts[1])
+    assert thigh_y0 is not None and hip_y0 is not None
+
+    optimized, result = optimize_package(pkg, mode="fast", freeze_feet=True)
+    by_name = {p.name: p for p in optimized.parts}
+    assert result.score_after <= result.score_before + 1e-12
+    # hip_bridge has no Y target and is excluded from free set — Y unchanged.
+    assert part_y(by_name["RECIPE_hip_bridge"]) == pytest.approx(hip_y0)
+    # Thigh may move toward mid target (initial pull and/or strict improves).
+    thigh_y1 = part_y(by_name["RECIPE_limb_thigh_l"])
+    assert thigh_y1 is not None
+    # Frozen ankle Y preserved.
+    assert part_y(by_name["RECIPE_ank_foot_l"]) == pytest.approx(0.04)
+
+
+def test_optimize_glute_duals_with_gap_template_still_runs() -> None:
+    """P1: dual glutes + gap/Y template remain free and optimizable."""
+
+    class _C:
+        glute_y_m = 0.08
+        glute_cleft_m = 0.04
+
+    class _T:
+        constants = _C()
+
+    pkg = _pkg(
+        [
+            _part(
+                "RECIPE_glute_l",
+                role="glute_soft",
+                kind="ellipsoid",
+                center=[-0.08, 0.20, 0.9],
+                rx_m=0.05,
+                ry_m=0.05,
+                rz_m=0.05,
+            ),
+            _part(
+                "RECIPE_glute_r",
+                role="glute_soft",
+                kind="ellipsoid",
+                center=[0.08, 0.20, 0.9],
+                rx_m=0.05,
+                ry_m=0.05,
+                rz_m=0.05,
+            ),
+        ]
+    )
+    optimized, result = optimize_package(
+        pkg,
+        mode="fast",
+        freeze_feet=True,
+        template_applied=_T(),
+    )
+    assert result.score_after <= result.score_before + 1e-12
+    # Initial pull toward glute_y_m=0.08 should move at least one glute off 0.20.
+    by_name = {p.name: p for p in optimized.parts}
+    yl = part_y(by_name["RECIPE_glute_l"])
+    yr = part_y(by_name["RECIPE_glute_r"])
+    assert yl is not None and yr is not None
+    assert yl < 0.20 or yr < 0.20 or result.score_after < result.score_before
+    assert result.n_trials is not None and result.n_trials > 0
+
+
+def test_optimize_unscored_only_leaves_y_identical_or_refuses() -> None:
+    """P1: unscored-only recipe must not score-neutral-walk Y (strict keep)."""
+    pkg = _pkg(
+        [
+            _part(
+                "RECIPE_hip_bridge",
+                role="hip_bridge",
+                kind="ellipsoid",
+                center=[0.0, 0.12, 0.95],
+                rx_m=0.15,
+                ry_m=0.06,
+                rz_m=0.05,
+            ),
+            _part(
+                "RECIPE_pelvis",
+                role="pelvis",
+                kind="ellipsoid",
+                center=[0.0, 0.05, 0.9],
+                rx_m=0.12,
+                ry_m=0.08,
+                rz_m=0.06,
+            ),
+            _part(
+                "RECIPE_limb_upper_arm_l",
+                kind="capsule",
+                center=None,
+                rx_m=None,
+                ry_m=None,
+                rz_m=None,
+                radius_m=0.03,
+                p0=[0.2, 0.1, 1.1],
+                p1=[0.25, 0.1, 0.8],
+            ),
+        ]
+    )
+    y0 = {p.name: part_y(p) for p in pkg.parts}
+    try:
+        optimized, result = optimize_package(pkg, mode="fast", freeze_feet=True)
+    except ProportionError as exc:
+        assert exc.code == "optimize_no_free_dofs"
+        # Prefer raise when free empty — input unchanged.
+        for p in pkg.parts:
+            assert part_y(p) == pytest.approx(y0[p.name])  # type: ignore[arg-type]
+        return
+    # Fallback contract: if optimize runs, every Y must match input (no walk).
+    by_name = {p.name: p for p in optimized.parts}
+    for name, y in y0.items():
+        assert y is not None
+        assert part_y(by_name[name]) == pytest.approx(y)
+    assert result.score_before == pytest.approx(0.0)
+    assert result.score_after == pytest.approx(0.0)
+    assert result.n_kept == 0
 
 
 def test_validate_entrypoint_writes_report(tmp_path: Path) -> None:
