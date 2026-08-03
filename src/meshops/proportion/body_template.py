@@ -2,6 +2,10 @@
 
 List and apply versioned authoring priors scaled by report stature.
 Not mesh or print success (Difficulty §12 / N6 / TEMPLATE_HONESTY).
+
+0024 soft note: when measured foot_len_*_m messages or cranial/foot depth_bands
+are present on a report, consumers may override template foot_len_scale / head
+depth priors — no auto-override in this module yet (document-only).
 """
 
 from __future__ import annotations

@@ -3,6 +3,10 @@
 Side document (landmarks_assist.hint.json) is authoring-only and is never
 auto-loaded by analyze. Use --merge-into for a canonical assist loadable by
 apply_assist. Not mesh or print success (Difficulty §12 / N6).
+
+0024: DEPTH_PAIRS includes cranial/foot; narrow head/foot rows may skip when
+body_count < 3 (B3). Consumers of foot depth_band must use depth_frac / y_mid,
+not raw y_front as "toe Y" (C4 auto-swap).
 """
 
 from __future__ import annotations
@@ -263,6 +267,8 @@ def extract_depth_hints(
     hints: dict[str, HintPoint] = {}
     pairs_ok = 0
 
+    # Iterates all DEPTH_PAIRS (chest/hip/breast/glute/thigh/calf/cranial/foot).
+    # cranial/foot rows may skip when body_count < 3 on that scanline (B3).
     for front_id, back_id, _mid in DEPTH_PAIRS:
         band = _band_from_front_id(front_id)
         z_frac = _z_frac_from_report(report_path, band, messages)

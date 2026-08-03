@@ -6,7 +6,12 @@ Axes (freeze):
   +Y toward camera when facing_direction == camera_left (invert for camera_right / right)
 
 0013: extended depth pairs + DepthBand list + optional CrossSection correlation.
+0024: cranial/foot depth pairs; torso_cx skips cranial/foot bands (B4).
 package_score depth gate remains chest/hip only (R8).
+
+Consumers of foot/cranial depth_bands must use depth_frac / y_mid, not raw
+y_front as "toe Y" — global auto-swap may invert y_front/y_back labels (C4).
+breast_lower* is assist vocabulary only until 0027 (no fuse pair here).
 """
 
 from __future__ import annotations
@@ -23,7 +28,7 @@ from meshops.proportion.models import (
     ViewLandmarks,
 )
 
-# Left-view front/back/mid depth pairs (0012 chest/hip + 0013 extras).
+# Left-view front/back/mid depth pairs (0012 chest/hip + 0013 extras + 0024 cranial/foot).
 DEPTH_PAIRS: tuple[tuple[str, str, str], ...] = (
     ("chest_front", "chest_back", "chest_mid"),
     ("hip_front", "hip_back", "hip_mid"),
@@ -31,7 +36,12 @@ DEPTH_PAIRS: tuple[tuple[str, str, str], ...] = (
     ("glute_front", "glute_back", "glute_mid"),
     ("thigh_front", "thigh_back", "thigh_mid"),
     ("calf_front", "calf_back", "calf_mid"),
+    ("cranial_front", "cranial_back", "cranial_mid"),
+    ("foot_front", "foot_back", "foot_mid"),
 )
+
+# Bands never used as torso center X fallback (B4 — head/foot are not torso).
+_TORSO_CX_SKIP_BANDS: frozenset[str] = frozenset({"cranial", "foot"})
 
 # package_score depth gate (R8) — never include glute/thigh/breast.
 _SCORE_DEPTH_BANDS: frozenset[str] = frozenset({"chest", "hip"})
@@ -112,6 +122,11 @@ def _mid_z_refs(mid_id: str) -> tuple[str, ...]:
         return ("greater_trochanter", "knee", "crotch_pubic")
     if mid_id == "calf_mid":
         return ("knee", "ankle", "sole")
+    # C3: empty → pair-mean Z fallback (do not prefer chin as first ref).
+    if mid_id == "cranial_mid":
+        return ()
+    if mid_id == "foot_mid":
+        return ("ankle", "sole", "heel")
     return ()
 
 
@@ -268,7 +283,25 @@ def fuse_xyz(
                         mid.x_m = x_ref * height_m
                 out[mid_id] = mid
 
+    # Soft foot length from front toe/heel Z when meters present (R4).
+    messages.extend(_foot_len_messages(out))
+
     return out, quality, messages
+
+
+def _foot_len_messages(xyz: dict[str, LandmarkXYZ]) -> list[str]:
+    """Emit foot_len_{l,r}_m when toe+heel both have z_m (R4; no schema bump)."""
+    msgs: list[str] = []
+    for side in ("l", "r"):
+        toe = xyz.get(f"toe_{side}")
+        heel = xyz.get(f"heel_{side}")
+        if toe is None or heel is None:
+            continue
+        if toe.z_m is None or heel.z_m is None:
+            continue
+        length_m = abs(float(toe.z_m) - float(heel.z_m))
+        msgs.append(f"foot_len_{side}_m~={length_m:.6f}")
+    return msgs
 
 
 def build_depth_bands(
@@ -368,7 +401,7 @@ def build_depth_bands(
     if non_torso_used:
         messages.append(
             "depth_bands: torso_cx reused for non-torso bands "
-            "(thigh/calf/glute) — approximation (R9)"
+            "(thigh/calf/glute/cranial/foot) — approximation (R9)"
         )
     if bands:
         messages.append(f"depth_bands: {len(bands)} band(s)")
@@ -450,6 +483,11 @@ def _midline_x(front: ViewLandmarks) -> float | None:
 
 
 def _torso_center_x(left: ViewLandmarks) -> float:
+    """Torso center X from left depth pairs (chest → hip → other torso only).
+
+    B4 load-bearing: never use cranial/foot pairs as torso center — head/foot
+    midpoints are not torso. Fall through to spine_hint or width/2 instead.
+    """
     lm = left.landmarks
     cf, cb = lm.get("chest_front"), lm.get("chest_back")
     if cf is not None and cb is not None:
@@ -457,8 +495,11 @@ def _torso_center_x(left: ViewLandmarks) -> float:
     hf, hb = lm.get("hip_front"), lm.get("hip_back")
     if hf is not None and hb is not None:
         return (hf.x_px + hb.x_px) / 2.0
-    # Fall back to other depth pairs if chest/hip missing
+    # Fall back to other torso depth pairs if chest/hip missing (skip head/foot).
     for front_id, back_id, _mid in DEPTH_PAIRS:
+        band_id = _band_id_from_pair(front_id)
+        if band_id in _TORSO_CX_SKIP_BANDS:
+            continue
         a, b = lm.get(front_id), lm.get(back_id)
         if a is not None and b is not None:
             return (a.x_px + b.x_px) / 2.0

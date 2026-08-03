@@ -33,6 +33,8 @@ _FRONT_LANDMARK_KEYS: tuple[str, ...] = (
     "heel",
     "heel_l",
     "heel_r",
+    "toe_l",
+    "toe_r",
     "midline",
     "midline_x",
     "bust_l",
@@ -59,6 +61,7 @@ _FRONT_LANDMARK_KEYS: tuple[str, ...] = (
     "calf_r",
 )
 
+# Left profile: depth pairs + optional heel/breast hang. No toe_l/r (B1 — front only).
 _LEFT_LANDMARK_KEYS: tuple[str, ...] = (
     "hair_crown",
     "cranial_vertex",
@@ -76,6 +79,17 @@ _LEFT_LANDMARK_KEYS: tuple[str, ...] = (
     "thigh_back",
     "calf_front",
     "calf_back",
+    "cranial_front",
+    "cranial_back",
+    "foot_front",
+    "foot_back",
+    "heel",
+    "heel_l",
+    "heel_r",
+    # Prep-only until 0027 — no fuse pair / diameter / recipe consumer (C1).
+    "breast_lower",
+    "breast_lower_l",
+    "breast_lower_r",
     "spine_hint",
 )
 

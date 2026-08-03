@@ -2,6 +2,10 @@
 
 Build BlockoutRecipePackage from ProportionReport; emit JSON + Blender 5.2 bpy script.
 Authoring layout only — not mesh or print success (Difficulty §12 / N6).
+
+0024 soft note: measured cranial/foot depth_bands and foot_len_*_m messages may
+override template head/foot scales when present — not wired in v1 (document-only).
+neck diameter already preferred when available. breast_lower* is prep-only until 0027.
 """
 
 from __future__ import annotations

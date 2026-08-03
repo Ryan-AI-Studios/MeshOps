@@ -2,6 +2,10 @@
 
 Never claim mesh reconstruction, printability, or artistic success from
 pixel proportion measurement alone.
+
+0024 consumer notes (measurement only):
+- foot/cranial depth_bands: use depth_frac / y_mid, not raw y_front as toe Y (C4)
+- breast_lower* assist ids are prep-only until 0027 (no fuse pair / diameter)
 """
 
 from __future__ import annotations

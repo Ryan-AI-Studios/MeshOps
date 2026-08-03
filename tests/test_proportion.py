@@ -16,11 +16,19 @@ from typer.testing import CliRunner
 
 from meshops.cli import app
 from meshops.proportion.analyze import analyze_proportion, load_report, report_to_markdown
-from meshops.proportion.assist import load_assist_json, point_to_landmark2d
+from meshops.proportion.assist import (
+    KNOWN_LANDMARK_IDS,
+    load_assist_json,
+    point_to_landmark2d,
+)
 from meshops.proportion.checks import diameter_info_checks
 from meshops.proportion.diameters import compute_diameters, ortho_width
 from meshops.proportion.errors import ProportionError
-from meshops.proportion.fuse import compute_package_score, head_unit_frac_from_front
+from meshops.proportion.fuse import (
+    _torso_center_x,
+    compute_package_score,
+    head_unit_frac_from_front,
+)
 from meshops.proportion.honesty import PROPORTION_HONESTY
 from meshops.proportion.load_views import load_views, png_size_from_bytes
 from meshops.proportion.models import (
@@ -919,3 +927,215 @@ def test_missing_stature_diameter_emits_diagnostic() -> None:
     assert diameters == []
     assert any("stature" in m.lower() or "figure height" in m.lower() for m in messages)
     assert any("waist" in m for m in messages)
+
+
+# ---------------------------------------------------------------------------
+# Track 0024 — foot / head / neck assist completeness
+# ---------------------------------------------------------------------------
+
+
+def test_0024_known_landmark_ids() -> None:
+    for lid in (
+        "toe_l",
+        "toe_r",
+        "foot_front",
+        "foot_back",
+        "cranial_front",
+        "cranial_back",
+        "breast_lower",
+        "breast_lower_l",
+        "breast_lower_r",
+        "heel",
+        "heel_l",
+        "heel_r",
+    ):
+        assert lid in KNOWN_LANDMARK_IDS
+
+
+def test_0024_template_blanks_front_toes_left_no_toes() -> None:
+    """B1: toes on front only; left has foot/cranial depth pair blanks."""
+    blank = blank_assist_document()
+    front_lm = blank["views"]["front"]["landmarks"]
+    left_lm = blank["views"]["left"]["landmarks"]
+    assert "toe_l" in front_lm
+    assert "toe_r" in front_lm
+    assert "heel_l" in front_lm
+    assert "heel_r" in front_lm
+    assert "foot_front" not in front_lm
+    assert "foot_back" not in front_lm
+    assert "foot_front" in left_lm
+    assert "foot_back" in left_lm
+    assert "cranial_front" in left_lm
+    assert "cranial_back" in left_lm
+    assert "breast_lower" in left_lm
+    assert "toe_l" not in left_lm
+    assert "toe_r" not in left_lm
+    assert "neck" in blank["edge_pairs"]["front"]
+
+
+def test_0024_front_toes_heels_foot_len_and_y_null(tmp_path: Path) -> None:
+    """Front toe+heel fuse X/Z; y None without left depth; foot_len_m when z_m."""
+    assist = eight_head_assist()
+    # Sole at SOLE_Y=520; toes slightly above sole, heels slightly above toes
+    assist["views"]["front"]["landmarks"]["toe_l"] = [240, 515]
+    assist["views"]["front"]["landmarks"]["toe_r"] = [272, 515]
+    assist["views"]["front"]["landmarks"]["heel_l"] = [248, 505]
+    assist["views"]["front"]["landmarks"]["heel_r"] = [264, 505]
+    Hm = 1.70
+    d = make_package(tmp_path, assist=assist)
+    report = analyze_proportion(d, height_m=Hm, run_heuristic_frame=False)
+    assert "toe_l" in report.landmarks_xyz
+    assert "toe_r" in report.landmarks_xyz
+    assert report.landmarks_xyz["toe_l"].y is None
+    assert report.landmarks_xyz["toe_r"].y is None
+    assert report.landmarks_xyz["toe_l"].z is not None
+    assert report.landmarks_xyz["toe_l"].z_m is not None
+    assert any(m.startswith("foot_len_l_m~=") for m in report.messages)
+    assert any(m.startswith("foot_len_r_m~=") for m in report.messages)
+    # abs Δz_m for left: |z_m(toe) - z_m(heel)|
+    toe_z = float(report.landmarks_xyz["toe_l"].z_m)  # type: ignore[arg-type]
+    heel_z = float(report.landmarks_xyz["heel_l"].z_m)  # type: ignore[arg-type]
+    expected = abs(toe_z - heel_z)
+    foot_msg = next(m for m in report.messages if m.startswith("foot_len_l_m~="))
+    measured = float(foot_msg.split("~=", 1)[1])
+    assert measured == pytest.approx(expected, abs=1e-5)
+
+
+def test_0024_cranial_depth_band(tmp_path: Path) -> None:
+    """Left cranial_front/back → depth_band cranial; auto-swap allowed (C4)."""
+    assist = eight_head_assist()
+    # Deliberately inverted (front x < back x) so orientation_swapped may fire
+    assist["views"]["left"]["landmarks"]["cranial_front"] = [160, 70]
+    assist["views"]["left"]["landmarks"]["cranial_back"] = [240, 70]
+    d = make_package(tmp_path, assist=assist)
+    report = analyze_proportion(d, run_heuristic_frame=False)
+    cranial = next(b for b in report.depth_bands if b.band_id == "cranial")
+    assert cranial.depth_frac > 0
+    assert cranial.y_front >= cranial.y_back  # post auto-swap law
+    assert any("cranial/foot" in m for m in report.messages)
+
+
+def test_0024_foot_depth_band(tmp_path: Path) -> None:
+    """Left foot_front/back → depth_band foot; consumers use depth_frac not id-as-y."""
+    assist = eight_head_assist()
+    assist["views"]["left"]["landmarks"]["foot_front"] = [235, 510]
+    assist["views"]["left"]["landmarks"]["foot_back"] = [165, 510]
+    d = make_package(tmp_path, assist=assist)
+    report = analyze_proportion(d, run_heuristic_frame=False)
+    foot = next(b for b in report.depth_bands if b.band_id == "foot")
+    assert foot.depth_frac > 0
+    assert foot.y_mid == pytest.approx((foot.y_front + foot.y_back) / 2.0)
+    assert foot.depth_frac == pytest.approx(abs(foot.y_front - foot.y_back))
+
+
+def test_0024_missing_new_ids_package_score_still_100(tmp_path: Path) -> None:
+    """R8: new ids never required — eight_head path still scores 100."""
+    d = make_package(tmp_path, assist=eight_head_assist())
+    report = analyze_proportion(d, run_heuristic_frame=False)
+    assert report.package_score == pytest.approx(100.0, abs=0.1)
+    ids = {b.band_id for b in report.depth_bands}
+    assert "cranial" not in ids
+    assert "foot" not in ids
+
+
+def test_0024_breast_lower_accepted_no_band(tmp_path: Path) -> None:
+    """C1: breast_lower* known + left y; no diameter/depth band required."""
+    assist = eight_head_assist()
+    assist["views"]["left"]["landmarks"]["breast_lower"] = [220, 200]
+    assist["views"]["left"]["landmarks"]["breast_lower_l"] = [210, 205]
+    d = make_package(tmp_path, assist=assist)
+    report = analyze_proportion(d, height_m=1.70, run_heuristic_frame=False)
+    assert not any("unknown landmark id 'breast_lower" in m for m in report.messages)
+    # May appear in xyz when stature/left path allows (left-only → y set)
+    if "breast_lower" in report.landmarks_xyz:
+        assert report.landmarks_xyz["breast_lower"].y is not None
+    assert not any(b.band_id.startswith("breast_lower") for b in report.depth_bands)
+    assert not any(d.band_id.startswith("breast_lower") for d in report.diameters)
+
+
+def test_0024_torso_center_x_skips_cranial_and_foot() -> None:
+    """B4: cranial/foot pairs must not become torso_cx (use width/2 or spine)."""
+
+    def lm(lid: str, x: float, y: float = 100.0) -> Landmark2D:
+        return Landmark2D(
+            id=lid,
+            x_px=x,
+            y_px=y,
+            x_frac=min(1.0, max(0.0, x / 400.0)),
+            y_frac=min(1.0, max(0.0, y / 560.0)),
+            method="assist",
+            confidence=1.0,
+        )
+
+    width = 400.0
+    # Asymmetric cranial mean (300) must not equal width/2 (200)
+    left_cranial = ViewLandmarks(
+        view="left",
+        width_px=int(width),
+        height_px=560,
+        landmarks={
+            "cranial_front": lm("cranial_front", 350.0, 60.0),
+            "cranial_back": lm("cranial_back", 250.0, 60.0),
+        },
+    )
+    cx = _torso_center_x(left_cranial)
+    cranial_mean = 300.0
+    assert cx != pytest.approx(cranial_mean)
+    assert cx == pytest.approx(width / 2.0)
+
+    left_foot = ViewLandmarks(
+        view="left",
+        width_px=int(width),
+        height_px=560,
+        landmarks={
+            "foot_front": lm("foot_front", 340.0, 500.0),
+            "foot_back": lm("foot_back", 280.0, 500.0),
+        },
+    )
+    cx_f = _torso_center_x(left_foot)
+    foot_mean = 310.0
+    assert cx_f != pytest.approx(foot_mean)
+    assert cx_f == pytest.approx(width / 2.0)
+
+    # spine_hint preferred over width/2 when no torso pairs
+    left_spine = ViewLandmarks(
+        view="left",
+        width_px=int(width),
+        height_px=560,
+        landmarks={
+            "cranial_front": lm("cranial_front", 350.0, 60.0),
+            "cranial_back": lm("cranial_back", 250.0, 60.0),
+            "spine_hint": lm("spine_hint", 185.0, 250.0),
+        },
+    )
+    assert _torso_center_x(left_spine) == pytest.approx(185.0)
+
+    # chest still preferred when present
+    left_chest = ViewLandmarks(
+        view="left",
+        width_px=int(width),
+        height_px=560,
+        landmarks={
+            "chest_front": lm("chest_front", 230.0, 180.0),
+            "chest_back": lm("chest_back", 170.0, 180.0),
+            "cranial_front": lm("cranial_front", 350.0, 60.0),
+            "cranial_back": lm("cranial_back", 250.0, 60.0),
+        },
+    )
+    assert _torso_center_x(left_chest) == pytest.approx(200.0)
+
+
+def test_0024_neck_edge_pairs_diameter(tmp_path: Path) -> None:
+    """Neck width via existing edge_pairs.front.neck still works."""
+    assist = eight_head_assist()
+    assist["edge_pairs"] = {
+        "front": {
+            "neck": [[240, 110], [272, 110]],  # 32 px width
+        }
+    }
+    d = make_package(tmp_path, assist=assist)
+    report = analyze_proportion(d, height_m=1.70, run_heuristic_frame=False)
+    neck = next(m for m in report.diameters if m.band_id == "neck")
+    assert neck.width_px == pytest.approx(32.0)
+    assert neck.width_frac > 0
+    assert neck.width_m is not None
