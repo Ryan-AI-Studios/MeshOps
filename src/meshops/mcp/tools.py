@@ -972,6 +972,10 @@ def mesh_proportion_blockout_recipe(
     face: bool = False,
     hair: str = "none",
     neckline: str = "none",
+    hands: bool = False,
+    feet: bool = False,
+    fingers: str = "mitten",
+    toes: str = "wedge",
 ) -> dict[str, Any]:
     """Emit RECIPE_* blockout primitives. Authoring only — RECIPE_HONESTY / N6."""
     from meshops.proportion.blockout_recipe import run_blockout_recipe
@@ -991,6 +995,12 @@ def mesh_proportion_blockout_recipe(
     neckline_tier = (neckline or "none").strip().lower()
     if neckline_tier not in ("none", "crew", "v_proxy"):
         raise ValueError("--neckline must be none, crew, or v_proxy")
+    fingers_tier = (fingers or "mitten").strip().lower()
+    if fingers_tier not in ("none", "mitten", "full"):
+        raise ValueError("--fingers must be none, mitten, or full")
+    toes_tier = (toes or "wedge").strip().lower()
+    if toes_tier not in ("none", "wedge", "full"):
+        raise ValueError("--toes must be none, wedge, or full")
     # Preserve trailing directory separator intent (R1); Path resolve strips it.
     ends_sep = out.endswith(("/", "\\"))
     out_base = out.rstrip("/\\") if ends_sep else out
@@ -1019,6 +1029,10 @@ def mesh_proportion_blockout_recipe(
         face=bool(face),
         hair=hair_tier,  # type: ignore[arg-type]
         neckline=neckline_tier,  # type: ignore[arg-type]
+        hands=bool(hands),
+        feet=bool(feet),
+        fingers=fingers_tier,  # type: ignore[arg-type]
+        toes=toes_tier,  # type: ignore[arg-type]
     )
 
 

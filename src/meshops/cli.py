@@ -2398,6 +2398,26 @@ def proportion_blockout_recipe_cmd(
         "--neckline",
         help="Neckline proxy: none | crew | v_proxy (default none; 0028)",
     ),
+    hands: bool = typer.Option(
+        False,
+        "--hands/--no-hands",
+        help="Emit hand kit (palm + fingers) — authoring only (0029; N6)",
+    ),
+    feet: bool = typer.Option(
+        False,
+        "--feet/--no-feet",
+        help="Emit foot kit (plate/heel/ank_foot/toes) — authoring only (0029; N6)",
+    ),
+    fingers: str = typer.Option(
+        "mitten",
+        "--fingers",
+        help="Finger tier when --hands: none | mitten | full (default mitten; 0029)",
+    ),
+    toes: str = typer.Option(
+        "wedge",
+        "--toes",
+        help="Toe tier when --feet: none | wedge | full (default wedge; 0029)",
+    ),
     force: bool = typer.Option(
         False,
         "--force",
@@ -2425,6 +2445,12 @@ def proportion_blockout_recipe_cmd(
     neckline_tier = neckline.strip().lower()
     if neckline_tier not in ("none", "crew", "v_proxy"):
         raise typer.BadParameter("--neckline must be none, crew, or v_proxy")
+    fingers_tier = fingers.strip().lower()
+    if fingers_tier not in ("none", "mitten", "full"):
+        raise typer.BadParameter("--fingers must be none, mitten, or full")
+    toes_tier = toes.strip().lower()
+    if toes_tier not in ("none", "wedge", "full"):
+        raise typer.BadParameter("--toes must be none, wedge, or full")
 
     try:
         # Keep --out as str so trailing directory separators survive (R1).
@@ -2445,6 +2471,10 @@ def proportion_blockout_recipe_cmd(
             face=face,
             hair=hair_tier,  # type: ignore[arg-type]
             neckline=neckline_tier,  # type: ignore[arg-type]
+            hands=hands,
+            feet=feet,
+            fingers=fingers_tier,  # type: ignore[arg-type]
+            toes=toes_tier,  # type: ignore[arg-type]
         )
     except ProportionError as exc:
         _emit_error(exc, json_mode=json_out, code=1)

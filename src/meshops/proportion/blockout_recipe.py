@@ -1,4 +1,4 @@
-"""Proportion → blockout primitive recipes (track 0019 + 0027 profiles + 0028 face).
+"""Proportion → blockout primitive recipes (0019 + 0027 + 0028 face + 0029 extremities).
 
 Build BlockoutRecipePackage from ProportionReport; emit JSON + Blender 5.2 bpy script.
 Authoring layout only — not mesh or print success (Difficulty §12 / N6).
@@ -10,6 +10,7 @@ breast_lower* used for rz in 0030; lateral fuse/diameter still 0027.
 0030: soft offsets prefer report.soft_spacing measured gaps (B7) over template fracs.
 0027: anatomy profiles (--profiles) skip_roles merge + parent_joint; schema 1.1.0.
 0028: face/hair/neckline RECIPE kit (opt-in); schema write 1.2.0; load 1.0|1.1|1.2.
+0029: hands/feet RECIPE kit (opt-in); schema write 1.3.0; load 1.0|1.1|1.2|1.3.
 """
 
 from __future__ import annotations
@@ -41,7 +42,7 @@ if TYPE_CHECKING:
     from meshops.proportion.depth_samples import DepthSamplesPackage
     from meshops.proportion.skeleton import BlockoutSkeleton, SkeletonJoint
 
-RECIPE_SCHEMA_VERSION: Final[Literal["1.0.0", "1.1.0", "1.2.0"]] = "1.2.0"
+RECIPE_SCHEMA_VERSION: Final[Literal["1.0.0", "1.1.0", "1.2.0", "1.3.0"]] = "1.3.0"
 RECIPE_ID: Final[Literal["humanoid_a_pose_v1"]] = "humanoid_a_pose_v1"
 
 JSON_BASENAME: Final[str] = "blockout_recipe.json"
@@ -88,10 +89,21 @@ RecipeRole = Literal[
     "hair_mass",
     "neckline",
     "sternomastoid_soft",
+    # 0029 hand / foot / digit
+    "palm",
+    "finger_soft",
+    "thumb_soft",
+    "foot_plate",
+    "heel",
+    "ankle_bridge",
+    "toe_soft",
+    "ball_soft",
 ]
 RecipeKind = Literal["trap_box", "box", "cylinder", "ellipsoid", "capsule"]
 HairTier = Literal["none", "short", "bun", "long_proxy"]
 NecklineTier = Literal["none", "crew", "v_proxy"]
+FingerTier = Literal["none", "mitten", "full"]
+ToeTier = Literal["none", "wedge", "full"]
 
 _MIDLINE_EXEMPT_ROLES: Final[frozenset[str]] = frozenset({"torso", "pelvis", "neck", "head"})
 # Pre-0027 role set snapshot for B11 (no profile → no trap/pec/scap/bicep/clavicle).
@@ -169,11 +181,11 @@ class RecipeMetrics(BaseModel):
 
 
 class BlockoutRecipePackage(BaseModel):
-    """blockout_recipe.json package (schema 1.0.0 | 1.1.0 | 1.2.0)."""
+    """blockout_recipe.json package (schema 1.0.0 | 1.1.0 | 1.2.0 | 1.3.0)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["1.0.0", "1.1.0", "1.2.0"] = RECIPE_SCHEMA_VERSION
+    schema_version: Literal["1.0.0", "1.1.0", "1.2.0", "1.3.0"] = RECIPE_SCHEMA_VERSION
     honesty: str = RECIPE_HONESTY
     source_report_schema: str | None = None
     height_m: float | None = None
@@ -2052,6 +2064,10 @@ def build_blockout_recipe(
     face: bool = False,
     hair: HairTier = "none",
     neckline: NecklineTier = "none",
+    hands: bool = False,
+    feet: bool = False,
+    fingers: FingerTier = "mitten",
+    toes: ToeTier = "wedge",
 ) -> BlockoutRecipePackage:
     """Build BlockoutRecipePackage from a loaded ProportionReport.
 
@@ -2059,6 +2075,7 @@ def build_blockout_recipe(
     Topology modes only in messages (C1) — not in counts.
     When *profile* set: skip_roles merge (R6.1) + profile dual softs / new roles.
     Opt-in face/hair/neckline (0028): default flags preserve pre-0028 role set (B6).
+    Opt-in hands/feet (0029): default flags preserve pre-0029 role set (B6).
     """
     messages: list[str] = []
 
@@ -2098,6 +2115,11 @@ def build_blockout_recipe(
         messages.append(f"skip_roles={sorted(skip_roles)}")
     if face or hair != "none" or neckline != "none":
         messages.append(f"face={str(bool(face)).lower()} hair={hair} neckline={neckline}")
+    if hands or feet:
+        messages.append(
+            f"hands={str(bool(hands)).lower()} feet={str(bool(feet)).lower()} "
+            f"fingers={fingers} toes={toes}"
+        )
 
     if template_applied is not None:
         messages.append(f"template_applied: id={template_applied.template_id}")
@@ -2230,6 +2252,31 @@ def build_blockout_recipe(
     else:
         messages.append("--no-limbs: limb_segment parts omitted")
 
+    # 14 extremities (0029) — append after limbs; does not remove forearm/calf (B15)
+    if hands:
+        from meshops.proportion.extremity_recipe import build_hand_parts
+
+        for p in build_hand_parts(
+            report,
+            skeleton=skeleton,
+            height_m=resolved.height_m,
+            fingers=fingers,
+            messages=messages,
+        ):
+            _append_part(parts, p)
+    if feet:
+        from meshops.proportion.extremity_recipe import build_foot_parts
+
+        for p in build_foot_parts(
+            report,
+            skeleton=skeleton,
+            template_applied=template_applied,
+            height_m=resolved.height_m,
+            toes=toes,
+            messages=messages,
+        ):
+            _append_part(parts, p)
+
     # 0027 profile emit after base (skip_roles already applied)
     if profile is not None:
         for p in _emit_profile_parts(
@@ -2291,7 +2338,7 @@ def build_blockout_recipe(
 
 
 def load_blockout_recipe(path: Path | str) -> BlockoutRecipePackage:
-    """Load blockout_recipe.json; accepts schema 1.0.0 | 1.1.0 | 1.2.0."""
+    """Load blockout_recipe.json; accepts schema 1.0.0 | 1.1.0 | 1.2.0 | 1.3.0."""
     p = Path(path)
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
@@ -2302,9 +2349,9 @@ def load_blockout_recipe(path: Path | str) -> BlockoutRecipePackage:
             details={"path": str(p)},
         ) from exc
     ver = data.get("schema_version") if isinstance(data, dict) else None
-    if ver not in ("1.0.0", "1.1.0", "1.2.0"):
+    if ver not in ("1.0.0", "1.1.0", "1.2.0", "1.3.0"):
         raise ProportionError(
-            f"blockout recipe schema_version must be 1.0.0, 1.1.0, or 1.2.0 (got {ver!r})",
+            f"blockout recipe schema_version must be 1.0.0, 1.1.0, 1.2.0, or 1.3.0 (got {ver!r})",
             code="recipe_failed",
             details={"path": str(p), "schema_version": ver},
         )
@@ -2758,6 +2805,10 @@ def run_blockout_recipe(
     face: bool = False,
     hair: HairTier = "none",
     neckline: NecklineTier = "none",
+    hands: bool = False,
+    feet: bool = False,
+    fingers: FingerTier = "mitten",
+    toes: ToeTier = "wedge",
 ) -> dict[str, Any]:
     """CLI helper: load report → build → write; return success payload."""
     report = load_report(report_path)
@@ -2813,6 +2864,10 @@ def run_blockout_recipe(
         face=face,
         hair=hair,
         neckline=neckline,
+        hands=hands,
+        feet=feet,
+        fingers=fingers,
+        toes=toes,
     )
     if skel_err is not None:
         package.messages.append(skel_err)

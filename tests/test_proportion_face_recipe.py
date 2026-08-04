@@ -203,7 +203,7 @@ def test_face__default_no_face_roles() -> None:
     }
     assert roles.isdisjoint(face_roles)
     assert "RECIPE_neck_head_fuse" not in {p.name for p in pkg.parts}
-    assert pkg.schema_version == RECIPE_SCHEMA_VERSION == "1.2.0"
+    assert pkg.schema_version == RECIPE_SCHEMA_VERSION == "1.3.0"
 
 
 def test_face__face_flag_core_features() -> None:
@@ -258,26 +258,36 @@ def test_face__skeleton_parent_joint() -> None:
     assert eye.parent_joint == "head"
 
 
-def test_face__schema_load_1_1_and_write_1_2(tmp_path: Path) -> None:
-    """Load 1.1.0 without face roles OK; write 1.2.0; load 1.2.0 round-trip."""
+def test_face__schema_load_1_1_and_write_current(tmp_path: Path) -> None:
+    """Load 1.1.0 without face roles OK; write current; load 1.2.0 face recipe still OK."""
     report = _full_torso_report()
     # Craft a 1.1.0 package without face roles
     pkg11 = build_blockout_recipe(report, limbs=False)
     data = pkg11.model_dump(mode="json")
     data["schema_version"] = "1.1.0"
-    # Strip any 1.2-only roles just in case
+    # Strip any face-only roles just in case
     data["parts"] = [p for p in data["parts"] if p["role"] not in ("jaw", "hair_mass")]
     p11 = tmp_path / "recipe_1_1.json"
     p11.write_text(json.dumps(data, indent=2), encoding="utf-8")
     loaded11 = load_blockout_recipe(p11)
     assert loaded11.schema_version == "1.1.0"
 
-    pkg12 = build_blockout_recipe(report, limbs=False, face=True)
-    assert pkg12.schema_version == "1.2.0"
-    paths = write_blockout_recipe(tmp_path / "out12", pkg12, format="json", force=True)
-    loaded12 = load_blockout_recipe(paths[0])
+    # Load path still accepts 1.2.0 face recipes
+    pkg_face = build_blockout_recipe(report, limbs=False, face=True)
+    data12 = pkg_face.model_dump(mode="json")
+    data12["schema_version"] = "1.2.0"
+    p12 = tmp_path / "recipe_1_2.json"
+    p12.write_text(json.dumps(data12, indent=2), encoding="utf-8")
+    loaded12 = load_blockout_recipe(p12)
     assert loaded12.schema_version == "1.2.0"
     assert any(p.role == "jaw" for p in loaded12.parts)
+
+    # New writes are 1.3.0
+    assert pkg_face.schema_version == "1.3.0"
+    paths = write_blockout_recipe(tmp_path / "out13", pkg_face, format="json", force=True)
+    loaded13 = load_blockout_recipe(paths[0])
+    assert loaded13.schema_version == "1.3.0"
+    assert any(p.role == "jaw" for p in loaded13.parts)
 
 
 def test_face__classifier_b5_tokens() -> None:

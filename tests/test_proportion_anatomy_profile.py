@@ -259,7 +259,7 @@ def test_profile__female_emit_dual_mass_and_traps() -> None:
         profile=profile,
         skeleton=skel,
     )
-    assert pkg.schema_version == "1.2.0"
+    assert pkg.schema_version == "1.3.0"
     roles = {p.role for p in pkg.parts}
     names = {p.name for p in pkg.parts}
 
@@ -387,13 +387,13 @@ def test_recipe__write_load_1_1_0_parent_joint_roundtrip(tmp_path: Path) -> None
     profile = load_anatomy_profile("torso_limb_f_athletic_v1")
     skel = _skeleton_with_arms()
     pkg = build_blockout_recipe(report, limbs=False, profile=profile, skeleton=skel)
-    assert pkg.schema_version == RECIPE_SCHEMA_VERSION == "1.2.0"
+    assert pkg.schema_version == RECIPE_SCHEMA_VERSION == "1.3.0"
     # at least one part with parent_joint set
     with_pj = [p for p in pkg.parts if p.parent_joint]
     assert with_pj, "expected parent_joint filled from skeleton"
     paths = write_blockout_recipe(tmp_path / "r", pkg, format="json", force=True)
     loaded = load_blockout_recipe(paths[0])
-    assert loaded.schema_version == "1.2.0"
+    assert loaded.schema_version == "1.3.0"
     loaded_map = {p.name: p.parent_joint for p in loaded.parts}
     for p in with_pj:
         assert loaded_map.get(p.name) == p.parent_joint
