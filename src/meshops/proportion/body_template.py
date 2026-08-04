@@ -6,11 +6,15 @@ Not mesh or print success (Difficulty §12 / N6 / TEMPLATE_HONESTY).
 0024 soft note: when measured foot_len_*_m messages or cranial/foot depth_bands
 are present on a report, consumers may override template foot_len_scale / head
 depth priors — no auto-override in this module yet (document-only).
+
+0031: soft Y (breast / glute) resolves as signed fraction of soft half-depth,
+not stature — see CHEST_/HIP_SOFT_HALF_FALLBACK_FRAC and _resolve_soft_depth_m.
 """
 
 from __future__ import annotations
 
 import json
+import math
 from importlib.resources import files as resource_files
 from pathlib import Path
 from typing import Any, Final, Literal
@@ -26,11 +30,17 @@ TEMPLATE_SCHEMA_VERSION: Final[Literal["1.0.0"]] = "1.0.0"
 APPLIED_JSON_BASENAME: Final[str] = "template_applied.json"
 CONSTANTS_PY_BASENAME: Final[str] = "template_constants.py"
 
+# Soft half-depth fallbacks (0031; mirror blockout_recipe chest/hip half-depth).
+CHEST_SOFT_HALF_FALLBACK_FRAC: Final[float] = 0.12
+HIP_SOFT_HALF_FALLBACK_FRAC: Final[float] = 0.13
+ABS_SOFT_Y_CLAMP_M: Final[float] = 0.35
+
 BreastMode = Literal["dual_tilted", "pec_ovals", "none"]
 GluteModeDefault = Literal["two_spheres", "oval", "mild_oval"]
 TorsoModeDefault = Literal["ovals", "trap"]
 SexLiteral = Literal["female", "male"]
 ArchetypeLiteral = Literal["adult_athletic"]
+SoftDepthRegion = Literal["chest", "hip"]
 
 _KNOWN_TEMPLATE_IDS: Final[tuple[str, ...]] = (
     "female_adult_athletic",
@@ -48,13 +58,17 @@ _MALE_ART_CANON_MSG: Final[str] = (
 
 
 class BreastTemplate(BaseModel):
-    """Breast / pec soft priors."""
+    """Breast / pec soft priors.
+
+    ``y_frac`` is a signed fraction of soft half-depth (front -Y), not stature
+    (0031 B1). Resolved via chest soft_depth ladder at apply time.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = True
     tilt_x_deg: float = 0.0
-    y_frac: float  # signed body-frame (front -Y)
+    y_frac: float  # soft half-depth frac (front -Y); not stature (0031 B1)
     ry_scale: float = 1.0
     rz_scale: float = 1.0
     intermammary_gap_frac: float  # of bust_hw only (C6)
@@ -62,12 +76,16 @@ class BreastTemplate(BaseModel):
 
 
 class GluteTemplate(BaseModel):
-    """Glute soft priors."""
+    """Glute soft priors.
+
+    ``y_frac`` is a signed fraction of soft half-depth (back +Y), not stature
+    (0031 B1). Absolute ``y_m`` when set is pass-through then clamp (B4).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     r_frac: float
-    y_frac: float | None = None  # signed + back
+    y_frac: float | None = None  # soft half-depth frac (back +Y); not stature (0031 B1)
     y_m: float | None = None
     z_frac: float | None = None
     z_m: float | None = None
@@ -297,6 +315,112 @@ def _half_width(d: DiameterMeasure) -> float | None:
     return None
 
 
+def _finite_y_m(lm: Any) -> float | None:
+    """Return finite landmark y_m or None."""
+    if lm is None:
+        return None
+    y = getattr(lm, "y_m", None)
+    if y is None:
+        return None
+    try:
+        v = float(y)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(v):
+        return None
+    return v
+
+
+def _resolve_soft_depth_m(
+    report: ProportionReport,
+    *,
+    region: SoftDepthRegion,
+    height_m: float,
+    scale_notes: list[str],
+) -> tuple[float, str]:
+    """Resolve half soft-depth meters for chest (breast) or hip (glute).
+
+    Ladder (0031 B2/B3):
+      chest: measured chest_front/back → depth_band chest|breast → 0.12*H
+      hip:   measured hip_front/back → depth_band hip only → 0.13*H
+    Never returns stature as soft_depth. source ∈ measured|band|fallback.
+    """
+    h = float(height_m)
+    lms = report.landmarks_xyz
+
+    if region == "chest":
+        y_f = _finite_y_m(lms.get("chest_front"))
+        y_b = _finite_y_m(lms.get("chest_back"))
+        if y_f is not None and y_b is not None:
+            half = abs(y_f - y_b) / 2.0
+            if half > 0.0:
+                return half, "measured"
+        for band in report.depth_bands:
+            if band.band_id in ("chest", "breast") and band.depth_m is not None:
+                try:
+                    dm = float(band.depth_m)
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(dm) and dm > 0.0:
+                    return dm / 2.0, "band"
+        soft = CHEST_SOFT_HALF_FALLBACK_FRAC * h
+        scale_notes.append(
+            f"soft_depth chest fallback {CHEST_SOFT_HALF_FALLBACK_FRAC}*H={soft:.6f}"
+        )
+        return soft, "fallback"
+
+    # hip / glute — band_id hip only (no "glute" band in fuse)
+    y_f = _finite_y_m(lms.get("hip_front"))
+    y_b = _finite_y_m(lms.get("hip_back"))
+    if y_f is not None and y_b is not None:
+        half = abs(y_f - y_b) / 2.0
+        if half > 0.0:
+            return half, "measured"
+    for band in report.depth_bands:
+        if band.band_id == "hip" and band.depth_m is not None:
+            try:
+                dm = float(band.depth_m)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(dm) and dm > 0.0:
+                return dm / 2.0, "band"
+    soft = HIP_SOFT_HALF_FALLBACK_FRAC * h
+    scale_notes.append(f"soft_depth hip fallback {HIP_SOFT_HALF_FALLBACK_FRAC}*H={soft:.6f}")
+    return soft, "fallback"
+
+
+def _soft_y_from_frac(frac: float, soft_depth_m: float) -> float:
+    """y_m = copysign(|frac| * soft_depth_m, frac); 0.0 -> +0.0 (not -0.0)."""
+    f = float(frac)
+    if f == 0.0:
+        return 0.0
+    return math.copysign(abs(f) * float(soft_depth_m), f)
+
+
+def _clamp_soft_y_m(
+    y_m: float,
+    soft_depth_m: float,
+    *,
+    label: str,
+    scale_notes: list[str],
+    messages: list[str],
+) -> float:
+    """Clamp |y_m| ≤ soft_depth_m and ≤ ABS_SOFT_Y_CLAMP_M (0031 B5)."""
+    limit = min(abs(float(soft_depth_m)), ABS_SOFT_Y_CLAMP_M)
+    ay = abs(float(y_m))
+    if ay <= limit:
+        return float(y_m) if float(y_m) != 0.0 else 0.0
+    clamped = math.copysign(limit, float(y_m)) if float(y_m) != 0.0 else 0.0
+    msg = (
+        f"{label} clamped from {float(y_m):.6f} to {clamped:.6f} "
+        f"(|y|≤soft_depth_m={float(soft_depth_m):.6f}, |y|≤{ABS_SOFT_Y_CLAMP_M})"
+    )
+    scale_notes.append(msg)
+    if msg not in messages:
+        messages.append(msg)
+    return clamped
+
+
 def _resolve_applied_constants(
     doc: BodyTemplateDocument,
     report: ProportionReport,
@@ -311,18 +435,58 @@ def _resolve_applied_constants(
     glute = doc.glute
     foot = doc.foot
 
-    breast_y_m = float(breast.y_frac) * h
+    # 0031 B1/B2/B8: breast y_frac is soft half-depth fraction (raw prior kept).
     breast_y_frac = float(breast.y_frac)
+    chest_soft_m, chest_src = _resolve_soft_depth_m(
+        report, region="chest", height_m=h, scale_notes=scale_notes
+    )
+    breast_y_m = _clamp_soft_y_m(
+        _soft_y_from_frac(breast_y_frac, chest_soft_m),
+        chest_soft_m,
+        label="breast_y_m",
+        scale_notes=scale_notes,
+        messages=messages,
+    )
+    scale_notes.append(
+        f"breast_y_m={breast_y_m:.6f} from y_frac={breast_y_frac} * "
+        f"soft_depth_m={chest_soft_m:.6f} (source={chest_src})"
+    )
 
     # Template prior for glute radius (frac * H); may be replaced by measured hip_hw.
     glute_r_m = float(glute.r_frac) * h
     glute_r_frac = float(glute.r_frac)
+
+    # 0031 B1/B3/B4/B8: glute soft Y from hip soft-depth; fracs stay raw template.
+    hip_soft_m, hip_src = _resolve_soft_depth_m(
+        report, region="hip", height_m=h, scale_notes=scale_notes
+    )
     if glute.y_m is not None:
-        glute_y_m = float(glute.y_m)
-        glute_y_frac = glute_y_m / h if h > 0 else None
+        # Absolute y_m pass-through then clamp (B4). glute_y_frac stays raw if present.
+        glute_y_frac = float(glute.y_frac) if glute.y_frac is not None else None
+        glute_y_m = _clamp_soft_y_m(
+            float(glute.y_m),
+            hip_soft_m,
+            label="glute_y_m",
+            scale_notes=scale_notes,
+            messages=messages,
+        )
+        scale_notes.append(
+            f"glute_y_m={glute_y_m:.6f} from absolute template y_m "
+            f"(soft_depth_m={hip_soft_m:.6f}, source={hip_src})"
+        )
     elif glute.y_frac is not None:
-        glute_y_frac = float(glute.y_frac)
-        glute_y_m = glute_y_frac * h
+        glute_y_frac = float(glute.y_frac)  # raw prior — never y_m/h (B8)
+        glute_y_m = _clamp_soft_y_m(
+            _soft_y_from_frac(glute_y_frac, hip_soft_m),
+            hip_soft_m,
+            label="glute_y_m",
+            scale_notes=scale_notes,
+            messages=messages,
+        )
+        scale_notes.append(
+            f"glute_y_m={glute_y_m:.6f} from y_frac={glute_y_frac} * "
+            f"soft_depth_m={hip_soft_m:.6f} (source={hip_src})"
+        )
     else:
         glute_y_m = None
         glute_y_frac = None
@@ -399,6 +563,9 @@ def _resolve_applied_constants(
     if hip_hw_lm is not None:
         glute_cleft_m = cleft_frac * hip_hw_lm
 
+    # B12 / 0031: pelvis_y_frac is stature-style (* height_m), NOT soft-depth frac --
+    # not a soft mass. Soft-depth conversion for pelvis is out of scope; do not apply
+    # chest/hip soft_depth here. Both shipped packs use absolute pelvis_y_m.
     if doc.pelvis_y_m is not None:
         pelvis_y_m = float(doc.pelvis_y_m)
     elif doc.pelvis_y_frac is not None:
