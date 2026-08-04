@@ -551,6 +551,36 @@ def test_face__skip_when_chin_unresolved() -> None:
     assert not any(p.role == "hair_mass" for p in pkg.parts)
 
 
+def test_face__skip_when_top_unresolved_invented_h() -> None:
+    """B11: chin present but no top landmark → invent H for head, skip face kit."""
+    report = _full_torso_report()
+    # Remove top landmarks so z_top is invented from head_unit/stature
+    lms = dict(report.landmarks_xyz)
+    lms.pop("cranial_vertex", None)
+    lms.pop("hair_crown", None)
+    report = report.model_copy(update={"landmarks_xyz": lms})
+    pkg = build_blockout_recipe(report, limbs=False, face=True, hair="short")
+    assert any(p.name == "RECIPE_head" for p in pkg.parts)
+    assert FACE_KIT_SKIP_BOUNDS in pkg.messages
+    assert not any(p.role in ("jaw", "eye_soft", "hair_mass") for p in pkg.parts)
+
+
+def test_face__top_prefers_hair_crown_when_vertex_z_none() -> None:
+    """Invalid cranial_vertex (z_m=None) must not mask valid hair_crown."""
+    report = _full_torso_report()
+    lms = dict(report.landmarks_xyz)
+    lms["cranial_vertex"] = _lm("cranial_vertex", x_m=0.0, y_m=-0.01, z_m=None)
+    lms["hair_crown"] = _lm("hair_crown", x_m=0.0, y_m=-0.01, z_m=1.68)
+    report = report.model_copy(update={"landmarks_xyz": lms})
+    pkg = build_blockout_recipe(report, limbs=False, face=True)
+    assert FACE_KIT_SKIP_BOUNDS not in pkg.messages
+    assert any(p.role == "jaw" for p in pkg.parts)
+    head = next(p for p in pkg.parts if p.name == "RECIPE_head")
+    assert head.center is not None
+    # z_top=1.68, chin=1.50 → z_c = 1.59
+    assert head.center[2] == pytest.approx(1.59, abs=1e-6)
+
+
 def test_face__headbounds_type() -> None:
     b = HeadBounds(
         z_chin=1.5,

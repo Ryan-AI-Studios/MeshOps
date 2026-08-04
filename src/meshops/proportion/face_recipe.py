@@ -12,6 +12,8 @@ import math
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Final, Literal
 
+from meshops.proportion.models import LandmarkXYZ
+
 if TYPE_CHECKING:
     from meshops.proportion.blockout_recipe import RecipePart
     from meshops.proportion.models import ProportionReport
@@ -63,6 +65,8 @@ class HeadBounds:
     y: float
     placement: HeadPlacement
     has_y: bool
+    # True only when cranial_vertex or hair_crown provided z_top (B11 face kit).
+    top_from_landmark: bool = True
 
 
 def scale_head_bounds(
@@ -77,6 +81,15 @@ def scale_head_bounds(
     )
 
 
+def _top_landmark_with_z(lms: dict[str, LandmarkXYZ]) -> LandmarkXYZ | None:
+    """First of cranial_vertex / hair_crown with finite z_m (do not mask crown)."""
+    for key in ("cranial_vertex", "hair_crown"):
+        lm = lms.get(key)
+        if lm is not None and lm.z_m is not None:
+            return lm
+    return None
+
+
 def resolve_head_bounds(
     report: ProportionReport,
     *,
@@ -84,7 +97,11 @@ def resolve_head_bounds(
     height_m: float | None,
     messages: list[str],
 ) -> HeadBounds | None:
-    """Resolve HeadBounds from landmarks (same ladder as pre-0028 RECIPE_head)."""
+    """Resolve HeadBounds from landmarks (same ladder as pre-0028 RECIPE_head).
+
+    When top z is invented from head_unit/stature, *top_from_landmark* is False so
+    the face kit can refuse to invent H (B11) while RECIPE_head still emits.
+    """
     from meshops.proportion.blockout_recipe import (
         _half_width_from_diameter,
         _resolve_diameter,
@@ -92,13 +109,15 @@ def resolve_head_bounds(
 
     lms = report.landmarks_xyz
     chin = lms.get("chin")
-    top = lms.get("cranial_vertex") or lms.get("hair_crown")
+    top = _top_landmark_with_z(lms)
     if chin is None or chin.z_m is None:
         messages.append("RECIPE_head skipped: need chin z_m")
         return None
     z_chin = float(chin.z_m)
+    top_from_landmark = False
     if top is not None and top.z_m is not None:
         z_top = float(top.z_m)
+        top_from_landmark = True
     elif head_unit_m is not None:
         z_top = z_chin + 0.75 * float(head_unit_m)
     elif height_m is not None:
@@ -145,6 +164,7 @@ def resolve_head_bounds(
         y=y,
         placement=placement,
         has_y=has_y,
+        top_from_landmark=top_from_landmark,
     )
 
 
@@ -690,7 +710,8 @@ def build_face_parts(
     msgs = messages if messages is not None else []
     if not face and hair == "none" and neckline == "none":
         return []
-    if head_bounds is None:
+    # B11: never invent H for face/hair/neckline — require landmark top z.
+    if head_bounds is None or not head_bounds.top_from_landmark:
         msgs.append(FACE_KIT_SKIP_BOUNDS)
         return []
 
