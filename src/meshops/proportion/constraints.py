@@ -219,6 +219,16 @@ def classify_part_name(name: str) -> tuple[ConstraintRole, Side]:
             return "calf_proximal", side
         return "calf", side
     # 8 — limbs, bridges, softs, axial
+    # 0027 profile softs: ordered before generic fallthrough (AI2 B2).
+    # trap before torso/neck generics; bicep before upper_arm limb; clavicle before shoulder_bridge.
+    if "trap" in lower:
+        return "neck", side
+    if "bicep" in lower:
+        return "upper_arm", side  # soft bead; exempt from limb no-dup vs limb_segment
+    if "clavicle" in lower:
+        return "shoulder_bridge", side
+    if "scap" in lower:
+        return "torso", side
     if "thigh" in lower or "limb_thigh" in lower:
         return "thigh", side
     if "upper_arm" in lower or "limb_upper_arm" in lower:
@@ -996,10 +1006,14 @@ def _check_no_dup_limb(
             seen_bases[base] = part.name
 
     # (role, side) uniqueness for limb/foot stack
+    # 0027: bicep_soft beads share upper_arm ConstraintRole with limb_segment — exempt.
     rs_map: dict[tuple[str, str], list[str]] = {}
     for part, role, side in indexed:
         if role not in _LIMB_FOOT_ROLES:
             continue
+        lower_name = part.name.lower()
+        if "bicep" in lower_name and "limb_" not in lower_name:
+            continue  # soft bead exempt from no-dup vs limb_segment
         if side == "none" and role not in ("foot_plate", "heel", "ankle_bridge"):
             continue
         key = (role, side)

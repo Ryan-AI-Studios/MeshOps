@@ -59,6 +59,7 @@ packages = ["src/meshops"]
 [tool.hatch.build.targets.wheel.force-include]
 "src/meshops/slice/profiles" = "meshops/slice/profiles"
 "src/meshops/proportion/body_templates" = "meshops/proportion/body_templates"
+"src/meshops/proportion/body_profiles" = "meshops/proportion/body_profiles"
 
 [tool.ruff]
 target-version = "py313"

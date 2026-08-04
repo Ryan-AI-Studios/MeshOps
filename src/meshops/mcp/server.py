@@ -60,6 +60,7 @@ TOOL_NAMES: frozenset[str] = frozenset(
         "mesh_proportion_capture",
         "mesh_proportion_depth_samples",
         "mesh_proportion_blockout_recipe",
+        "mesh_proportion_anatomy_profiles",
         "mesh_proportion_blockout_validate_constraints",
         "mesh_proportion_blockout_optimize",
         "mesh_proportion_skeleton_build",
@@ -633,6 +634,11 @@ def build_server(work_root: Path | None = None) -> Any:
         )
 
     @mcp.tool()
+    def mesh_proportion_anatomy_profiles() -> dict[str, Any]:
+        """List torso/limb anatomy profile packs (authoring only — N6)."""
+        return T.mesh_proportion_anatomy_profiles(wr)
+
+    @mcp.tool()
     def mesh_proportion_blockout_recipe(
         report: str,
         out: str,
@@ -645,12 +651,14 @@ def build_server(work_root: Path | None = None) -> Any:
         nofuse: bool = False,
         breast_tilt_deg: float | None = None,
         template_applied: str | None = None,
+        profiles: str | None = None,
+        skeleton: str | None = None,
     ) -> dict[str, Any]:
         """Emit RECIPE_* blockout primitives (trap/ovals/softs) from a report.
 
         Authoring layout only — proportion_blockout_recipe_not_mesh_or_print_success (N6).
         Topology: torso trap|ovals, glute oval|two_spheres, optional template-applied.
-        Raises ProportionError on failure (never ok:false success).
+        Optional profiles + skeleton (0027). Raises ProportionError on failure.
         """
         return T.mesh_proportion_blockout_recipe(
             wr,
@@ -665,6 +673,8 @@ def build_server(work_root: Path | None = None) -> Any:
             nofuse=nofuse,
             breast_tilt_deg=breast_tilt_deg,
             template_applied=template_applied,
+            profiles=profiles,
+            skeleton=skeleton,
         )
 
     @mcp.tool()

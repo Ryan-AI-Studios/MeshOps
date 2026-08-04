@@ -44,6 +44,7 @@ ProportionErrorCode = Literal[
     "constraint_report_failed",
     "skeleton_empty",
     "skeleton_failed",
+    "profile_unknown",
     "unknown",
 ]
 
