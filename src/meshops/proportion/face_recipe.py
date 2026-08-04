@@ -96,11 +96,15 @@ def resolve_head_bounds(
     head_unit_m: float | None,
     height_m: float | None,
     messages: list[str],
+    chest_y: float | None = None,
 ) -> HeadBounds | None:
     """Resolve HeadBounds from landmarks (same ladder as pre-0028 RECIPE_head).
 
     When top z is invented from head_unit/stature, *top_from_landmark* is False so
     the face kit can refuse to invent H (B11) while RECIPE_head still emits.
+
+    When chin/top lack y_m, *chest_y* (axial mid, B2 ladder) is the no-Y fallback —
+    not a hardcode of 0.0 alone and never chest_front (0032 B5).
     """
     from meshops.proportion.blockout_recipe import (
         _half_width_from_diameter,
@@ -146,11 +150,14 @@ def resolve_head_bounds(
             )
             return None
     ry = float(rx) * 0.9
+    # Prefer chin/top landmark Y when present; else axial mid (chest_y) / 0.0
     y = 0.0
     if chin.y_m is not None:
         y = float(chin.y_m)
     elif top is not None and top.y_m is not None:
         y = float(top.y_m)
+    else:
+        y = float(chest_y) if chest_y is not None else 0.0
     has_y = chin.y_m is not None or (top is not None and top.y_m is not None)
     placement: HeadPlacement = "full3d" if has_y else "front_plane"
     return HeadBounds(
@@ -621,7 +628,7 @@ def _build_neckline(
     neck_y = bounds.y - 0.05 * h
     if chest_y is not None:
         neck_y = float(chest_y) - 0.05 * h
-    # Prefer chest_front landmark Y when present is handled by caller via chest_y
+    # chest_y is axial mid-depth (B2 ladder / 0032), not chest_front
 
     pj = _parent_joint("neck_base", ["neck_top"], skeleton, role="neckline", messages=messages)
     if skeleton is not None:

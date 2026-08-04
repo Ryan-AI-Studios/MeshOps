@@ -58,6 +58,8 @@ _CHEST_HALF_DEPTH_FALLBACK_FRAC: Final[float] = 0.12
 _HIP_HALF_DEPTH_FALLBACK_FRAC: Final[float] = 0.13
 _DEFAULT_WAIST_TAPER: Final[float] = 0.14
 _COLUMNAR_WIDTH_RATIO: Final[float] = 0.1
+# Mirror constraints.AXIAL_DEPTH_MARGIN_M — local to avoid import cycle (B12).
+_AXIAL_DEPTH_MARGIN_M: Final[float] = 0.02
 
 RecipeFormat = Literal["bpy", "json", "both"]
 TorsoMode = Literal["trap", "ovals"]
@@ -250,6 +252,58 @@ def _mean_y(lms: dict[str, LandmarkXYZ], ids: tuple[str, ...]) -> float | None:
     return sum(ys) / len(ys)
 
 
+def _finite_m(v: float | None) -> float | None:
+    """Return float meters when finite; else None."""
+    if v is None:
+        return None
+    fv = float(v)
+    return fv if math.isfinite(fv) else None
+
+
+def _resolve_axial_chest_y(report: ProportionReport, messages: list[str]) -> float:
+    """Axial mid-depth chest_y (B2). Never chest_front alone. Always float.
+
+    Ladder:
+      1. landmarks_xyz[chest_mid].y_m (meters) if finite
+      2. depth_bands chest y_mid (fraction) * height_m if both finite
+      3. 0.0 + source=fallback0 mid_plane
+    """
+    lms = report.landmarks_xyz
+    mid = lms.get("chest_mid")
+    if mid is not None:
+        y = _finite_m(mid.y_m)
+        if y is not None:
+            messages.append(f"chest_y={y:.6g} source=chest_mid")
+            return y
+    band = _depth_band(report, "chest")
+    h = _finite_m(report.height_m)
+    if band is not None and h is not None:
+        y_mid_frac = _finite_m(getattr(band, "y_mid", None))
+        if y_mid_frac is not None:
+            chest_y = float(y_mid_frac) * float(h)
+            messages.append(f"chest_y={chest_y:.6g} source=band")
+            return chest_y
+    messages.append("chest_y=0 source=fallback0 mid_plane")
+    return 0.0
+
+
+def _resolve_hip_y(report: ProportionReport, messages: list[str]) -> float:
+    """Hip Y ladder (B6): hip_mid → mean hip_l/r y → 0.0. Always float."""
+    lms = report.landmarks_xyz
+    mid = lms.get("hip_mid")
+    if mid is not None:
+        y = _finite_m(mid.y_m)
+        if y is not None:
+            messages.append(f"hip_y={y:.6g} source=hip_mid")
+            return y
+    mean = _mean_y(lms, ("hip_l", "hip_r"))
+    if mean is not None and math.isfinite(mean):
+        messages.append(f"hip_y={mean:.6g} source=hip_l_r")
+        return float(mean)
+    messages.append("hip_y=0 source=fallback0")
+    return 0.0
+
+
 def _segment_length(p0: Vec3, p1: Vec3) -> float:
     return math.sqrt((p1[0] - p0[0]) ** 2 + (p1[1] - p0[1]) ** 2 + (p1[2] - p0[2]) ** 2)
 
@@ -435,8 +489,9 @@ def _resolve_metrics(
 
     m.shoulder_z = _mean_z(lms, ("shoulder_l", "shoulder_r"))
     m.hip_z = _mean_z(lms, ("hip_l", "hip_r"))
-    m.chest_y = _mean_y(lms, ("chest_front", "shoulder_l", "shoulder_r"))
-    m.hip_y = _mean_y(lms, ("hip_l", "hip_r"))
+    # B2 / B6: axial mid-depth plane — never chest_front alone (0032)
+    m.chest_y = _resolve_axial_chest_y(report, messages)
+    m.hip_y = _resolve_hip_y(report, messages)
 
     # chest_z
     chest_band = _depth_band(report, "chest")
@@ -663,6 +718,7 @@ def _build_head(
         head_unit_m=m.head_unit_m,
         height_m=m.height_m,
         messages=messages,
+        chest_y=m.chest_y,
     )
     if bounds is None:
         return None, None
@@ -687,6 +743,19 @@ def _build_shoulder_bridges(
     # Spec: radius <= 0.55 * upper_arm half-width or 0.04 * H — no absolute invent
     default_r = 0.04 * m.height_m if m.height_m is not None else None
     y_torso = m.chest_y if m.chest_y is not None else 0.0
+    # Landmark refs for B12 clamp (prefer true mid/front when present)
+    mid_lm = lms.get("chest_mid")
+    front_lm = lms.get("chest_front")
+    axial_ref = (
+        float(mid_lm.y_m)
+        if mid_lm is not None and mid_lm.y_m is not None and math.isfinite(float(mid_lm.y_m))
+        else y_torso
+    )
+    chest_front_y = (
+        float(front_lm.y_m)
+        if front_lm is not None and front_lm.y_m is not None and math.isfinite(float(front_lm.y_m))
+        else None
+    )
 
     for side, lm_id, ua_hw in (
         ("l", "shoulder_l", ua_hw_l),
@@ -710,7 +779,8 @@ def _build_shoulder_bridges(
             continue
         sx = float(lm.x_m)
         sz = float(lm.z_m)
-        sy = float(lm.y_m) if lm.y_m is not None else y_torso
+        # B12: p0 = axial mid; p1 = joint y if finite else axial mid
+        sy = float(lm.y_m) if lm.y_m is not None and math.isfinite(float(lm.y_m)) else y_torso
         # Torso side attachment at shoulder_hw * 0.85 toward shoulder
         torso_x = (
             math.copysign(m.shoulder_hw * 0.85, sx)
@@ -719,11 +789,20 @@ def _build_shoulder_bridges(
         )
         p0 = [torso_x, y_torso, m.shoulder_z]
         p1 = [sx, sy, sz]
+        # B12 clamp: if midpoint closer to chest_front than mid by margin → both mid
+        if chest_front_y is not None:
+            midpt_y = 0.5 * (float(p0[1]) + float(p1[1]))
+            d_mid = abs(midpt_y - axial_ref)
+            d_front = abs(midpt_y - chest_front_y)
+            if d_front + _AXIAL_DEPTH_MARGIN_M < d_mid:
+                p0[1] = axial_ref
+                p1[1] = axial_ref
+                messages.append(f"RECIPE_shoulder_bridge_{side}: Y clamped to axial mid (B12)")
         if _segment_length((p0[0], p0[1], p0[2]), (p1[0], p1[1], p1[2])) <= _NEAR_ZERO_LEN:
             messages.append(f"RECIPE_shoulder_bridge_{side} skipped: zero length")
             continue
         placement: Literal["full3d", "front_plane"] = (
-            "full3d" if lm.y_m is not None and m.chest_y is not None else "front_plane"
+            "full3d" if m.chest_y is not None else "front_plane"
         )
         parts.append(
             RecipePart(
@@ -1905,13 +1984,15 @@ def _emit_one_profile_part(
         if role == "glute_soft":
             anchor = _joint_xyz(joints.get("pelvis"))
             if anchor is None and m.hip_z is not None:
-                anchor = [0.0, m.hip_y or 0.0, m.hip_z]
+                hip_y_anchor = m.hip_y if m.hip_y is not None else 0.0
+                anchor = [0.0, hip_y_anchor, m.hip_z]
         else:
             anchor = _joint_xyz(joints.get("spine_high")) or _joint_xyz(joints.get("spine_mid"))
+            chest_y_anchor = m.chest_y if m.chest_y is not None else 0.0
             if anchor is None and m.chest_z is not None:
-                anchor = [0.0, m.chest_y or 0.0, m.chest_z]
+                anchor = [0.0, chest_y_anchor, m.chest_z]
             elif anchor is None and m.shoulder_z is not None:
-                anchor = [0.0, m.chest_y or 0.0, m.shoulder_z]
+                anchor = [0.0, chest_y_anchor, m.shoulder_z]
         if anchor is None:
             messages.append(f"parent_joint {role} unresolved — using landmark placement")
             z0 = m.hip_z if role == "glute_soft" else (m.chest_z or m.shoulder_z or 1.2)

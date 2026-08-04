@@ -1295,7 +1295,9 @@ def _role_target_y(
             return abs(float(gy))  # glute +Y
         return None
     if role in ("neck", "head", "torso", "shoulder_bridge"):
-        return _lm_y(report, "chest_mid") or _lm_y(report, "chest_front")
+        # B9 (0032): bare `or` treats mid y_m=0.0 as falsy → wrong front target
+        mid = _lm_y(report, "chest_mid")
+        return mid if mid is not None else _lm_y(report, "chest_front")
     return None
 
 

@@ -605,3 +605,42 @@ def test_face__headbounds_type() -> None:
         has_y=True,
     )
     assert pytest.approx(0.18) == b.H
+
+
+def test_face__head_no_y_fallback_chest_y() -> None:
+    """0032 B5: resolve_head_bounds no-Y uses chest_y axial mid (not hardcode 0 alone)."""
+    report = _full_torso_report()
+    lms = dict(report.landmarks_xyz)
+    lms["chin"] = _lm("chin", x_m=0.0, y_m=None, z_m=1.50)
+    lms["cranial_vertex"] = _lm("cranial_vertex", x_m=0.0, y_m=None, z_m=1.68)
+    report = report.model_copy(update={"landmarks_xyz": lms})
+    msgs: list[str] = []
+    bounds = resolve_head_bounds(
+        report,
+        head_unit_m=1.72 / 7.5,
+        height_m=1.72,
+        messages=msgs,
+        chest_y=0.05,
+    )
+    assert bounds is not None
+    assert bounds.y == pytest.approx(0.05, abs=1e-6)
+    assert bounds.has_y is False
+
+
+def test_face__head_chin_y_not_forced_to_mid() -> None:
+    """0032 B5: chin Y preserved when present (may still fail axial by design)."""
+    report = _full_torso_report()
+    lms = dict(report.landmarks_xyz)
+    lms["chin"] = _lm("chin", x_m=0.0, y_m=-0.04, z_m=1.50)
+    report = report.model_copy(update={"landmarks_xyz": lms})
+    msgs: list[str] = []
+    bounds = resolve_head_bounds(
+        report,
+        head_unit_m=1.72 / 7.5,
+        height_m=1.72,
+        messages=msgs,
+        chest_y=0.0,
+    )
+    assert bounds is not None
+    assert bounds.y == pytest.approx(-0.04, abs=1e-6)
+    assert bounds.has_y is True

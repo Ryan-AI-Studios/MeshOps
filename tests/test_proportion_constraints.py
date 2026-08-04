@@ -28,6 +28,7 @@ from meshops.proportion.constraints import (
     OUTER_X_TOL_M,
     SOFT_GAP_FRAC,
     _band_weighted_free_dof_score,
+    _role_target_y,
     classify_part_name,
     optimize_package,
     part_y,
@@ -1252,3 +1253,117 @@ def test_error_codes_present() -> None:
         "constraint_report_failed",
     ):
         assert c in codes
+
+
+def test_role_target_y_mid_zero_not_front() -> None:
+    """0032 B9: chest_mid y_m=0.0 must stick (bare `or` used to fall through to front)."""
+
+    class _Lm:
+        def __init__(self, y: float) -> None:
+            self.y_m = y
+
+    class _R:
+        def __init__(self) -> None:
+            self.landmarks_xyz = {
+                "chest_mid": _Lm(0.0),
+                "chest_front": _Lm(-0.13),
+            }
+
+    target = _role_target_y("neck", "none", [], _R(), None)
+    assert target == pytest.approx(0.0)
+    assert target != pytest.approx(-0.13)
+
+    # Also for other axial roles
+    for role in ("head", "torso", "shoulder_bridge"):
+        t = _role_target_y(role, "none", [], _R(), None)  # type: ignore[arg-type]
+        assert t == pytest.approx(0.0)
+
+
+def test_emit_axial_mid_passes_constraint_rogue_v3_class() -> None:
+    """0032: product-class emit (front=-0.13, mid=0) → C_axial_depth_plane pass."""
+    from meshops.proportion.blockout_recipe import build_blockout_recipe
+    from meshops.proportion.models import (
+        DepthBand,
+        DiameterMeasure,
+        LandmarkXYZ,
+        ProportionReport,
+        QualityFlags,
+    )
+
+    def _lm(
+        id_: str,
+        *,
+        x_m: float | None = None,
+        y_m: float | None = None,
+        z_m: float | None = None,
+    ) -> LandmarkXYZ:
+        return LandmarkXYZ(id=id_, x_m=x_m, y_m=y_m, z_m=z_m)
+
+    def _diam(band_id: str, half_width_m: float = 0.05) -> DiameterMeasure:
+        return DiameterMeasure(
+            band_id=band_id,
+            view="front",
+            width_px=40.0,
+            width_eucl_px=40.0,
+            theta_deg=90.0,
+            width_frac=0.1,
+            width_m=half_width_m * 2.0,
+            half_width_m=half_width_m,
+            mid_x_px=100.0,
+            mid_y_px=200.0,
+        )
+
+    lms = {
+        "sole": _lm("sole", x_m=0.0, y_m=0.0, z_m=0.0),
+        "chin": _lm("chin", x_m=0.0, y_m=None, z_m=1.50),
+        "shoulder_l": _lm("shoulder_l", x_m=-0.20, y_m=None, z_m=1.38),
+        "shoulder_r": _lm("shoulder_r", x_m=0.20, y_m=None, z_m=1.38),
+        "hip_l": _lm("hip_l", x_m=-0.14, y_m=0.0, z_m=0.95),
+        "hip_r": _lm("hip_r", x_m=0.14, y_m=0.0, z_m=0.95),
+        "cranial_vertex": _lm("cranial_vertex", x_m=0.0, y_m=None, z_m=1.68),
+        "crotch_pubic": _lm("crotch_pubic", x_m=0.0, y_m=0.0, z_m=0.86),
+        "chest_front": _lm("chest_front", x_m=0.0, y_m=-0.13, z_m=1.25),
+        "chest_mid": _lm("chest_mid", x_m=0.0, y_m=0.0, z_m=1.25),
+    }
+    diams = [
+        _diam("bust", 0.16),
+        _diam("waist", 0.13),
+        _diam("neck", 0.05),
+        _diam("upper_arm_l"),
+        _diam("upper_arm_r"),
+    ]
+    bands = [
+        DepthBand(
+            band_id="chest",
+            depth_px=50.0,
+            depth_frac=0.12,
+            depth_m=0.24,
+            y_front=0.1,
+            y_back=-0.1,
+            y_mid=0.0,
+            z_frac=0.72,
+        ),
+        DepthBand(
+            band_id="hip",
+            depth_px=50.0,
+            depth_frac=0.12,
+            depth_m=0.26,
+            y_front=0.1,
+            y_back=-0.1,
+            y_mid=0.0,
+            z_frac=0.55,
+        ),
+    ]
+    report = ProportionReport(
+        schema_version="1.1.0",
+        height_m=1.72,
+        head_unit_frac=1.0 / 7.5,
+        landmarks_xyz=lms,
+        diameters=diams,
+        depth_bands=bands,
+        quality=QualityFlags(),
+    )
+    pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
+    result = validate_constraints(pkg, report=report)
+    by_id = {r.id: r for r in result.rules}
+    assert by_id["C_axial_depth_plane"].status == "pass", by_id["C_axial_depth_plane"].message
