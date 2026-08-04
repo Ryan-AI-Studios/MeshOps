@@ -1,0 +1,744 @@
+"""Head / face / hair / neckline RECIPE primitives (track 0028).
+
+Opt-in blockout-grade face kit parented to head/neck skeleton or Loomis placement.
+Authoring only - not identity biometrics, not print success (Difficulty §12 / N6).
+
+All names stay RECIPE_* (never FACE_*/HAIR_*/NECKLINE_* prefixes).
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Final, Literal
+
+if TYPE_CHECKING:
+    from meshops.proportion.blockout_recipe import RecipePart
+    from meshops.proportion.models import ProportionReport
+    from meshops.proportion.skeleton import BlockoutSkeleton
+
+HairTier = Literal["none", "short", "bun", "long_proxy"]
+NecklineTier = Literal["none", "crew", "v_proxy"]
+HeadPlacement = Literal["full3d", "front_plane"]
+
+HAIR_TIERS: Final[frozenset[str]] = frozenset({"none", "short", "bun", "long_proxy"})
+NECKLINE_TIERS: Final[frozenset[str]] = frozenset({"none", "crew", "v_proxy"})
+
+# B11 exact skip message
+FACE_KIT_SKIP_BOUNDS: Final[str] = "face kit skipped - chin/top bounds unresolved"
+
+# Loomis / authoring freezes (plan §7)
+_EYE_Z_FRAC: Final[float] = 0.50
+_BROW_Z_FRAC: Final[float] = 0.67
+_NOSE_BASE_Z_FRAC: Final[float] = 0.33
+_LIP_Z_FRAC: Final[float] = 0.20  # authoring choice, not Loomis third
+_NOSE_TIP_Y_FRAC_RY: Final[float] = 0.15
+_EYE_RADIUS_FRAC_H: Final[float] = 0.08
+_JAW_HALF_WIDTH_FRAC_RX: Final[float] = 0.85
+_HAIR_SHORT_RZ_FRAC: Final[float] = 0.25
+_BUN_R_FRAC_H: Final[float] = 0.12
+_LONG_PROXY_LEN_FRAC_H: Final[float] = 0.45
+_CREW_LEN_SHOULDER_FRAC: Final[float] = 0.4
+_CREW_LEN_H_FALLBACK: Final[float] = 0.25
+_NECKLINE_R_FRAC_H: Final[float] = 0.012
+_V_X_SHOULDER_FRAC: Final[float] = 0.05
+_V_DOWN_Z_FRAC_H: Final[float] = 0.08
+_V_ANGLE_DEG: Final[float] = 15.0
+_FUSE_EPS_FRAC: Final[float] = 0.02
+_FUSE_R_NECK_FRAC: Final[float] = 0.8
+_SCM_R_FRAC_H: Final[float] = 0.012
+
+
+@dataclass(frozen=True)
+class HeadBounds:
+    """Shared head geometry for RECIPE_head + face kit (B17)."""
+
+    z_chin: float
+    z_top: float
+    z_c: float
+    H: float  # z_top - z_chin
+    rx: float
+    ry: float
+    rz: float
+    y: float
+    placement: HeadPlacement
+    has_y: bool
+
+
+def scale_head_bounds(
+    bounds: HeadBounds, *, rx_scale: float, ry_scale: float, rz_scale: float
+) -> HeadBounds:
+    """Apply template head radius/depth scales to shared bounds (same path as RECIPE_head)."""
+    return replace(
+        bounds,
+        rx=float(bounds.rx) * float(rx_scale),
+        ry=float(bounds.ry) * float(ry_scale),
+        rz=float(bounds.rz) * float(rz_scale),
+    )
+
+
+def resolve_head_bounds(
+    report: ProportionReport,
+    *,
+    head_unit_m: float | None,
+    height_m: float | None,
+    messages: list[str],
+) -> HeadBounds | None:
+    """Resolve HeadBounds from landmarks (same ladder as pre-0028 RECIPE_head)."""
+    from meshops.proportion.blockout_recipe import (
+        _half_width_from_diameter,
+        _resolve_diameter,
+    )
+
+    lms = report.landmarks_xyz
+    chin = lms.get("chin")
+    top = lms.get("cranial_vertex") or lms.get("hair_crown")
+    if chin is None or chin.z_m is None:
+        messages.append("RECIPE_head skipped: need chin z_m")
+        return None
+    z_chin = float(chin.z_m)
+    if top is not None and top.z_m is not None:
+        z_top = float(top.z_m)
+    elif head_unit_m is not None:
+        z_top = z_chin + 0.75 * float(head_unit_m)
+    elif height_m is not None:
+        z_top = z_chin + 0.10 * float(height_m)
+    else:
+        messages.append("RECIPE_head skipped: insufficient z for head")
+        return None
+    if z_top <= z_chin:
+        messages.append("RECIPE_head skipped: top z <= chin z")
+        return None
+    z_c = (z_chin + z_top) / 2.0
+    h = z_top - z_chin
+    rz = h / 2.0
+    diam = _resolve_diameter(report.diameters, "head")
+    rx: float | None = None
+    if diam is not None:
+        rx = _half_width_from_diameter(diam)
+    if rx is None:
+        if head_unit_m is not None:
+            rx = 0.40 * float(head_unit_m)
+        elif height_m is not None:
+            rx = 0.06 * float(height_m)
+        else:
+            messages.append(
+                "RECIPE_head skipped: no head diameter, head_unit_m, or height_m for radius"
+            )
+            return None
+    ry = float(rx) * 0.9
+    y = 0.0
+    if chin.y_m is not None:
+        y = float(chin.y_m)
+    elif top is not None and top.y_m is not None:
+        y = float(top.y_m)
+    has_y = chin.y_m is not None or (top is not None and top.y_m is not None)
+    placement: HeadPlacement = "full3d" if has_y else "front_plane"
+    return HeadBounds(
+        z_chin=z_chin,
+        z_top=z_top,
+        z_c=z_c,
+        H=h,
+        rx=float(rx),
+        ry=ry,
+        rz=rz,
+        y=y,
+        placement=placement,
+        has_y=has_y,
+    )
+
+
+def head_part_from_bounds(bounds: HeadBounds) -> RecipePart:
+    """Emit RECIPE_head ellipsoid from shared HeadBounds."""
+    from meshops.proportion.blockout_recipe import RecipePart
+
+    return RecipePart(
+        name="RECIPE_head",
+        role="head",
+        kind="ellipsoid",
+        center=[0.0, bounds.y, bounds.z_c],
+        rx_m=bounds.rx,
+        ry_m=bounds.ry,
+        rz_m=bounds.rz,
+        placement=bounds.placement,
+        label="RECIPE_head",
+    )
+
+
+def _parent_joint(
+    preferred: str,
+    fallbacks: list[str],
+    skeleton: BlockoutSkeleton | None,
+    *,
+    role: str,
+    messages: list[str],
+) -> str | None:
+    """Resolve parent_joint id; null + message if unresolved (B10)."""
+    if skeleton is None:
+        return None
+    from meshops.proportion.blockout_recipe import _joints_map, _resolve_parent_joint_id
+
+    joints = _joints_map(skeleton)
+    pid = _resolve_parent_joint_id(preferred, fallbacks, joints, side="none")
+    if pid is None:
+        messages.append(f"parent_joint {role} unresolved - using landmark/Loomis placement")
+    return pid
+
+
+def _ellipsoid(
+    name: str,
+    role: str,
+    center: list[float],
+    rx: float,
+    ry: float,
+    rz: float,
+    *,
+    placement: HeadPlacement,
+    parent_joint: str | None = None,
+    notes: str | None = None,
+) -> RecipePart:
+    from meshops.proportion.blockout_recipe import RecipePart
+
+    return RecipePart(
+        name=name,
+        role=role,  # type: ignore[arg-type]
+        kind="ellipsoid",
+        center=center,
+        rx_m=rx,
+        ry_m=ry,
+        rz_m=rz,
+        placement=placement,
+        label=name,
+        parent_joint=parent_joint,
+        notes=notes,
+    )
+
+
+def _capsule(
+    name: str,
+    role: str,
+    p0: list[float],
+    p1: list[float],
+    radius: float,
+    *,
+    placement: HeadPlacement,
+    parent_joint: str | None = None,
+    notes: str | None = None,
+) -> RecipePart:
+    from meshops.proportion.blockout_recipe import RecipePart
+
+    return RecipePart(
+        name=name,
+        role=role,  # type: ignore[arg-type]
+        kind="capsule",
+        p0=p0,
+        p1=p1,
+        radius_m=radius,
+        placement=placement,
+        label=name,
+        parent_joint=parent_joint,
+        notes=notes,
+    )
+
+
+def _box(
+    name: str,
+    role: str,
+    center: list[float],
+    *,
+    half_width: float,
+    half_depth: float,
+    z_bottom: float,
+    z_top: float,
+    placement: HeadPlacement,
+    parent_joint: str | None = None,
+) -> RecipePart:
+    from meshops.proportion.blockout_recipe import RecipePart
+
+    return RecipePart(
+        name=name,
+        role=role,  # type: ignore[arg-type]
+        kind="box",
+        center=center,
+        top_half_width_m=half_width,
+        bottom_half_width_m=half_width * 0.85,
+        half_depth_m=half_depth,
+        z_bottom_m=z_bottom,
+        z_top_m=z_top,
+        placement=placement,
+        label=name,
+        parent_joint=parent_joint,
+    )
+
+
+def _build_face_features(
+    bounds: HeadBounds,
+    *,
+    skeleton: BlockoutSkeleton | None,
+    messages: list[str],
+) -> list[RecipePart]:
+    """Jaw + brows + eyes + nose + ears + lip (R1 / B7)."""
+    h = bounds.H
+    z_chin = bounds.z_chin
+    y = bounds.y
+    rx = bounds.rx
+    ry = bounds.ry
+    placement = bounds.placement
+
+    eye_r = _EYE_RADIUS_FRAC_H * h
+    eye_z = z_chin + _EYE_Z_FRAC * h
+    brow_z = z_chin + _BROW_Z_FRAC * h
+    nose_base_z = z_chin + _NOSE_BASE_Z_FRAC * h
+    lip_z = z_chin + _LIP_Z_FRAC * h
+    # Face forward -Y of head center
+    face_y = y - 0.40 * ry
+    # Inter-eye gap ~ one eye width; half-sep = 2 * eye_r
+    eye_half_sep = 2.0 * eye_r
+    nose_tip_y = y - _NOSE_TIP_Y_FRAC_RY * ry
+
+    pj_head = _parent_joint("head", ["chin", "crown"], skeleton, role="eye_soft", messages=messages)
+    # Prefer head for features; jaw prefers chin
+    pj_jaw = _parent_joint("chin", ["head"], skeleton, role="jaw", messages=messages)
+    # Reuse head parent for remaining features without spamming messages
+    pj_feat = pj_head
+    if skeleton is not None and pj_feat is None:
+        # one message already emitted for eye_soft; still try silent resolve for others
+        from meshops.proportion.blockout_recipe import _joints_map, _resolve_parent_joint_id
+
+        pj_feat = _resolve_parent_joint_id(
+            "head", ["chin", "crown"], _joints_map(skeleton), side="none"
+        )
+
+    parts: list[RecipePart] = []
+
+    # Jaw wedge (box) below mid-face
+    jaw_half_w = _JAW_HALF_WIDTH_FRAC_RX * rx
+    jaw_z_top = z_chin + 0.28 * h
+    jaw_z_bot = z_chin - 0.02 * h
+    jaw_z_c = (jaw_z_top + jaw_z_bot) / 2.0
+    parts.append(
+        _box(
+            "RECIPE_jaw",
+            "jaw",
+            [0.0, face_y + 0.05 * ry, jaw_z_c],
+            half_width=jaw_half_w,
+            half_depth=0.55 * ry,
+            z_bottom=jaw_z_bot,
+            z_top=jaw_z_top,
+            placement=placement,
+            parent_joint=pj_jaw,
+        )
+    )
+
+    # Brows L/R - thin horizontal capsules
+    brow_half_len = 1.1 * eye_r
+    brow_r = 0.015 * h
+    for side, sx in (("l", -1.0), ("r", 1.0)):
+        cx = sx * eye_half_sep
+        parts.append(
+            _capsule(
+                f"RECIPE_brow_soft_{side}",
+                "brow_soft",
+                [cx - brow_half_len, face_y, brow_z],
+                [cx + brow_half_len, face_y, brow_z],
+                brow_r,
+                placement=placement,
+                parent_joint=pj_feat,
+            )
+        )
+
+    # Eyes L/R - disk-ish ellipsoids (thin ry)
+    for side, sx in (("l", -1.0), ("r", 1.0)):
+        parts.append(
+            _ellipsoid(
+                f"RECIPE_eye_soft_{side}",
+                "eye_soft",
+                [sx * eye_half_sep, face_y, eye_z],
+                eye_r,
+                0.25 * eye_r,
+                0.70 * eye_r,
+                placement=placement,
+                parent_joint=pj_feat,
+            )
+        )
+
+    # Nose - capsule base -> tip (-Y)
+    parts.append(
+        _capsule(
+            "RECIPE_nose_soft",
+            "nose_soft",
+            [0.0, y - 0.05 * ry, nose_base_z],
+            [0.0, nose_tip_y, nose_base_z - 0.02 * h],
+            0.025 * h,
+            placement=placement,
+            parent_joint=pj_feat,
+        )
+    )
+
+    # Ears L/R - span brow→nose base Z, lateral ±rx
+    ear_z = (brow_z + nose_base_z) / 2.0
+    ear_rz = max((brow_z - nose_base_z) / 2.0, 0.04 * h)
+    ear_rx = 0.08 * h
+    ear_ry = 0.04 * h
+    for side, sx in (("l", -1.0), ("r", 1.0)):
+        parts.append(
+            _ellipsoid(
+                f"RECIPE_ear_soft_{side}",
+                "ear_soft",
+                [sx * rx, y, ear_z],
+                ear_rx,
+                ear_ry,
+                ear_rz,
+                placement=placement,
+                parent_joint=pj_feat,
+            )
+        )
+
+    # Lip - closed-mouth thin bar (B16)
+    parts.append(
+        _ellipsoid(
+            "RECIPE_lip_soft",
+            "lip_soft",
+            [0.0, face_y, lip_z],
+            0.12 * h,
+            0.02 * h,
+            0.015 * h,
+            placement=placement,
+            parent_joint=pj_feat,
+        )
+    )
+
+    return parts
+
+
+def _build_scm(
+    bounds: HeadBounds,
+    *,
+    skeleton: BlockoutSkeleton | None,
+    shoulder_z: float | None,
+    chest_y: float | None,
+    neck_len_m: float | None,
+    messages: list[str],
+) -> list[RecipePart]:
+    """Sternomastoid L/R capsules neck_base to near ear base (B14). With --face when neck ok."""
+    h = bounds.H
+    placement = bounds.placement
+    y = bounds.y if bounds.has_y else (chest_y if chest_y is not None else 0.0)
+
+    neck_base_z: float | None = None
+    neck_base_y = y
+
+    if skeleton is not None:
+        from meshops.proportion.blockout_recipe import _joint_xyz, _joints_map
+
+        jmap = _joints_map(skeleton)
+        nb = _joint_xyz(jmap.get("neck_base"))
+        if nb is not None:
+            neck_base_z = nb[2]
+            neck_base_y = nb[1]
+    if neck_base_z is None:
+        if shoulder_z is not None:
+            neck_base_z = float(shoulder_z)
+            if chest_y is not None:
+                neck_base_y = float(chest_y)
+        elif neck_len_m is not None:
+            # Fallback: chin - neck_len ≈ shoulder
+            neck_base_z = bounds.z_chin - float(neck_len_m)
+        else:
+            messages.append("sternomastoid skipped - neck_base / shoulder unavailable")
+            return []
+
+    pj = _parent_joint(
+        "neck_base", ["neck_top", "head"], skeleton, role="sternomastoid_soft", messages=messages
+    )
+
+    # Ear base approx lateral at mid ear Z
+    brow_z = bounds.z_chin + _BROW_Z_FRAC * h
+    nose_base_z = bounds.z_chin + _NOSE_BASE_Z_FRAC * h
+    ear_z = (brow_z + nose_base_z) / 2.0
+    ear_base_z = ear_z - 0.3 * ((brow_z - nose_base_z) / 2.0)
+    r = _SCM_R_FRAC_H * h
+    parts: list[RecipePart] = []
+    for side, sx in (("l", -1.0), ("r", 1.0)):
+        p0 = [sx * 0.03 * h, neck_base_y, float(neck_base_z)]
+        p1 = [sx * bounds.rx * 0.85, y, ear_base_z]
+        if math.dist(p0, p1) <= 1e-9:
+            continue
+        parts.append(
+            _capsule(
+                f"RECIPE_sternomastoid_soft_{side}",
+                "sternomastoid_soft",
+                p0,
+                p1,
+                r,
+                placement=placement,
+                parent_joint=pj,
+            )
+        )
+    return parts
+
+
+def _build_fuse(
+    bounds: HeadBounds,
+    *,
+    skeleton: BlockoutSkeleton | None,
+    neck_top_z: float | None,
+    neck_radius: float | None,
+    head_unit_m: float | None,
+    messages: list[str],
+) -> list[RecipePart]:
+    """Optional RECIPE_neck_head_fuse when gap large (B15)."""
+    head_bottom = bounds.z_c - bounds.rz  # == z_chin for ellipsoid head
+    if neck_top_z is None:
+        return []
+    gap = float(head_bottom) - float(neck_top_z)
+    eps_ref = float(head_unit_m) if head_unit_m is not None else bounds.H
+    eps = _FUSE_EPS_FRAC * eps_ref
+    if gap <= eps:
+        return []
+    r_neck = float(neck_radius) if neck_radius is not None else 0.05 * bounds.H
+    r = _FUSE_R_NECK_FRAC * r_neck
+    pj = _parent_joint("neck_top", ["neck_base", "head"], skeleton, role="neck", messages=messages)
+    y = bounds.y
+    return [
+        _capsule(
+            "RECIPE_neck_head_fuse",
+            "neck",
+            [0.0, y, float(neck_top_z)],
+            [0.0, y, float(head_bottom)],
+            r,
+            placement=bounds.placement,
+            parent_joint=pj,
+            notes=f"fuse gap={gap:.4f}m",
+        )
+    ]
+
+
+def _build_hair(
+    bounds: HeadBounds,
+    hair: str,
+    *,
+    skeleton: BlockoutSkeleton | None,
+    messages: list[str],
+) -> list[RecipePart]:
+    """Hair mass tiers: short | bun | long_proxy (B8)."""
+    if hair == "none":
+        return []
+    h = bounds.H
+    placement = bounds.placement
+    y = bounds.y
+    crown_z = bounds.z_top
+    pj = _parent_joint("crown", ["head"], skeleton, role="hair_mass", messages=messages)
+    parts: list[RecipePart] = []
+
+    if hair in ("short", "bun"):
+        # Shallow cap ellipsoid on crown
+        cap_rz = _HAIR_SHORT_RZ_FRAC * bounds.rz
+        parts.append(
+            _ellipsoid(
+                "RECIPE_hair_mass",
+                "hair_mass",
+                [0.0, y, crown_z - 0.15 * bounds.rz],
+                bounds.rx * 1.05,
+                bounds.ry * 1.05,
+                cap_rz,
+                placement=placement,
+                parent_joint=pj,
+            )
+        )
+        if hair == "bun":
+            bun_r = _BUN_R_FRAC_H * h
+            parts.append(
+                _ellipsoid(
+                    "RECIPE_hair_mass_bun",
+                    "hair_mass",
+                    [0.0, y + 0.05 * bounds.ry, crown_z + bun_r * 0.6],
+                    bun_r,
+                    bun_r,
+                    bun_r,
+                    placement=placement,
+                    parent_joint=pj,
+                )
+            )
+    elif hair == "long_proxy":
+        # Elongated ellipsoid rear (+Y) from crown
+        length = _LONG_PROXY_LEN_FRAC_H * h
+        parts.append(
+            _ellipsoid(
+                "RECIPE_hair_mass",
+                "hair_mass",
+                [0.0, y + 0.55 * length, crown_z - 0.35 * length],
+                bounds.rx * 0.85,
+                0.45 * length,
+                0.55 * length,
+                placement=placement,
+                parent_joint=pj,
+            )
+        )
+    else:
+        messages.append(f"unknown hair tier {hair!r} - no hair mass")
+    return parts
+
+
+def _build_neckline(
+    bounds: HeadBounds,
+    neckline: str,
+    *,
+    skeleton: BlockoutSkeleton | None,
+    shoulder_hw: float | None,
+    shoulder_z: float | None,
+    chest_y: float | None,
+    messages: list[str],
+) -> list[RecipePart]:
+    """Crew or v_proxy neckline (B9)."""
+    if neckline == "none":
+        return []
+    h = bounds.H
+    placement = bounds.placement
+    r = _NECKLINE_R_FRAC_H * h
+
+    neck_z: float | None = None
+    neck_y = bounds.y - 0.05 * h
+    if chest_y is not None:
+        neck_y = float(chest_y) - 0.05 * h
+    # Prefer chest_front landmark Y when present is handled by caller via chest_y
+
+    pj = _parent_joint("neck_base", ["neck_top"], skeleton, role="neckline", messages=messages)
+    if skeleton is not None:
+        from meshops.proportion.blockout_recipe import _joint_xyz, _joints_map
+
+        nb = _joint_xyz(_joints_map(skeleton).get("neck_base"))
+        if nb is not None:
+            neck_z = nb[2]
+            neck_y = nb[1] - 0.02 * h
+    if neck_z is None:
+        if shoulder_z is not None:
+            neck_z = float(shoulder_z)
+        else:
+            neck_z = bounds.z_chin - 0.5 * (bounds.z_chin - (shoulder_z or bounds.z_chin - 0.1 * h))
+            if shoulder_z is None:
+                messages.append("neckline: neck_base/shoulder z fallback from head")
+
+    shw = float(shoulder_hw) if shoulder_hw is not None else None
+    parts: list[RecipePart] = []
+
+    if neckline == "crew":
+        half_len = 0.5 * (
+            _CREW_LEN_SHOULDER_FRAC * shw if shw is not None else _CREW_LEN_H_FALLBACK * h
+        )
+        parts.append(
+            _capsule(
+                "RECIPE_neckline_crew",
+                "neckline",
+                [-half_len, neck_y, float(neck_z)],
+                [half_len, neck_y, float(neck_z)],
+                r,
+                placement=placement,
+                parent_joint=pj,
+            )
+        )
+    elif neckline == "v_proxy":
+        dx = _V_X_SHOULDER_FRAC * shw if shw is not None else 0.05 * h
+        down = _V_DOWN_Z_FRAC_H * h
+        ang = math.radians(_V_ANGLE_DEG)
+        for side, sx in (("l", -1.0), ("r", 1.0)):
+            # From neck_base ±dx X, extend down-Z with slight outward X (~15° from vertical)
+            p0 = [sx * dx, neck_y, float(neck_z)]
+            p1 = [
+                sx * (dx + down * math.sin(ang)),
+                neck_y,
+                float(neck_z) - down * math.cos(ang),
+            ]
+            parts.append(
+                _capsule(
+                    f"RECIPE_neckline_v_{side}",
+                    "neckline",
+                    p0,
+                    p1,
+                    r,
+                    placement=placement,
+                    parent_joint=pj,
+                )
+            )
+    else:
+        messages.append(f"unknown neckline tier {neckline!r} - no neckline")
+    return parts
+
+
+def build_face_parts(
+    report: ProportionReport,
+    head_bounds: HeadBounds | None,
+    *,
+    face: bool = False,
+    hair: str = "none",
+    neckline: str = "none",
+    skeleton: BlockoutSkeleton | None = None,
+    shoulder_hw: float | None = None,
+    neck_len_m: float | None = None,
+    shoulder_z: float | None = None,
+    chest_y: float | None = None,
+    neck_top_z: float | None = None,
+    neck_radius: float | None = None,
+    head_unit_m: float | None = None,
+    messages: list[str] | None = None,
+) -> list[RecipePart]:
+    """Emit face/hair/neckline RECIPE parts from shared HeadBounds (B7-B15).
+
+    *report* reserved for future measured face diameters; placement uses *head_bounds*.
+    """
+    del report  # placement is Loomis/bounds-driven in v1
+    msgs = messages if messages is not None else []
+    if not face and hair == "none" and neckline == "none":
+        return []
+    if head_bounds is None:
+        msgs.append(FACE_KIT_SKIP_BOUNDS)
+        return []
+
+    parts: list[RecipePart] = []
+    if face:
+        parts.extend(_build_face_features(head_bounds, skeleton=skeleton, messages=msgs))
+        parts.extend(
+            _build_scm(
+                head_bounds,
+                skeleton=skeleton,
+                shoulder_z=shoulder_z,
+                chest_y=chest_y,
+                neck_len_m=neck_len_m,
+                messages=msgs,
+            )
+        )
+        parts.extend(
+            _build_fuse(
+                head_bounds,
+                skeleton=skeleton,
+                neck_top_z=neck_top_z,
+                neck_radius=neck_radius,
+                head_unit_m=head_unit_m,
+                messages=msgs,
+            )
+        )
+    parts.extend(_build_hair(head_bounds, hair, skeleton=skeleton, messages=msgs))
+    parts.extend(
+        _build_neckline(
+            head_bounds,
+            neckline,
+            skeleton=skeleton,
+            shoulder_hw=shoulder_hw,
+            shoulder_z=shoulder_z,
+            chest_y=chest_y,
+            messages=msgs,
+        )
+    )
+    return parts
+
+
+__all__ = [
+    "FACE_KIT_SKIP_BOUNDS",
+    "HAIR_TIERS",
+    "NECKLINE_TIERS",
+    "HeadBounds",
+    "build_face_parts",
+    "head_part_from_bounds",
+    "resolve_head_bounds",
+    "scale_head_bounds",
+]

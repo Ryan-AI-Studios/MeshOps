@@ -2383,6 +2383,21 @@ def proportion_blockout_recipe_cmd(
         "--skeleton",
         help="Optional blockout_skeleton.json for parent_joint (0026/0027)",
     ),
+    face: bool = typer.Option(
+        False,
+        "--face/--no-face",
+        help="Emit face kit (jaw/eyes/nose/ears/lips/SCM) — authoring only (0028)",
+    ),
+    hair: str = typer.Option(
+        "none",
+        "--hair",
+        help="Hair mass tier: none | short | bun | long_proxy (default none; 0028)",
+    ),
+    neckline: str = typer.Option(
+        "none",
+        "--neckline",
+        help="Neckline proxy: none | crew | v_proxy (default none; 0028)",
+    ),
     force: bool = typer.Option(
         False,
         "--force",
@@ -2404,6 +2419,12 @@ def proportion_blockout_recipe_cmd(
     glute_mode = glute.strip().lower()
     if glute_mode not in ("oval", "two_spheres"):
         raise typer.BadParameter("--glute must be oval or two_spheres")
+    hair_tier = hair.strip().lower()
+    if hair_tier not in ("none", "short", "bun", "long_proxy"):
+        raise typer.BadParameter("--hair must be none, short, bun, or long_proxy")
+    neckline_tier = neckline.strip().lower()
+    if neckline_tier not in ("none", "crew", "v_proxy"):
+        raise typer.BadParameter("--neckline must be none, crew, or v_proxy")
 
     try:
         # Keep --out as str so trailing directory separators survive (R1).
@@ -2421,6 +2442,9 @@ def proportion_blockout_recipe_cmd(
             template_applied=template_applied,
             profiles=profiles,
             skeleton=skeleton,
+            face=face,
+            hair=hair_tier,  # type: ignore[arg-type]
+            neckline=neckline_tier,  # type: ignore[arg-type]
         )
     except ProportionError as exc:
         _emit_error(exc, json_mode=json_out, code=1)

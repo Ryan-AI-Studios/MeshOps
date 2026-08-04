@@ -1,4 +1,4 @@
-"""Proportion → blockout primitive recipes (track 0019 + 0027 profiles).
+"""Proportion → blockout primitive recipes (track 0019 + 0027 profiles + 0028 face).
 
 Build BlockoutRecipePackage from ProportionReport; emit JSON + Blender 5.2 bpy script.
 Authoring layout only — not mesh or print success (Difficulty §12 / N6).
@@ -9,6 +9,7 @@ neck diameter already preferred when available.
 breast_lower* used for rz in 0030; lateral fuse/diameter still 0027.
 0030: soft offsets prefer report.soft_spacing measured gaps (B7) over template fracs.
 0027: anatomy profiles (--profiles) skip_roles merge + parent_joint; schema 1.1.0.
+0028: face/hair/neckline RECIPE kit (opt-in); schema write 1.2.0; load 1.0|1.1|1.2.
 """
 
 from __future__ import annotations
@@ -40,7 +41,7 @@ if TYPE_CHECKING:
     from meshops.proportion.depth_samples import DepthSamplesPackage
     from meshops.proportion.skeleton import BlockoutSkeleton, SkeletonJoint
 
-RECIPE_SCHEMA_VERSION: Final[Literal["1.0.0", "1.1.0"]] = "1.1.0"
+RECIPE_SCHEMA_VERSION: Final[Literal["1.0.0", "1.1.0", "1.2.0"]] = "1.2.0"
 RECIPE_ID: Final[Literal["humanoid_a_pose_v1"]] = "humanoid_a_pose_v1"
 
 JSON_BASENAME: Final[str] = "blockout_recipe.json"
@@ -77,8 +78,20 @@ RecipeRole = Literal[
     "scap_soft",
     "bicep_soft",
     "clavicle",
+    # 0028 face / hair / neckline
+    "jaw",
+    "brow_soft",
+    "eye_soft",
+    "nose_soft",
+    "ear_soft",
+    "lip_soft",
+    "hair_mass",
+    "neckline",
+    "sternomastoid_soft",
 ]
 RecipeKind = Literal["trap_box", "box", "cylinder", "ellipsoid", "capsule"]
+HairTier = Literal["none", "short", "bun", "long_proxy"]
+NecklineTier = Literal["none", "crew", "v_proxy"]
 
 _MIDLINE_EXEMPT_ROLES: Final[frozenset[str]] = frozenset({"torso", "pelvis", "neck", "head"})
 # Pre-0027 role set snapshot for B11 (no profile → no trap/pec/scap/bicep/clavicle).
@@ -156,11 +169,11 @@ class RecipeMetrics(BaseModel):
 
 
 class BlockoutRecipePackage(BaseModel):
-    """blockout_recipe.json package (schema 1.0.0 | 1.1.0)."""
+    """blockout_recipe.json package (schema 1.0.0 | 1.1.0 | 1.2.0)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["1.0.0", "1.1.0"] = RECIPE_SCHEMA_VERSION
+    schema_version: Literal["1.0.0", "1.1.0", "1.2.0"] = RECIPE_SCHEMA_VERSION
     honesty: str = RECIPE_HONESTY
     source_report_schema: str | None = None
     height_m: float | None = None
@@ -629,62 +642,19 @@ def _build_head(
     report: ProportionReport,
     m: _ResolvedMetrics,
     messages: list[str],
-) -> RecipePart | None:
-    lms = report.landmarks_xyz
-    chin = lms.get("chin")
-    top = lms.get("cranial_vertex") or lms.get("hair_crown")
-    if chin is None or chin.z_m is None:
-        messages.append("RECIPE_head skipped: need chin z_m")
-        return None
-    z_chin = float(chin.z_m)
-    if top is not None and top.z_m is not None:
-        z_top = float(top.z_m)
-    elif m.head_unit_m is not None:
-        z_top = z_chin + 0.75 * m.head_unit_m
-    elif m.height_m is not None:
-        z_top = z_chin + 0.10 * m.height_m
-    else:
-        messages.append("RECIPE_head skipped: insufficient z for head")
-        return None
-    if z_top <= z_chin:
-        messages.append("RECIPE_head skipped: top z <= chin z")
-        return None
-    z_c = (z_chin + z_top) / 2.0
-    rz = (z_top - z_chin) / 2.0
-    # Lateral radius from head diameter or head unit
-    diam = _resolve_diameter(report.diameters, "head")
-    rx: float | None = None
-    if diam is not None:
-        rx = _half_width_from_diameter(diam)
-    if rx is None:
-        if m.head_unit_m is not None:
-            rx = 0.40 * m.head_unit_m
-        elif m.height_m is not None:
-            rx = 0.06 * m.height_m
-        else:
-            messages.append(
-                "RECIPE_head skipped: no head diameter, head_unit_m, or height_m for radius"
-            )
-            return None
-    ry = rx * 0.9
-    y = 0.0
-    if chin.y_m is not None:
-        y = float(chin.y_m)
-    elif top is not None and top.y_m is not None:
-        y = float(top.y_m)
-    has_y = chin.y_m is not None or (top is not None and top.y_m is not None)
-    placement: Literal["full3d", "front_plane"] = "full3d" if has_y else "front_plane"
-    return RecipePart(
-        name="RECIPE_head",
-        role="head",
-        kind="ellipsoid",
-        center=[0.0, y, z_c],
-        rx_m=rx,
-        ry_m=ry,
-        rz_m=rz,
-        placement=placement,
-        label="RECIPE_head",
+) -> tuple[RecipePart | None, Any]:
+    """Emit RECIPE_head from shared HeadBounds (0028 B17). Returns (part, bounds)."""
+    from meshops.proportion.face_recipe import head_part_from_bounds, resolve_head_bounds
+
+    bounds = resolve_head_bounds(
+        report,
+        head_unit_m=m.head_unit_m,
+        height_m=m.height_m,
+        messages=messages,
     )
+    if bounds is None:
+        return None, None
+    return head_part_from_bounds(bounds), bounds
 
 
 def _build_shoulder_bridges(
@@ -2079,12 +2049,16 @@ def build_blockout_recipe(
     template_applied: TemplateAppliedPackage | None = None,
     profile: AnatomyProfileDocument | None = None,
     skeleton: BlockoutSkeleton | None = None,
+    face: bool = False,
+    hair: HairTier = "none",
+    neckline: NecklineTier = "none",
 ) -> BlockoutRecipePackage:
     """Build BlockoutRecipePackage from a loaded ProportionReport.
 
     Raises ProportionError(code=recipe_empty) when zero parts.
     Topology modes only in messages (C1) — not in counts.
     When *profile* set: skip_roles merge (R6.1) + profile dual softs / new roles.
+    Opt-in face/hair/neckline (0028): default flags preserve pre-0028 role set (B6).
     """
     messages: list[str] = []
 
@@ -2122,6 +2096,8 @@ def build_blockout_recipe(
         messages.append("nofuse=true: no join/boolean (emit layout only)")
     if skip_roles:
         messages.append(f"skip_roles={sorted(skip_roles)}")
+    if face or hair != "none" or neckline != "none":
+        messages.append(f"face={str(bool(face)).lower()} hair={hair} neckline={neckline}")
 
     if template_applied is not None:
         messages.append(f"template_applied: id={template_applied.template_id}")
@@ -2167,23 +2143,58 @@ def build_blockout_recipe(
                 messages.append(f"neck_thickness_scale={scale} applied to RECIPE_neck")
         _append_part(parts, neck)
 
-    # 4 head
-    head = _build_head(report, resolved, messages)
+    # 4 head (shared HeadBounds for face kit — B17)
+    head, head_bounds = _build_head(report, resolved, messages)
     if head is not None:
-        if template_applied is not None:
+        if template_applied is not None and head_bounds is not None:
+            from meshops.proportion.face_recipe import scale_head_bounds
+
             hd = float(template_applied.constants.head_depth_scale)
             hr = float(template_applied.constants.head_radius_scale)
-            updates: dict[str, Any] = {}
-            if head.rx_m is not None and hr != 1.0:
-                updates["rx_m"] = float(head.rx_m) * hr
-            if head.ry_m is not None and hd != 1.0:
-                updates["ry_m"] = float(head.ry_m) * hd
-            if head.rz_m is not None and hr != 1.0:
-                updates["rz_m"] = float(head.rz_m) * hr
-            if updates:
-                head = head.model_copy(update=updates)
+            rx_s = hr if hr != 1.0 else 1.0
+            ry_s = hd if hd != 1.0 else 1.0
+            rz_s = hr if hr != 1.0 else 1.0
+            if rx_s != 1.0 or ry_s != 1.0 or rz_s != 1.0:
+                head_bounds = scale_head_bounds(
+                    head_bounds, rx_scale=rx_s, ry_scale=ry_s, rz_scale=rz_s
+                )
+                head = head.model_copy(
+                    update={
+                        "rx_m": head_bounds.rx,
+                        "ry_m": head_bounds.ry,
+                        "rz_m": head_bounds.rz,
+                    }
+                )
                 messages.append(f"head scales depth={hd} radius={hr} applied to RECIPE_head")
         _append_part(parts, head)
+
+    # 4b face / hair / neckline kit (0028) — same HeadBounds as RECIPE_head
+    if face or hair != "none" or neckline != "none":
+        from meshops.proportion.face_recipe import build_face_parts
+
+        neck_top_z: float | None = None
+        neck_radius: float | None = None
+        if neck is not None:
+            if neck.p1 is not None and len(neck.p1) >= 3:
+                neck_top_z = float(neck.p1[2])
+            neck_radius = float(neck.radius_m) if neck.radius_m is not None else None
+        for p in build_face_parts(
+            report,
+            head_bounds,
+            face=face,
+            hair=hair,
+            neckline=neckline,
+            skeleton=skeleton,
+            shoulder_hw=resolved.shoulder_hw,
+            neck_len_m=resolved.neck_len_m,
+            shoulder_z=resolved.shoulder_z,
+            chest_y=resolved.chest_y,
+            neck_top_z=neck_top_z,
+            neck_radius=neck_radius,
+            head_unit_m=resolved.head_unit_m,
+            messages=messages,
+        ):
+            _append_part(parts, p)
 
     # 5-6 shoulder bridges
     for p in _build_shoulder_bridges(report, resolved, messages):
@@ -2280,7 +2291,7 @@ def build_blockout_recipe(
 
 
 def load_blockout_recipe(path: Path | str) -> BlockoutRecipePackage:
-    """Load blockout_recipe.json; accepts schema 1.0.0 | 1.1.0."""
+    """Load blockout_recipe.json; accepts schema 1.0.0 | 1.1.0 | 1.2.0."""
     p = Path(path)
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
@@ -2291,9 +2302,9 @@ def load_blockout_recipe(path: Path | str) -> BlockoutRecipePackage:
             details={"path": str(p)},
         ) from exc
     ver = data.get("schema_version") if isinstance(data, dict) else None
-    if ver not in ("1.0.0", "1.1.0"):
+    if ver not in ("1.0.0", "1.1.0", "1.2.0"):
         raise ProportionError(
-            f"blockout recipe schema_version must be 1.0.0 or 1.1.0 (got {ver!r})",
+            f"blockout recipe schema_version must be 1.0.0, 1.1.0, or 1.2.0 (got {ver!r})",
             code="recipe_failed",
             details={"path": str(p), "schema_version": ver},
         )
@@ -2744,6 +2755,9 @@ def run_blockout_recipe(
     template_applied: Path | str | None = None,
     profiles: str | None = None,
     skeleton: Path | str | None = None,
+    face: bool = False,
+    hair: HairTier = "none",
+    neckline: NecklineTier = "none",
 ) -> dict[str, Any]:
     """CLI helper: load report → build → write; return success payload."""
     report = load_report(report_path)
@@ -2796,6 +2810,9 @@ def run_blockout_recipe(
         template_applied=tpl,
         profile=profile_doc,
         skeleton=skel,
+        face=face,
+        hair=hair,
+        neckline=neckline,
     )
     if skel_err is not None:
         package.messages.append(skel_err)

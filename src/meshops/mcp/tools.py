@@ -969,6 +969,9 @@ def mesh_proportion_blockout_recipe(
     template_applied: str | None = None,
     profiles: str | None = None,
     skeleton: str | None = None,
+    face: bool = False,
+    hair: str = "none",
+    neckline: str = "none",
 ) -> dict[str, Any]:
     """Emit RECIPE_* blockout primitives. Authoring only — RECIPE_HONESTY / N6."""
     from meshops.proportion.blockout_recipe import run_blockout_recipe
@@ -982,6 +985,12 @@ def mesh_proportion_blockout_recipe(
     glute_mode = (glute or "oval").strip().lower()
     if glute_mode not in ("oval", "two_spheres"):
         raise ValueError("--glute must be oval or two_spheres")
+    hair_tier = (hair or "none").strip().lower()
+    if hair_tier not in ("none", "short", "bun", "long_proxy"):
+        raise ValueError("--hair must be none, short, bun, or long_proxy")
+    neckline_tier = (neckline or "none").strip().lower()
+    if neckline_tier not in ("none", "crew", "v_proxy"):
+        raise ValueError("--neckline must be none, crew, or v_proxy")
     # Preserve trailing directory separator intent (R1); Path resolve strips it.
     ends_sep = out.endswith(("/", "\\"))
     out_base = out.rstrip("/\\") if ends_sep else out
@@ -1007,6 +1016,9 @@ def mesh_proportion_blockout_recipe(
         ),
         profiles=profiles,
         skeleton=(_resolve_tool_path(skeleton, work_root) if skeleton else None),
+        face=bool(face),
+        hair=hair_tier,  # type: ignore[arg-type]
+        neckline=neckline_tier,  # type: ignore[arg-type]
     )
 
 
