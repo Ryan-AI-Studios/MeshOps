@@ -35,9 +35,11 @@ from meshops.proportion.soft_spacing import (
     NOTE_NO_CONTRA_BREAST,
     NOTE_NO_CONTRA_GLUTE,
     NOTE_PEAKS_ONLY,
+    NOTE_RX_ASYMMETRY,
     NOTE_SCALE_UNRESOLVED,
     NOTE_STATURE_MPP,
     NOTE_VOLUME_PROXY,
+    _classify_shape,
     _resolve_mpp,
     compute_soft_spacing,
 )
@@ -265,6 +267,47 @@ def test_single_glute_peak_null_span() -> None:
     assert soft.glute_peak_span_m is None
     assert soft.glute_cleft_gap_m is None
     assert NOTE_NO_CONTRA_GLUTE in soft.notes
+
+
+def test_classify_shape_teardrop_and_prolate() -> None:
+    """Shape cascade: teardrop when lower present + rz>ry*1.15; else prolate/sphere."""
+    assert _classify_shape(0.05, 0.05, 0.08, breast_lower_present=True) == "teardrop_proxy"
+    # lower absent → no teardrop even if rz tall
+    assert _classify_shape(0.05, 0.05, 0.08, breast_lower_present=False) == "prolate"
+    assert _classify_shape(0.05, 0.05, 0.05, breast_lower_present=False) == "sphere"
+
+
+def test_rx_asymmetry_note() -> None:
+    """Dual-side rx differ >15% → NOTE_RX_ASYMMETRY in breast_metrics.symmetry_notes."""
+    views = {
+        "top": _vl(
+            "top",
+            landmarks={
+                "breast_medial_l": (95.0, 100.0),
+                "breast_lateral_l": (70.0, 100.0),  # wider left
+                "breast_medial_r": (105.0, 100.0),
+                "breast_lateral_r": (115.0, 100.0),  # narrow right
+                "bust_l": (60.0, 100.0),
+                "bust_r": (140.0, 100.0),
+            },
+        ),
+        "front": _vl("front", figure_span_px=480.0),
+    }
+    xyz = {
+        "bust_l": _xyz("bust_l", x_m=-0.18, sources=["front"]),
+        "bust_r": _xyz("bust_r", x_m=0.18, sources=["front"]),
+        "breast_medial_l": _xyz("breast_medial_l", x_m=-0.02, sources=["top"]),
+        "breast_lateral_l": _xyz("breast_lateral_l", x_m=-0.12, sources=["top"]),
+        "breast_medial_r": _xyz("breast_medial_r", x_m=0.02, sources=["top"]),
+        "breast_lateral_r": _xyz("breast_lateral_r", x_m=0.05, sources=["top"]),
+    }
+    soft, bm, _ = compute_soft_spacing(views, xyz, height_m=1.72)
+    assert bm is not None
+    assert bm.left is not None and bm.right is not None
+    assert bm.left.rx_m is not None and bm.right.rx_m is not None
+    assert abs(bm.left.rx_m - bm.right.rx_m) / max(bm.left.rx_m, bm.right.rx_m) > 0.15
+    assert NOTE_RX_ASYMMETRY in bm.symmetry_notes
+    assert soft is not None
 
 
 def test_volume_and_circ_honesty() -> None:
@@ -538,14 +581,24 @@ def test_constraints_template_when_no_measured() -> None:
     assert _glute_cleft_gap_m(_T(), _R()) == pytest.approx(0.06)
 
 
-def test_recipe_measured_gap_smoke() -> None:
-    """Recipe soft offsets use measured gap when soft_spacing present."""
+def _recipe_breast_center_gap(measured_gap_m: float) -> tuple[float, float, float]:
+    """Build recipe with fixed fixture + measured gap; return (center_gap, rx, shoulder_hw).
+
+    B7 formula (blockout_recipe): half_gap = measured/2;
+    offset = max(half_gap + rx*0.5, shoulder_hw*0.25); centers at ±offset.
+    """
+    from meshops.proportion.models import CrossSection
+
     report = ProportionReport(
         schema_version="1.2.0",
         height_m=1.72,
         head_unit_frac=1.0 / 8.0,
-        soft_spacing=SoftSpacing(intermammary_gap_m=0.04),
-        cross_sections=[],
+        soft_spacing=SoftSpacing(intermammary_gap_m=measured_gap_m),
+        cross_sections=[
+            CrossSection(
+                level_id="bust", z_frac=0.75, rx_frac=0.12, ry_frac=0.08, sources=["front"]
+            ),
+        ],
         depth_bands=[],
         diameters=[],
         landmarks_xyz={
@@ -554,20 +607,36 @@ def test_recipe_measured_gap_smoke() -> None:
             "crotch_pubic": _xyz("crotch_pubic", z_m=0.9),
         },
     )
-    # Minimal CS so breasts emit
-    from meshops.proportion.models import CrossSection
-
-    report.cross_sections = [
-        CrossSection(level_id="bust", z_frac=0.75, rx_frac=0.12, ry_frac=0.08, sources=["front"]),
-    ]
-    # shoulder half-width via landmarks for offset floor
     pkg = build_blockout_recipe(report)
     breasts = [p for p in pkg.parts if p.role == "breast_soft"]
-    if len(breasts) >= 2:
-        xs = sorted(p.center[0] for p in breasts if p.center is not None)
-        gap = xs[1] - xs[0]
-        # centers should reflect ~ measured gap + radii, not template 0.08-class
-        assert gap > 0.04  # at least gap between centers
+    assert len(breasts) == 2, f"expected exactly 2 breast_soft parts, got {len(breasts)}"
+    xs = sorted(p.center[0] for p in breasts if p.center is not None)
+    assert len(xs) == 2
+    center_gap = xs[1] - xs[0]
+    rx_vals = [p.rx_m for p in breasts if p.rx_m is not None]
+    assert len(rx_vals) == 2
+    assert rx_vals[0] == pytest.approx(rx_vals[1], rel=1e-9)
+    rx = float(rx_vals[0])
+    shoulder_hw = 0.18  # mean abs x of shoulder_l/r landmarks
+    return center_gap, rx, shoulder_hw
+
+
+def test_recipe_measured_gap_smoke() -> None:
+    """Recipe B7: measured soft_spacing drives center gap (not pre-0030 shoulder-only)."""
+    gap_04, rx_04, shoulder_hw = _recipe_breast_center_gap(0.04)
+    expected_04 = 2.0 * max(0.04 / 2.0 + rx_04 * 0.5, shoulder_hw * 0.25)
+    assert gap_04 == pytest.approx(expected_04, rel=1e-5)
+
+    gap_20, rx_20, shoulder_hw_20 = _recipe_breast_center_gap(0.20)
+    assert shoulder_hw_20 == pytest.approx(shoulder_hw, rel=1e-9)
+    assert rx_20 == pytest.approx(rx_04, rel=1e-9)
+    expected_20 = 2.0 * max(0.20 / 2.0 + rx_20 * 0.5, shoulder_hw_20 * 0.25)
+    assert gap_20 == pytest.approx(expected_20, rel=1e-5)
+
+    # soft_spacing is consulted: larger measured gap → larger center separation
+    assert gap_04 < gap_20
+    # would fail if only pre-0030 shoulder*0.35 path were used (same gap for both)
+    assert gap_04 != pytest.approx(gap_20, rel=1e-5)
 
 
 def test_male_no_breast_null_metrics_no_error(tmp_path: Path) -> None:

@@ -529,6 +529,8 @@ def build_server(work_root: Path | None = None) -> Any:
         pose: str = "a_pose",
         with_template: bool = False,
         stub_images: bool = False,
+        include_back_stub: bool = False,
+        include_top_stub: bool = False,
         force: bool = False,
     ) -> dict[str, Any]:
         """Create multi-view package layout + checklist. Layout only — not mesh/print (N6)."""
@@ -542,6 +544,8 @@ def build_server(work_root: Path | None = None) -> Any:
             pose=pose,
             with_template=with_template,
             stub_images=stub_images,
+            include_back_stub=include_back_stub,
+            include_top_stub=include_top_stub,
             force=force,
         )
 
