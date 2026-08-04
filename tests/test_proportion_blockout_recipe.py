@@ -836,6 +836,35 @@ def test_recipe__template_applied_dir_resolves(tmp_path: Path) -> None:
     assert any("breast_tilt_deg=" in m for m in payload["messages"])
 
 
+def test_recipe__template_applied_breast_y_envelope(tmp_path: Path) -> None:
+    """0031: template-applied breast center |Y| stays in soft envelope (< 0.30 m)."""
+    from meshops.proportion.body_template import apply_body_template, load_template_applied
+
+    report = _report_with_soft_cs(height_m=1.72)
+    report_path = _write_report(tmp_path, report)
+    tpl_dir = tmp_path / "tpl_soft_y"
+    apply_body_template(report_path, "female_adult_athletic", tpl_dir, force=True)
+    applied_pkg = load_template_applied(tpl_dir)
+    breast_y_m = applied_pkg.constants.breast_y_m
+    assert breast_y_m is not None
+    assert abs(breast_y_m) < 0.30
+    assert abs(breast_y_m - (-0.77 * 1.72)) > 0.5  # not stature product
+
+    pkg = build_blockout_recipe(
+        report,
+        limbs=False,
+        template_applied=applied_pkg,
+        torso="ovals",
+        glute="two_spheres",
+    )
+    breasts = [p for p in pkg.parts if p.role == "breast_soft"]
+    assert len(breasts) >= 1
+    for b in breasts:
+        assert b.center is not None
+        assert abs(b.center[1]) < 0.30
+        assert b.center[1] < 0
+
+
 def test_recipe__template_applied_unknown_id_fails(tmp_path: Path) -> None:
     report = _full_torso_report()
     report_path = _write_report(tmp_path, report)
