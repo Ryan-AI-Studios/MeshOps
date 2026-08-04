@@ -230,6 +230,26 @@ def classify_part_name(name: str) -> tuple[ConstraintRole, Side]:
         return "shoulder_bridge", side
     if "scap" in lower:
         return "torso", side
+    # 0028 face kit tokens (B5): after 0027 softs, before generic fallthrough.
+    # Prefer *_soft / multi-token forms (trap_soft lesson). Exact substrings.
+    if "jaw" in lower:
+        return "head", side
+    if "brow_soft" in lower:
+        return "head", side
+    if "eye_soft" in lower:
+        return "head", side
+    if "nose_soft" in lower:
+        return "head", side
+    if "ear_soft" in lower:
+        return "head", side
+    if "lip_soft" in lower:
+        return "head", side
+    if "hair_mass" in lower:
+        return "head", side
+    if "sternomastoid" in lower:
+        return "neck", side
+    if "neckline" in lower:
+        return "neck", side
     if "thigh" in lower or "limb_thigh" in lower:
         return "thigh", side
     if "upper_arm" in lower or "limb_upper_arm" in lower:
@@ -824,6 +844,27 @@ def _check_calf_slant(
     return _rule("C_calf_slant", "pass", "; ".join(messages), metrics)
 
 
+# B18: face/hair/neckline/SCM/fuse softs must not fail C_axial_depth_plane
+# (forward of chest_mid by design). Core RECIPE_head / RECIPE_neck still checked.
+_AXIAL_EXEMPT_NAME_TOKENS: Final[tuple[str, ...]] = (
+    "jaw",
+    "brow_soft",
+    "eye_soft",
+    "nose_soft",
+    "ear_soft",
+    "lip_soft",
+    "hair_mass",
+    "neckline",
+    "sternomastoid",
+    "neck_head_fuse",
+)
+
+
+def _axial_name_exempt(name: str) -> bool:
+    lower = name.lower()
+    return any(tok in lower for tok in _AXIAL_EXEMPT_NAME_TOKENS)
+
+
 def _check_axial_depth_plane(
     indexed: list[tuple[RecipePart, ConstraintRole, Side]],
     report: Any | None,
@@ -855,6 +896,10 @@ def _check_axial_depth_plane(
     for role in axial_roles:
         parts = _find(indexed, role)
         for part in parts:
+            # 0028 B18: skip face-kit softs classified as head/neck
+            if _axial_name_exempt(part.name):
+                metrics[f"{part.name}_axial_exempt"] = True
+                continue
             y = part_y(part)
             if y is None:
                 continue

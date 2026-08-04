@@ -653,12 +653,16 @@ def build_server(work_root: Path | None = None) -> Any:
         template_applied: str | None = None,
         profiles: str | None = None,
         skeleton: str | None = None,
+        face: bool = False,
+        hair: str = "none",
+        neckline: str = "none",
     ) -> dict[str, Any]:
         """Emit RECIPE_* blockout primitives (trap/ovals/softs) from a report.
 
         Authoring layout only — proportion_blockout_recipe_not_mesh_or_print_success (N6).
         Topology: torso trap|ovals, glute oval|two_spheres, optional template-applied.
-        Optional profiles + skeleton (0027). Raises ProportionError on failure.
+        Optional profiles + skeleton (0027). Opt-in face/hair/neckline (0028).
+        Raises ProportionError on failure.
         """
         return T.mesh_proportion_blockout_recipe(
             wr,
@@ -675,6 +679,9 @@ def build_server(work_root: Path | None = None) -> Any:
             template_applied=template_applied,
             profiles=profiles,
             skeleton=skeleton,
+            face=face,
+            hair=hair,
+            neckline=neckline,
         )
 
     @mcp.tool()
