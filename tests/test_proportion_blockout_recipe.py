@@ -956,3 +956,234 @@ def test_recipe__template_does_not_override_measured_glute_cs() -> None:
         assert a.ry_m == pytest.approx(b.ry_m)
         assert b.rx_m != pytest.approx(0.5)
     assert any("measured CS" in m for m in pkg_tpl.messages)
+
+
+# ---------------------------------------------------------------------------
+# 0032 — axial mid-depth plane (chest_y B2 ladder; never chest_front alone)
+# ---------------------------------------------------------------------------
+
+
+def _axial_pin_report(
+    *,
+    chest_front_y: float = -0.13,
+    chest_mid_y: float | None = 0.0,
+    shoulder_y: float | None = None,
+    height_m: float = 1.72,
+    depth_bands: list[DepthBand] | None = None,
+    include_chest_band: bool = True,
+) -> ProportionReport:
+    """Rogue-v3-class report: front vs mid; shoulders may lack y_m."""
+    shoulder_z = 1.38
+    shoulder_x = 0.20
+    extra: dict[str, LandmarkXYZ] = {
+        "chest_front": _lm("chest_front", x_m=0.0, y_m=chest_front_y, z_m=1.25),
+        "shoulder_l": _lm("shoulder_l", x_m=-shoulder_x, y_m=shoulder_y, z_m=shoulder_z),
+        "shoulder_r": _lm("shoulder_r", x_m=shoulder_x, y_m=shoulder_y, z_m=shoulder_z),
+    }
+    if chest_mid_y is not None:
+        extra["chest_mid"] = _lm("chest_mid", x_m=0.0, y_m=chest_mid_y, z_m=1.25)
+    bands = depth_bands
+    if bands is None and include_chest_band:
+        bands = [
+            _depth_band("chest", depth_m=0.24, z_frac=0.72, y_mid=0.0),
+            _depth_band("hip", depth_m=0.26, z_frac=0.55),
+        ]
+    elif bands is None:
+        bands = [_depth_band("hip", depth_m=0.26, z_frac=0.55)]
+    return _full_torso_report(
+        height_m=height_m,
+        extra_lms=extra,
+        depth_bands=bands,
+    )
+
+
+def test_recipe__axial_chest_y_prefers_mid_not_front() -> None:
+    """0032 pin: shoulders y null + chest_front=-0.13 + mid=0 → axial Y≈0, not front."""
+    report = _axial_pin_report(chest_front_y=-0.13, chest_mid_y=0.0, shoulder_y=None)
+    pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
+    neck = next(p for p in pkg.parts if p.name == "RECIPE_neck")
+    assert neck.p0 is not None and neck.p1 is not None
+    assert neck.p0[1] == pytest.approx(0.0, abs=1e-6)
+    assert neck.p1[1] == pytest.approx(0.0, abs=1e-6)
+    ovals = [p for p in pkg.parts if p.name.startswith("RECIPE_torso_oval_")]
+    assert ovals
+    for o in ovals:
+        assert o.center is not None
+        assert o.center[1] == pytest.approx(0.0, abs=1e-6)
+        assert o.center[1] != pytest.approx(-0.13, abs=1e-3)
+    bridges = [p for p in pkg.parts if p.role == "shoulder_bridge"]
+    assert bridges
+    for b in bridges:
+        assert b.p0 is not None and b.p1 is not None
+        # p0 torso attach at mid; p1 joint y missing → mid
+        assert b.p0[1] == pytest.approx(0.0, abs=1e-6)
+        assert b.p1[1] == pytest.approx(0.0, abs=1e-6)
+    assert any("source=chest_mid" in m for m in pkg.messages)
+    assert any(m.startswith("chest_y=") for m in pkg.messages)
+
+
+def test_recipe__axial_depth_plane_pass_after_emit() -> None:
+    """Same pin recipe must pass C_axial_depth_plane without hand edit."""
+    from meshops.proportion.constraints import validate_constraints
+
+    report = _axial_pin_report(chest_front_y=-0.13, chest_mid_y=0.0, shoulder_y=None)
+    pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
+    result = validate_constraints(pkg, report=report)
+    by_id = {r.id: r for r in result.rules}
+    axial = by_id["C_axial_depth_plane"]
+    assert axial.status == "pass", axial.message
+
+
+def test_recipe__axial_chest_y_band_frac_times_height() -> None:
+    """B2 rung 2: no chest_mid; band y_mid is fraction * height_m."""
+    h = 1.72
+    y_mid_frac = 0.05
+    report = _axial_pin_report(
+        chest_front_y=-0.13,
+        chest_mid_y=None,
+        shoulder_y=None,
+        height_m=h,
+        depth_bands=[
+            _depth_band("chest", depth_m=0.24, z_frac=0.72, y_mid=y_mid_frac),
+            _depth_band("hip", depth_m=0.26, z_frac=0.55),
+        ],
+    )
+    # Ensure no chest_mid slipped in
+    assert "chest_mid" not in report.landmarks_xyz
+    pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
+    expected = y_mid_frac * h  # 0.086
+    neck = next(p for p in pkg.parts if p.name == "RECIPE_neck")
+    assert neck.p0 is not None
+    assert neck.p0[1] == pytest.approx(expected, abs=1e-6)
+    assert expected == pytest.approx(0.086, abs=1e-6)
+    assert any("source=band" in m for m in pkg.messages)
+    # Must not use fraction as meters
+    assert neck.p0[1] != pytest.approx(0.05, abs=1e-4)
+
+
+def test_recipe__axial_chest_y_fallback0_message() -> None:
+    """B2 rung 3: no mid, no chest band → Y=0.0 + source=fallback0."""
+    report = _axial_pin_report(
+        chest_front_y=-0.13,
+        chest_mid_y=None,
+        shoulder_y=None,
+        include_chest_band=False,
+        depth_bands=[_depth_band("hip", depth_m=0.26, z_frac=0.55)],
+    )
+    assert "chest_mid" not in report.landmarks_xyz
+    pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
+    neck = next(p for p in pkg.parts if p.name == "RECIPE_neck")
+    assert neck.p0 is not None
+    assert neck.p0[1] == pytest.approx(0.0, abs=1e-9)
+    assert any("source=fallback0" in m for m in pkg.messages)
+    # Never collapse to chest_front alone
+    assert neck.p0[1] != pytest.approx(-0.13, abs=1e-3)
+
+
+def test_recipe__shoulder_bridge_forward_joint_clamped_axial() -> None:
+    """B12: shoulder y=-0.20 (forward of front) still passes axial via clamp."""
+    from meshops.proportion.constraints import validate_constraints
+
+    report = _axial_pin_report(
+        chest_front_y=-0.13,
+        chest_mid_y=0.0,
+        shoulder_y=-0.20,
+    )
+    pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
+    bridges = [p for p in pkg.parts if p.role == "shoulder_bridge"]
+    assert bridges
+    for b in bridges:
+        assert b.p0 is not None and b.p1 is not None
+        # After B12 clamp both endpoints at mid
+        assert b.p0[1] == pytest.approx(0.0, abs=1e-6)
+        assert b.p1[1] == pytest.approx(0.0, abs=1e-6)
+    result = validate_constraints(pkg, report=report)
+    by_id = {r.id: r for r in result.rules}
+    assert by_id["C_axial_depth_plane"].status == "pass", by_id["C_axial_depth_plane"].message
+    assert any("clamped to axial mid" in m for m in pkg.messages)
+
+
+def test_recipe__head_no_y_uses_axial_chest_y() -> None:
+    """B5: chin/top lack y_m → head Y = axial mid (chest_mid=0.05), not hardcode 0 alone."""
+    report = _axial_pin_report(chest_front_y=-0.13, chest_mid_y=0.05, shoulder_y=None)
+    lms = dict(report.landmarks_xyz)
+    # Chin and cranial_vertex without y_m
+    lms["chin"] = _lm("chin", x_m=0.0, y_m=None, z_m=1.50)
+    lms["cranial_vertex"] = _lm("cranial_vertex", x_m=0.0, y_m=None, z_m=1.68)
+    report = report.model_copy(update={"landmarks_xyz": lms})
+    pkg = build_blockout_recipe(report, limbs=False)
+    head = next(p for p in pkg.parts if p.name == "RECIPE_head")
+    assert head.center is not None
+    assert head.center[1] == pytest.approx(0.05, abs=1e-6)
+
+
+def test_recipe__head_chin_y_preserved() -> None:
+    """B5: when chin y present, keep it (do not force mid)."""
+    report = _axial_pin_report(chest_front_y=-0.13, chest_mid_y=0.0, shoulder_y=None)
+    lms = dict(report.landmarks_xyz)
+    lms["chin"] = _lm("chin", x_m=0.0, y_m=-0.04, z_m=1.50)
+    report = report.model_copy(update={"landmarks_xyz": lms})
+    pkg = build_blockout_recipe(report, limbs=False)
+    head = next(p for p in pkg.parts if p.name == "RECIPE_head")
+    assert head.center is not None
+    assert head.center[1] == pytest.approx(-0.04, abs=1e-6)
+
+
+def test_recipe__axial_soft_breast_glute_not_mid_forced() -> None:
+    """B4 regression: soft breast stays front -Y; glute +Y after mid ladder."""
+    report = _report_with_soft_cs()
+    # Overlay front+mid like pin case; softs must not jump to mid
+    lms = dict(report.landmarks_xyz)
+    lms["chest_front"] = _lm("chest_front", x_m=0.0, y_m=-0.13, z_m=1.25)
+    lms["chest_mid"] = _lm("chest_mid", x_m=0.0, y_m=0.0, z_m=1.25)
+    report = report.model_copy(update={"landmarks_xyz": lms})
+    pkg = build_blockout_recipe(report, limbs=False)
+    breasts = [p for p in pkg.parts if p.role == "breast_soft"]
+    glutes = [p for p in pkg.parts if p.role == "glute_soft"]
+    assert breasts and glutes
+    for b in breasts:
+        assert b.center is not None
+        assert b.center[1] < 0.0
+    for g in glutes:
+        assert g.center is not None
+        assert g.center[1] > 0.0
+
+
+def test_recipe__hip_y_prefers_hip_mid() -> None:
+    """B6: hip_mid.y_m wins over mean(hip_l, hip_r) for pelvis oval plane."""
+    report = _axial_pin_report(chest_front_y=-0.13, chest_mid_y=0.0, shoulder_y=None)
+    lms = dict(report.landmarks_xyz)
+    lms["hip_l"] = _lm("hip_l", x_m=-0.14, y_m=-0.08, z_m=0.95)
+    lms["hip_r"] = _lm("hip_r", x_m=0.14, y_m=-0.08, z_m=0.95)
+    lms["hip_mid"] = _lm("hip_mid", x_m=0.0, y_m=0.03, z_m=0.95)
+    report = report.model_copy(update={"landmarks_xyz": lms})
+    pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
+    pelvis = next(p for p in pkg.parts if p.name == "RECIPE_pelvis_oval")
+    assert pelvis.center is not None
+    assert pelvis.center[1] == pytest.approx(0.03, abs=1e-6)
+    assert any("source=hip_mid" in m for m in pkg.messages)
+
+
+def test_recipe__axial_band_skipped_when_height_null() -> None:
+    """B2: band present but height_m None → skip rung 2 → fallback0 (not frac-as-m)."""
+    report = _axial_pin_report(
+        chest_front_y=-0.13,
+        chest_mid_y=None,
+        shoulder_y=None,
+        height_m=1.72,
+        depth_bands=[
+            _depth_band("chest", depth_m=0.24, z_frac=0.72, y_mid=0.05),
+            _depth_band("hip", depth_m=0.26, z_frac=0.55),
+        ],
+    )
+    # Null stature after report build (band still present)
+    report = report.model_copy(update={"height_m": None, "stature_m": None})
+    # Keep head_unit if required; some paths need H — ensure mid still absent
+    assert "chest_mid" not in report.landmarks_xyz
+    pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
+    neck = next(p for p in pkg.parts if p.name == "RECIPE_neck")
+    assert neck.p0 is not None
+    assert neck.p0[1] == pytest.approx(0.0, abs=1e-9)
+    assert any("source=fallback0" in m for m in pkg.messages)
+    assert neck.p0[1] != pytest.approx(0.05, abs=1e-4)
+    assert pkg.honesty == RECIPE_HONESTY
