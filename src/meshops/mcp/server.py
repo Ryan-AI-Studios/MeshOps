@@ -62,6 +62,7 @@ TOOL_NAMES: frozenset[str] = frozenset(
         "mesh_proportion_blockout_recipe",
         "mesh_proportion_blockout_validate_constraints",
         "mesh_proportion_blockout_optimize",
+        "mesh_proportion_skeleton_build",
         "mesh_proportion_depth_heatmap",
         "mesh_proportion_depth_hint",
         "mesh_proportion_silhouette_compare",
@@ -709,6 +710,29 @@ def build_server(work_root: Path | None = None) -> Any:
             freeze_feet=freeze_feet,
             mesh=mesh,
             report=report,
+            template_applied=template_applied,
+            force=force,
+        )
+
+    @mcp.tool()
+    def mesh_proportion_skeleton_build(
+        report: str,
+        out: str,
+        format: str = "json",
+        template_applied: str | None = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Emit joint/bone blockout skeleton graph from a proportion report.
+
+        Authoring scaffold only — proportion_blockout_skeleton_not_mesh_or_print_success (N6).
+        Not an animation rig. Writes blockout_skeleton.json (+ optional setup_skeleton.py)
+        under out directory. Raises ProportionError on failure (never ok:false success).
+        """
+        return T.mesh_proportion_skeleton_build(
+            wr,
+            report=report,
+            out=out,
+            format=format,
             template_applied=template_applied,
             force=force,
         )
