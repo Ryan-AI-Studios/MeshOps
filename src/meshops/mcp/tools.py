@@ -940,6 +940,19 @@ def mesh_proportion_apply_template(
     )
 
 
+def mesh_proportion_anatomy_profiles(work_root: Path) -> dict[str, Any]:
+    """List anatomy profile packs. Authoring only — ANATOMY_PROFILE_HONESTY / N6."""
+    from meshops.proportion.anatomy_profile import list_anatomy_profiles
+    from meshops.proportion.honesty import ANATOMY_PROFILE_HONESTY
+
+    _ = work_root
+    return {
+        "ok": True,
+        "profiles": list_anatomy_profiles(),
+        "honesty": ANATOMY_PROFILE_HONESTY,
+    }
+
+
 def mesh_proportion_blockout_recipe(
     work_root: Path,
     *,
@@ -954,6 +967,8 @@ def mesh_proportion_blockout_recipe(
     nofuse: bool = False,
     breast_tilt_deg: float | None = None,
     template_applied: str | None = None,
+    profiles: str | None = None,
+    skeleton: str | None = None,
 ) -> dict[str, Any]:
     """Emit RECIPE_* blockout primitives. Authoring only — RECIPE_HONESTY / N6."""
     from meshops.proportion.blockout_recipe import run_blockout_recipe
@@ -990,6 +1005,8 @@ def mesh_proportion_blockout_recipe(
         template_applied=(
             _resolve_tool_path(template_applied, work_root) if template_applied else None
         ),
+        profiles=profiles,
+        skeleton=(_resolve_tool_path(skeleton, work_root) if skeleton else None),
     )
 
 

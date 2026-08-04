@@ -88,7 +88,8 @@ proportion_app = typer.Typer(
     help=(
         "Pixel proportion analysis from multi-view RGB (tracks 0012-0026). "
         "Verbs: template | templates | apply-template | analyze | show | scaffold | guides | "
-        "capture | depth-samples | blockout-recipe | blockout-validate-constraints | "
+        "capture | depth-samples | blockout-recipe | anatomy-profiles | "
+        "blockout-validate-constraints | "
         "blockout-optimize | skeleton-build | depth-heatmap | depth-hint | silhouette-compare. "
         "Assist-first landmarks + head-unit checks + blockout-grade XYZ; "
         "schema 1.1.0 diameters (edge pairs) + left depth bands + cross-sections; "
@@ -98,7 +99,9 @@ proportion_app = typer.Typer(
         "depth-samples exports depth_at_landmarks.json + optional mesh ray deltas (N6); "
         "templates / apply-template: sex/archetype body priors (authoring only — N6); "
         "blockout-recipe emits trap/ovals RECIPE primitives + topology flags "
-        "(--torso/--glute/--nofuse/--breast-tilt-deg/--template-applied; authoring only — N6); "
+        "(--torso/--glute/--nofuse/--breast-tilt-deg/--template-applied/"
+        "--profiles/--skeleton; authoring only — N6); "
+        "anatomy-profiles lists torso/limb shape packs (0027; authoring only — N6); "
         "blockout-validate-constraints named-role hard rules (CONSTRAINT_HONESTY — N6); "
         "blockout-optimize constrained free-DOF adjust, --freeze-feet default "
         "(OPTIMIZE_HONESTY — N6; free-name optimizers are NOT product); "
@@ -2291,6 +2294,32 @@ def proportion_depth_samples_cmd(
     raise typer.Exit(0)
 
 
+@proportion_app.command("anatomy-profiles")
+def proportion_anatomy_profiles_cmd(
+    json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
+) -> None:
+    """List torso/limb anatomy profile packs (authoring shape vocab only — N6)."""
+    from meshops.proportion.anatomy_profile import list_anatomy_profiles
+    from meshops.proportion.errors import ProportionError
+    from meshops.proportion.honesty import ANATOMY_PROFILE_HONESTY
+
+    try:
+        profiles = list_anatomy_profiles()
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    if json_out:
+        _emit_json({"ok": True, "profiles": profiles, "honesty": ANATOMY_PROFILE_HONESTY})
+    else:
+        for p in profiles:
+            typer.echo(f"{p['id']}\t{p['sex']}\t{p['archetype']}\t{p['description']}")
+        typer.echo(f"honesty: {ANATOMY_PROFILE_HONESTY}")
+        typer.echo("anatomy profiles only — not mesh or print success")
+    raise typer.Exit(0)
+
+
 @proportion_app.command("blockout-recipe")
 def proportion_blockout_recipe_cmd(
     report: Path = typer.Option(
@@ -2344,6 +2373,16 @@ def proportion_blockout_recipe_cmd(
         "--template-applied",
         help="template_applied.json file or directory containing it (0022)",
     ),
+    profiles: str | None = typer.Option(
+        None,
+        "--profiles",
+        help="Anatomy profile id (e.g. torso_limb_f_athletic_v1) — 0027",
+    ),
+    skeleton: Path | None = typer.Option(
+        None,
+        "--skeleton",
+        help="Optional blockout_skeleton.json for parent_joint (0026/0027)",
+    ),
     force: bool = typer.Option(
         False,
         "--force",
@@ -2380,6 +2419,8 @@ def proportion_blockout_recipe_cmd(
             nofuse=nofuse,
             breast_tilt_deg=breast_tilt_deg,
             template_applied=template_applied,
+            profiles=profiles,
+            skeleton=skeleton,
         )
     except ProportionError as exc:
         _emit_error(exc, json_mode=json_out, code=1)

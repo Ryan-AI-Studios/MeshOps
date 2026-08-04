@@ -1,4 +1,4 @@
-"""Proportion → blockout primitive recipes (track 0019).
+"""Proportion → blockout primitive recipes (track 0019 + 0027 profiles).
 
 Build BlockoutRecipePackage from ProportionReport; emit JSON + Blender 5.2 bpy script.
 Authoring layout only — not mesh or print success (Difficulty §12 / N6).
@@ -8,6 +8,7 @@ override template head/foot scales when present — not wired in v1 (document-on
 neck diameter already preferred when available.
 breast_lower* used for rz in 0030; lateral fuse/diameter still 0027.
 0030: soft offsets prefer report.soft_spacing measured gaps (B7) over template fracs.
+0027: anatomy profiles (--profiles) skip_roles merge + parent_joint; schema 1.1.0.
 """
 
 from __future__ import annotations
@@ -30,10 +31,16 @@ from meshops.proportion.models import (
 )
 
 if TYPE_CHECKING:
+    from meshops.proportion.anatomy_profile import (
+        AnatomyProfileDocument,
+        ProfilePartSpec,
+        ProfileScaleSpec,
+    )
     from meshops.proportion.body_template import TemplateAppliedPackage
     from meshops.proportion.depth_samples import DepthSamplesPackage
+    from meshops.proportion.skeleton import BlockoutSkeleton, SkeletonJoint
 
-RECIPE_SCHEMA_VERSION: Final[Literal["1.0.0"]] = "1.0.0"
+RECIPE_SCHEMA_VERSION: Final[Literal["1.0.0", "1.1.0"]] = "1.1.0"
 RECIPE_ID: Final[Literal["humanoid_a_pose_v1"]] = "humanoid_a_pose_v1"
 
 JSON_BASENAME: Final[str] = "blockout_recipe.json"
@@ -65,11 +72,31 @@ RecipeRole = Literal[
     "glute_soft",
     "iliac_soft",
     "limb_segment",
+    "trap_soft",
+    "pec_soft",
+    "scap_soft",
+    "bicep_soft",
+    "clavicle",
 ]
 RecipeKind = Literal["trap_box", "box", "cylinder", "ellipsoid", "capsule"]
 
 _MIDLINE_EXEMPT_ROLES: Final[frozenset[str]] = frozenset({"torso", "pelvis", "neck", "head"})
-
+# Pre-0027 role set snapshot for B11 (no profile → no trap/pec/scap/bicep/clavicle).
+_BASELINE_ROLES_NO_PROFILE: Final[frozenset[str]] = frozenset(
+    {
+        "torso",
+        "pelvis",
+        "neck",
+        "head",
+        "shoulder_bridge",
+        "hip_bridge",
+        "deltoid_soft",
+        "breast_soft",
+        "glute_soft",
+        "iliac_soft",
+        "limb_segment",
+    }
+)
 Vec3 = tuple[float, float, float]
 
 
@@ -101,6 +128,7 @@ class RecipePart(BaseModel):
     placement: Literal["full3d", "front_plane"] = "full3d"
     label: str = ""
     notes: str | None = None
+    parent_joint: str | None = None  # 1.1.0 additive; null on 1.0.0 loads
 
     @model_validator(mode="after")
     def _label_recipe_prefix(self) -> RecipePart:
@@ -128,11 +156,11 @@ class RecipeMetrics(BaseModel):
 
 
 class BlockoutRecipePackage(BaseModel):
-    """blockout_recipe.json package (schema 1.0.0 only)."""
+    """blockout_recipe.json package (schema 1.0.0 | 1.1.0)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["1.0.0"] = RECIPE_SCHEMA_VERSION
+    schema_version: Literal["1.0.0", "1.1.0"] = RECIPE_SCHEMA_VERSION
     honesty: str = RECIPE_HONESTY
     source_report_schema: str | None = None
     height_m: float | None = None
@@ -791,18 +819,145 @@ def _build_hip_bridges(
     return parts
 
 
+def _michelin_clamp_max(
+    m: _ResolvedMetrics,
+    *,
+    michelin_cap_frac_h: float | None = None,
+) -> float | None:
+    """Return Michelin radius cap (meters). Per-part frac_h*H overrides global."""
+    if michelin_cap_frac_h is not None and m.height_m is not None:
+        return float(michelin_cap_frac_h) * float(m.height_m)
+    if michelin_cap_frac_h is not None and m.shoulder_hw is not None:
+        return float(michelin_cap_frac_h) * float(m.shoulder_hw)
+    if m.shoulder_hw is not None:
+        return _MICHELIN_FRAC * float(m.shoulder_hw)
+    return None
+
+
+def _joint_xyz(joint: SkeletonJoint | None) -> list[float] | None:
+    """Return [x,y,z] when all three finite; else None."""
+    if joint is None:
+        return None
+    if joint.x_m is None or joint.y_m is None or joint.z_m is None:
+        return None
+    x, y, z = float(joint.x_m), float(joint.y_m), float(joint.z_m)
+    if any(v != v for v in (x, y, z)):  # NaN
+        return None
+    return [x, y, z]
+
+
+def _joints_map(skeleton: BlockoutSkeleton | None) -> dict[str, SkeletonJoint]:
+    if skeleton is None:
+        return {}
+    return {j.id: j for j in skeleton.joints}
+
+
+def _midpoint_of_joints(
+    joints: dict[str, SkeletonJoint],
+    id_a: str,
+    id_b: str,
+) -> list[float] | None:
+    """Midpoint of two skeleton joints when both have finite xyz (AI2 B4)."""
+    pa = _joint_xyz(joints.get(id_a))
+    pb = _joint_xyz(joints.get(id_b))
+    if pa is None or pb is None:
+        return None
+    return [(pa[0] + pb[0]) / 2.0, (pa[1] + pb[1]) / 2.0, (pa[2] + pb[2]) / 2.0]
+
+
+def _lm_midpoint(
+    lms: dict[str, LandmarkXYZ],
+    id_a: str,
+    id_b: str,
+) -> list[float] | None:
+    """Landmark midpoint when both have finite x,z (y falls back 0)."""
+    la = lms.get(id_a)
+    lb = lms.get(id_b)
+    if la is None or lb is None:
+        return None
+    if la.x_m is None or la.z_m is None or lb.x_m is None or lb.z_m is None:
+        return None
+    ya = float(la.y_m) if la.y_m is not None else 0.0
+    yb = float(lb.y_m) if lb.y_m is not None else 0.0
+    return [
+        (float(la.x_m) + float(lb.x_m)) / 2.0,
+        (ya + yb) / 2.0,
+        (float(la.z_m) + float(lb.z_m)) / 2.0,
+    ]
+
+
+def _side_match_joint_id(cid: str, side: str) -> str:
+    """Rewrite L/R joint suffix to match emit side (shoulder_l + side=r → shoulder_r)."""
+    if side not in ("l", "r"):
+        return cid
+    if cid.endswith("_l") or cid.endswith("_r"):
+        base = cid[:-2]
+        return f"{base}_{side}"
+    if cid in ("shoulder", "elbow", "wrist", "hip", "knee", "ankle", "heel", "toe"):
+        return f"{cid}_{side}"
+    return cid
+
+
+def _resolve_parent_joint_id(
+    preferred: str | None,
+    fallbacks: list[str],
+    joints: dict[str, SkeletonJoint],
+    *,
+    side: str,
+) -> str | None:
+    """Pick first joint id with finite xyz; side-specific ids use emit side.
+
+    Packs may store ``shoulder_l`` on ``side: both``; the emit side rewrites
+    wrong-side suffixes so R parts parent to ``shoulder_r`` (D4 / B6).
+    """
+    candidates: list[str] = []
+    if preferred:
+        candidates.append(preferred)
+    candidates.extend(fallbacks)
+    expanded: list[str] = []
+    for c in candidates:
+        if c.endswith("_*") or c.endswith("*"):
+            continue
+        if side in ("l", "r"):
+            sided = _side_match_joint_id(c, side)
+            if sided != c:
+                expanded.append(sided)
+            # Prefer side-suffixed form when base joint missing (shoulder → shoulder_l).
+            if not c.endswith(("_l", "_r")):
+                maybe = f"{c}_{side}"
+                if maybe not in expanded:
+                    expanded.append(maybe)
+            expanded.append(c)
+        else:
+            expanded.append(c)
+    seen: set[str] = set()
+    for cid in expanded:
+        if side in ("l", "r"):
+            cid = _side_match_joint_id(cid, side)
+        if cid in seen:
+            continue
+        seen.add(cid)
+        if _joint_xyz(joints.get(cid)) is not None:
+            return cid
+    return None
+
+
 def _build_deltoids(
     report: ProportionReport,
     m: _ResolvedMetrics,
     messages: list[str],
     crotch_z: float | None,
+    *,
+    michelin_cap_frac_h: float | None = None,
 ) -> list[RecipePart]:
     parts: list[RecipePart] = []
     if m.shoulder_hw is None:
         messages.append("deltoid softs skipped: shoulder_hw null")
         return parts
     lms = report.landmarks_xyz
-    clamp_max = _MICHELIN_FRAC * m.shoulder_hw
+    clamp_max = _michelin_clamp_max(m, michelin_cap_frac_h=michelin_cap_frac_h)
+    if clamp_max is None:
+        clamp_max = _MICHELIN_FRAC * m.shoulder_hw
     for side, lm_id, band in (
         ("l", "shoulder_l", "upper_arm_l"),
         ("r", "shoulder_r", "upper_arm_r"),
@@ -856,13 +1011,16 @@ def _build_soft_ovals(
     *,
     glute_mode: GluteMode = "oval",
     template_applied: TemplateAppliedPackage | None = None,
+    skip_roles: frozenset[str] | set[str] | None = None,
 ) -> list[RecipePart]:
     """Breast / glute / iliac soft ellipsoids when CS or depth available.
 
     Body frame (B1): breast center y = -abs(offset) (front -Y);
     glute center y = +abs(offset) (back +Y).
+    skip_roles (0027): omit breast_soft / glute_soft when profile owns them.
     """
     parts: list[RecipePart] = []
+    skip = frozenset(skip_roles or ())
     h = m.height_m
     soft_y_msg = "soft_y_frame: face=-Y glute=+Y breast=-Y"
     if soft_y_msg not in messages:
@@ -942,7 +1100,9 @@ def _build_soft_ovals(
     breast_cs = _cs_level("bust") or _cs_level("chest") or _cs_level("breast")
     breast_band = _depth_band(report, "breast") or _depth_band(report, "chest")
     bust_diam = _resolve_diameter(report.diameters, "bust")
-    if breast_cs is not None and h is not None:
+    if "breast_soft" in skip:
+        messages.append("base breast_soft skipped (profile owns chest)")
+    elif breast_cs is not None and h is not None:
         z_m = float(breast_cs.z_frac) * h
         rx = float(breast_cs.rx_frac) * h * 0.35
         ry = float(breast_cs.ry_frac) * h * 0.5 * breast_ry_scale
@@ -1013,7 +1173,7 @@ def _build_soft_ovals(
                         label=name,
                     )
                 )
-    else:
+    elif "breast_soft" not in skip:
         messages.append("breast softs skipped: no CS/depth/bust")
 
     # Glute softs — oval ellipsoids or two equal-axis spheres
@@ -1021,7 +1181,9 @@ def _build_soft_ovals(
     glute_band = _depth_band(report, "glute") or _depth_band(report, "hip")
     glute_parts_built = False
 
-    if glute_mode == "two_spheres":
+    if "glute_soft" in skip:
+        messages.append("base glute_soft skipped (profile owns glutes)")
+    elif glute_mode == "two_spheres":
         # Equal-axis ellipsoids RECIPE_glute_sphere_l/r; centers y > 0 (back).
         # Measured hip_hw / CS radii win over template glute_r (binding scale rule).
         r: float | None = None
@@ -1083,7 +1245,7 @@ def _build_soft_ovals(
         else:
             messages.append("glute two_spheres skipped: need radius and z")
 
-    if not glute_parts_built and glute_mode == "oval":
+    if "glute_soft" not in skip and not glute_parts_built and glute_mode == "oval":
         if glute_cs is not None and h is not None:
             z_m = (
                 float(glute_z_override)
@@ -1155,7 +1317,7 @@ def _build_soft_ovals(
                     )
                 glute_parts_built = True
 
-    if not glute_parts_built and glute_mode == "oval":
+    if "glute_soft" not in skip and not glute_parts_built and glute_mode == "oval":
         # Template prior only when no measured CS/depth/hip path.
         if glute_r_override is not None and h is not None:
             r = float(glute_r_override)
@@ -1390,6 +1552,517 @@ def _build_limbs(
 
 
 # ---------------------------------------------------------------------------
+# Profile emit (0027)
+# ---------------------------------------------------------------------------
+
+
+def _profile_skip_roles(profile: AnatomyProfileDocument) -> set[str]:
+    """R6.1: roles base emit must not append when profile owns them."""
+    from meshops.proportion.anatomy_profile import region_enabled
+
+    skip: set[str] = set()
+    if region_enabled(profile, "delts"):
+        skip.add("deltoid_soft")
+    if region_enabled(profile, "chest"):
+        # Clear base mid-chest / dual breast so profile dual breast or pec owns chest.
+        skip.add("breast_soft")
+    if region_enabled(profile, "glutes"):
+        skip.add("glute_soft")
+    # hips: do NOT skip iliac_soft (base owns iliac — C7)
+    return skip
+
+
+def _scale_from_frac_h(frac: float | None, height_m: float | None) -> float | None:
+    if frac is None or height_m is None:
+        return None
+    return float(frac) * float(height_m)
+
+
+def _breast_metrics_rx_ry_rz(
+    report: ProportionReport,
+) -> tuple[float | None, float | None, float | None]:
+    bm = getattr(report, "breast_metrics", None)
+    if bm is None:
+        return None, None, None
+    rxs: list[float] = []
+    rys: list[float] = []
+    rzs: list[float] = []
+    for side_attr in ("left", "right"):
+        side = getattr(bm, side_attr, None)
+        if side is None:
+            continue
+        if side.rx_m is not None and side.rx_m == side.rx_m:
+            rxs.append(float(side.rx_m))
+        if side.ry_m is not None and side.ry_m == side.ry_m:
+            rys.append(float(side.ry_m))
+        if side.rz_m is not None and side.rz_m == side.rz_m:
+            rzs.append(float(side.rz_m))
+    rx = sum(rxs) / len(rxs) if rxs else None
+    ry = sum(rys) / len(rys) if rys else None
+    rz = sum(rzs) / len(rzs) if rzs else None
+    return rx, ry, rz
+
+
+def _breast_slant_deg(
+    report: ProportionReport,
+    template_applied: TemplateAppliedPackage | None,
+) -> float | None:
+    """Plan slant only (B9) — never hang."""
+    bm = getattr(report, "breast_metrics", None)
+    if bm is not None:
+        for side_attr in ("left", "right"):
+            side = getattr(bm, side_attr, None)
+            if side is not None and side.slant_deg is not None:
+                return float(side.slant_deg)
+    if template_applied is not None:
+        return float(getattr(template_applied.constants, "breast_slant_deg", 0.0) or 0.0)
+    return None
+
+
+def _resolve_profile_axes(
+    report: ProportionReport,
+    m: _ResolvedMetrics,
+    scale: ProfileScaleSpec,
+    *,
+    side: str,
+    template_applied: TemplateAppliedPackage | None,
+    messages: list[str],
+) -> tuple[float, float, float]:
+    """B8 scale precedence → (rx, ry, rz) meters."""
+    h = m.height_m
+    rx: float | None = None
+    ry: float | None = None
+    rz: float | None = None
+
+    # 1) breast_metrics
+    if scale.use_breast_metrics:
+        brx, bry, brz = _breast_metrics_rx_ry_rz(report)
+        if brx is not None:
+            rx = brx
+        if bry is not None:
+            ry = bry
+        if brz is not None:
+            rz = brz
+
+    # 2) diameter
+    if scale.use_diameter:
+        band = scale.use_diameter
+        if band == "upper_arm":
+            band = f"upper_arm_{side}" if side in ("l", "r") else band
+        elif band == "hip":
+            band = "waist"  # hip half-width often via waist when no hip diam
+        diam = _resolve_diameter(report.diameters, band)
+        if diam is None and scale.use_diameter == "hip":
+            diam = _resolve_diameter(report.diameters, "hip")
+        if diam is None and scale.use_diameter == "bust":
+            diam = _resolve_diameter(report.diameters, "bust")
+        hw = _half_width_from_diameter(diam) if diam else None
+        if hw is not None:
+            if rx is None:
+                rx = float(hw) * 0.55
+            if ry is None:
+                ry = float(hw) * 0.45
+            if rz is None:
+                rz = float(hw) * 0.5
+
+    # 3) depth_band
+    if scale.use_depth_band:
+        band = _depth_band(report, scale.use_depth_band)
+        if band is not None and band.depth_m is not None and ry is None:
+            ry = float(band.depth_m) * 0.35
+
+    # 5) *_frac_h * H (soft_spacing gaps applied at placement, not axes)
+    if rx is None:
+        rx = _scale_from_frac_h(scale.rx_frac_h, h)
+    if ry is None:
+        ry = _scale_from_frac_h(scale.ry_frac_h, h)
+    if rz is None:
+        rz = _scale_from_frac_h(scale.rz_frac_h, h)
+
+    # 6) template / hard fallbacks
+    if rx is None:
+        rx = 0.04 * (h or 1.7)
+        messages.append(f"profile scale rx fallback {rx:.4f}m")
+    if ry is None:
+        ry = 0.03 * (h or 1.7)
+    if rz is None:
+        rz = 0.035 * (h or 1.7)
+
+    # Michelin cap when set
+    if scale.michelin_cap_frac_h is not None:
+        cap = _michelin_clamp_max(m, michelin_cap_frac_h=scale.michelin_cap_frac_h)
+        if cap is not None:
+            for axis_name, val in (("rx", rx), ("ry", ry), ("rz", rz)):
+                if val > cap:
+                    messages.append(
+                        f"profile {axis_name} {val:.3f}m clamped to {cap:.3f}m "
+                        f"(michelin_cap_frac_h={scale.michelin_cap_frac_h})"
+                    )
+            rx = min(rx, cap)
+            ry = min(ry, cap)
+            rz = min(rz, cap)
+
+    _ = template_applied  # reserved for future template soft scales
+    return float(rx), float(ry), float(rz)
+
+
+def _half_gap_intermammary(
+    report: ProportionReport,
+    m: _ResolvedMetrics,
+    template_applied: TemplateAppliedPackage | None,
+) -> float:
+    soft = getattr(report, "soft_spacing", None)
+    if soft is not None and soft.intermammary_gap_m is not None:
+        g = float(soft.intermammary_gap_m)
+        if g == g:
+            return g / 2.0
+    if template_applied is not None:
+        tm = getattr(template_applied.constants, "intermammary_gap_m", None)
+        if tm is not None:
+            return float(tm) / 2.0
+        gf = getattr(template_applied.constants, "intermammary_gap_frac", None)
+        bust = _resolve_diameter(report.diameters, "bust")
+        hw = _half_width_from_diameter(bust) if bust else m.shoulder_hw
+        if gf is not None and hw is not None:
+            return (float(gf) * float(hw)) / 2.0
+    return (m.shoulder_hw or 0.15) * 0.18
+
+
+def _half_gap_glute(
+    report: ProportionReport,
+    m: _ResolvedMetrics,
+    template_applied: TemplateAppliedPackage | None,
+) -> float:
+    soft = getattr(report, "soft_spacing", None)
+    if soft is not None and soft.glute_cleft_gap_m is not None:
+        g = float(soft.glute_cleft_gap_m)
+        if g == g:
+            return g / 2.0
+    if template_applied is not None:
+        tm = getattr(template_applied.constants, "glute_cleft_m", None)
+        if tm is not None:
+            return float(tm) / 2.0
+        cf = getattr(template_applied.constants, "glute_cleft_frac", None)
+        hip = m.hip_hw or 0.12
+        if cf is not None:
+            return (float(cf) * float(hip)) / 2.0
+    return (m.hip_hw or 0.12) * 0.08
+
+
+def _emit_profile_parts(
+    report: ProportionReport,
+    m: _ResolvedMetrics,
+    messages: list[str],
+    crotch_z: float | None,
+    *,
+    profile: AnatomyProfileDocument,
+    skeleton: BlockoutSkeleton | None,
+    template_applied: TemplateAppliedPackage | None,
+) -> list[RecipePart]:
+    """Emit dual softs + trap/pec/scap/bicep/clavicle from profile regions."""
+    parts: list[RecipePart] = []
+    joints = _joints_map(skeleton)
+    lms = report.landmarks_xyz
+    h = m.height_m
+
+    messages.append(f"anatomy_profile: id={profile.id}")
+
+    # Hang (B9) — CLI already applied upstream; note slant separately.
+    slant = _breast_slant_deg(report, template_applied)
+    if slant is not None:
+        messages.append(f"breast_slant_deg={slant} (plan only; not hang)")
+
+    for reg in profile.regions:
+        if not reg.enabled:
+            continue
+        if reg.id in ("torso", "hips", "neck"):
+            # torso: preferred_torso_mode only; hips: no iliac re-emit; neck: base owns
+            continue
+        for spec in reg.parts:
+            sides: list[str]
+            if spec.side == "both":
+                sides = ["l", "r"]
+            elif spec.side in ("l", "r"):
+                sides = [spec.side]
+            else:
+                sides = ["none"]
+
+            for side in sides:
+                emitted = _emit_one_profile_part(
+                    report,
+                    m,
+                    messages,
+                    crotch_z,
+                    spec=spec,
+                    side=side,
+                    joints=joints,
+                    lms=lms,
+                    template_applied=template_applied,
+                    height_m=h,
+                )
+                if emitted is not None:
+                    parts.append(emitted)
+    return parts
+
+
+def _emit_one_profile_part(
+    report: ProportionReport,
+    m: _ResolvedMetrics,
+    messages: list[str],
+    crotch_z: float | None,
+    *,
+    spec: ProfilePartSpec,
+    side: str,
+    joints: dict[str, SkeletonJoint],
+    lms: dict[str, LandmarkXYZ],
+    template_applied: TemplateAppliedPackage | None,
+    height_m: float | None,
+) -> RecipePart | None:
+    role = spec.role  # type: ignore[assignment]
+    kind = spec.kind  # type: ignore[assignment]
+    rules = set(spec.placement_rules)
+    side_tag = side if side in ("l", "r") else "none"
+    name = f"RECIPE_{role}" if side_tag == "none" else f"RECIPE_{role}_{side_tag}"
+
+    parent_id = _resolve_parent_joint_id(
+        spec.parent_joint_id,
+        list(spec.parent_joint_fallback),
+        joints,
+        side=side_tag if side_tag in ("l", "r") else "none",
+    )
+    parent_joint: str | None = parent_id
+    center: list[float] | None = None
+    p0: list[float] | None = None
+    p1: list[float] | None = None
+
+    # --- Placement ---
+    if role == "trap_soft" and side_tag in ("l", "r"):
+        sh_id = f"shoulder_{side_tag}"
+        mid = _midpoint_of_joints(joints, "neck_base", sh_id)
+        if mid is None:
+            # landmark fallback: estimate neck_base at chin/shoulder mid z
+            chin = lms.get("chin")
+            sh = lms.get(sh_id)
+            if chin is not None and sh is not None and sh.x_m is not None and sh.z_m is not None:
+                neck_z = (
+                    (float(chin.z_m) + float(sh.z_m)) / 2.0
+                    if chin.z_m is not None
+                    else float(sh.z_m) + 0.02
+                )
+                mid = [
+                    float(sh.x_m) * 0.5,
+                    float(sh.y_m) if sh.y_m is not None else 0.0,
+                    neck_z,
+                ]
+            else:
+                mid = _lm_midpoint(lms, "chin", sh_id)
+        if mid is not None:
+            center = list(mid)
+            if "y_back_pos" in rules:
+                center[1] = abs(center[1]) if center[1] != 0.0 else 0.01 * (height_m or 1.7)
+        if parent_joint is None:
+            parent_joint = None
+            messages.append(f"parent_joint {role} unresolved — using landmark placement")
+
+    elif role == "bicep_soft" and side_tag in ("l", "r"):
+        sh_id = f"shoulder_{side_tag}"
+        el_id = f"elbow_{side_tag}"
+        mid = _midpoint_of_joints(joints, sh_id, el_id)
+        if mid is None:
+            mid = _lm_midpoint(lms, sh_id, el_id)
+        if mid is not None:
+            center = list(mid)
+        # Prefer side-correct shoulder as parent SoT (D4); mid placement is independent.
+        if _joint_xyz(joints.get(sh_id)) is not None:
+            parent_joint = sh_id
+        elif parent_joint is None:
+            messages.append(f"parent_joint {role} unresolved — using landmark placement")
+
+    elif role == "clavicle" and side_tag in ("l", "r"):
+        sh_id = f"shoulder_{side_tag}"
+        sh_j = _joint_xyz(joints.get(sh_id))
+        sp_j = _joint_xyz(joints.get("spine_high")) or _joint_xyz(joints.get("spine_mid"))
+        if sh_j is not None and sp_j is not None:
+            p0 = list(sh_j)
+            p1 = list(sp_j)
+        else:
+            sh_lm = lms.get(sh_id)
+            if sh_lm is not None and sh_lm.x_m is not None and sh_lm.z_m is not None:
+                y = float(sh_lm.y_m) if sh_lm.y_m is not None else 0.0
+                p0 = [float(sh_lm.x_m), y, float(sh_lm.z_m)]
+                # mid-chest toward spine
+                p1 = [0.0, y, float(sh_lm.z_m) - 0.02 * (height_m or 1.7)]
+                messages.append(f"parent_joint {role} unresolved — using landmark placement")
+            else:
+                messages.append(f"RECIPE_clavicle_{side_tag} skipped: missing shoulder")
+                return None
+        # Side-correct shoulder wins over pack left-default parent_joint_id.
+        parent_joint = sh_id if sh_j is not None else parent_id
+
+    elif role in ("deltoid_soft",) and side_tag in ("l", "r"):
+        sh_id = f"shoulder_{side_tag}"
+        jxyz = _joint_xyz(joints.get(sh_id))
+        if jxyz is not None:
+            center = list(jxyz)
+            parent_joint = sh_id
+        else:
+            lm = lms.get(sh_id)
+            if lm is not None and lm.x_m is not None and lm.z_m is not None:
+                center = [
+                    float(lm.x_m),
+                    float(lm.y_m) if lm.y_m is not None else 0.0,
+                    float(lm.z_m),
+                ]
+                messages.append(f"parent_joint {role} unresolved — using landmark placement")
+            else:
+                messages.append(f"{name} skipped: missing joint")
+                return None
+
+    elif role in ("breast_soft", "pec_soft", "scap_soft", "glute_soft"):
+        # Anchor at spine_high / pelvis then offset L/R + Y rule
+        if role == "glute_soft":
+            anchor = _joint_xyz(joints.get("pelvis"))
+            if anchor is None and m.hip_z is not None:
+                anchor = [0.0, m.hip_y or 0.0, m.hip_z]
+        else:
+            anchor = _joint_xyz(joints.get("spine_high")) or _joint_xyz(joints.get("spine_mid"))
+            if anchor is None and m.chest_z is not None:
+                anchor = [0.0, m.chest_y or 0.0, m.chest_z]
+            elif anchor is None and m.shoulder_z is not None:
+                anchor = [0.0, m.chest_y or 0.0, m.shoulder_z]
+        if anchor is None:
+            messages.append(f"parent_joint {role} unresolved — using landmark placement")
+            z0 = m.hip_z if role == "glute_soft" else (m.chest_z or m.shoulder_z or 1.2)
+            if z0 is None:
+                messages.append(f"{name} skipped: no z anchor")
+                return None
+            anchor = [0.0, 0.0, float(z0)]
+        center = list(anchor)
+        if parent_joint is None:
+            messages.append(f"parent_joint {role} unresolved — using landmark placement")
+    else:
+        if parent_id is not None:
+            jxyz = _joint_xyz(joints.get(parent_id))
+            if jxyz is not None:
+                center = list(jxyz)
+        if center is None and kind != "capsule":
+            messages.append(f"parent_joint {role} unresolved — using landmark placement")
+            messages.append(f"{name} skipped: no center")
+            return None
+
+    # Axes / radius
+    rx = ry = rz = 0.0
+    radius_m: float | None = None
+    if kind == "capsule" or kind == "cylinder":
+        rfrac = spec.scale.radius_frac_h
+        if rfrac is not None and height_m is not None:
+            radius_m = float(rfrac) * float(height_m)
+        else:
+            radius_m = 0.006 * (height_m or 1.7)
+    else:
+        rx, ry, rz = _resolve_profile_axes(
+            report,
+            m,
+            spec.scale,
+            side=side_tag if side_tag in ("l", "r") else "none",
+            template_applied=template_applied,
+            messages=messages,
+        )
+
+    # Lateral dual gap offsets
+    if center is not None and side_tag in ("l", "r") and "dual_lr" in rules:
+        sign = -1.0 if side_tag == "l" else 1.0
+        if "gap_intermammary" in rules or role in ("breast_soft", "pec_soft"):
+            half = _half_gap_intermammary(report, m, template_applied)
+            offset = half + max(rx, 0.02) * 0.55
+            center[0] = sign * offset
+        elif "gap_glute_cleft" in rules or role == "glute_soft":
+            half = _half_gap_glute(report, m, template_applied)
+            offset = half + max(rx, 0.02) * 0.55
+            center[0] = sign * offset
+        elif role in ("trap_soft", "scap_soft", "deltoid_soft", "bicep_soft"):
+            # keep mid/joint x; mild lateral bias for traps/scap if near zero
+            if abs(center[0]) < 1e-6:
+                lat = (m.shoulder_hw or 0.15) * (0.35 if role == "trap_soft" else 0.45)
+                center[0] = sign * lat
+        else:
+            if abs(center[0]) < 1e-6:
+                center[0] = sign * (m.shoulder_hw or 0.15) * 0.3
+
+    # Soft Y frame (B8)
+    if center is not None:
+        if "y_front_neg" in rules or role in ("breast_soft", "pec_soft"):
+            mag = abs(center[1]) if center[1] != 0.0 else abs(ry) * 0.35
+            if template_applied is not None and role == "breast_soft":
+                by = template_applied.constants.breast_y_m
+                if by is not None:
+                    mag = abs(float(by))
+            center[1] = -abs(mag) if mag != 0.0 else -abs(ry) * 0.3
+        if "y_back_pos" in rules or role in ("glute_soft", "scap_soft", "trap_soft"):
+            mag = abs(center[1]) if center[1] != 0.0 else abs(ry) * 0.4
+            if template_applied is not None and role == "glute_soft":
+                gy = template_applied.constants.glute_y_m
+                if gy is not None:
+                    mag = abs(float(gy))
+            center[1] = abs(mag) if mag != 0.0 else abs(ry) * 0.35
+
+    if (
+        center is not None
+        and role
+        in (
+            "deltoid_soft",
+            "breast_soft",
+            "glute_soft",
+            "trap_soft",
+            "pec_soft",
+            "scap_soft",
+            "bicep_soft",
+        )
+        and role not in _MIDLINE_EXEMPT_ROLES
+        and _midline_blocked(center, "deltoid_soft", crotch_z)
+    ):
+        messages.append(f"midline below crotch skipped: {name}")
+        return None
+
+    if kind in ("capsule", "cylinder"):
+        if p0 is None or p1 is None or radius_m is None:
+            messages.append(f"{name} skipped: missing capsule endpoints/radius")
+            return None
+        if _segment_length((p0[0], p0[1], p0[2]), (p1[0], p1[1], p1[2])) < _NEAR_ZERO_LEN:
+            messages.append(f"{name} skipped: zero length")
+            return None
+        return RecipePart(
+            name=name,
+            role=role,  # type: ignore[arg-type]
+            kind=kind,  # type: ignore[arg-type]
+            p0=p0,
+            p1=p1,
+            radius_m=radius_m,
+            placement="full3d",
+            label=name,
+            parent_joint=parent_joint,
+            notes=spec.notes,
+        )
+
+    if center is None:
+        messages.append(f"{name} skipped: no center")
+        return None
+    return RecipePart(
+        name=name,
+        role=role,  # type: ignore[arg-type]
+        kind=kind,  # type: ignore[arg-type]
+        center=center,
+        rx_m=rx,
+        ry_m=ry,
+        rz_m=rz,
+        placement="full3d",
+        label=name,
+        parent_joint=parent_joint,
+        notes=spec.notes,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Build package
 # ---------------------------------------------------------------------------
 
@@ -1404,11 +2077,14 @@ def build_blockout_recipe(
     nofuse: bool = False,
     breast_tilt_deg: float | None = None,
     template_applied: TemplateAppliedPackage | None = None,
+    profile: AnatomyProfileDocument | None = None,
+    skeleton: BlockoutSkeleton | None = None,
 ) -> BlockoutRecipePackage:
     """Build BlockoutRecipePackage from a loaded ProportionReport.
 
     Raises ProportionError(code=recipe_empty) when zero parts.
     Topology modes only in messages (C1) — not in counts.
+    When *profile* set: skip_roles merge (R6.1) + profile dual softs / new roles.
     """
     messages: list[str] = []
 
@@ -1417,17 +2093,40 @@ def build_blockout_recipe(
     if report.quality.multi_figure:
         messages.append("quality.multi_figure: recipe still emitted — confirm primary figure")
 
+    skip_roles: set[str] = set()
+    torso_mode: TorsoMode = torso
+    glute_mode: GluteMode = glute
+    if profile is not None:
+        from meshops.proportion.anatomy_profile import region_by_id
+
+        skip_roles = _profile_skip_roles(profile)
+        torso_reg = region_by_id(profile, "torso")
+        if (
+            torso_reg is not None
+            and torso_reg.enabled
+            and torso_reg.preferred_torso_mode is not None
+        ):
+            torso_mode = torso_reg.preferred_torso_mode
+            messages.append(f"preferred_torso_mode from profile: {torso_mode}")
+        # Profile glutes enabled → dual wins over CLI --glute oval (AI2 B7)
+        glute_reg = region_by_id(profile, "glutes")
+        if glute_reg is not None and glute_reg.enabled:
+            glute_mode = "two_spheres"
+            messages.append("profile glutes enabled: dual glute (wins over CLI glute mode)")
+
     # Mode messages (C1)
-    messages.append(f"torso_mode={torso}")
-    messages.append(f"glute_mode={glute}")
+    messages.append(f"torso_mode={torso_mode}")
+    messages.append(f"glute_mode={glute_mode}")
     messages.append(f"nofuse={str(bool(nofuse)).lower()}")
     if nofuse:
         messages.append("nofuse=true: no join/boolean (emit layout only)")
+    if skip_roles:
+        messages.append(f"skip_roles={sorted(skip_roles)}")
 
     if template_applied is not None:
         messages.append(f"template_applied: id={template_applied.template_id}")
 
-    # Breast tilt metadata only (C2) — no bpy rotation in v1
+    # Breast hang (B9): CLI → template tilt — never slant (C2 message-only hang)
     tilt_val: float | None = breast_tilt_deg
     if tilt_val is None and template_applied is not None:
         tilt_val = float(template_applied.constants.breast_tilt_x_deg)
@@ -1446,7 +2145,7 @@ def build_blockout_recipe(
     parts: list[RecipePart] = []
 
     # 1-2 torso + pelvis
-    if torso == "ovals":
+    if torso_mode == "ovals":
         for p in _build_torso_ovals(resolved, messages, taper=taper):
             _append_part(parts, p)
     else:
@@ -1494,9 +2193,12 @@ def build_blockout_recipe(
     for p in _build_hip_bridges(report, resolved, messages):
         _append_part(parts, p)
 
-    # 9-10 deltoids
-    for p in _build_deltoids(report, resolved, messages, crotch_z):
-        _append_part(parts, p)
+    # 9-10 deltoids (skip when profile owns delts)
+    if "deltoid_soft" not in skip_roles:
+        for p in _build_deltoids(report, resolved, messages, crotch_z):
+            _append_part(parts, p)
+    else:
+        messages.append("base deltoid_soft skipped (profile owns delts)")
 
     # 11+ breast/glute/iliac
     for p in _build_soft_ovals(
@@ -1504,8 +2206,9 @@ def build_blockout_recipe(
         resolved,
         messages,
         crotch_z,
-        glute_mode=glute,
+        glute_mode=glute_mode,
         template_applied=template_applied,
+        skip_roles=skip_roles,
     ):
         _append_part(parts, p)
 
@@ -1515,6 +2218,32 @@ def build_blockout_recipe(
             _append_part(parts, p)
     else:
         messages.append("--no-limbs: limb_segment parts omitted")
+
+    # 0027 profile emit after base (skip_roles already applied)
+    if profile is not None:
+        for p in _emit_profile_parts(
+            report,
+            resolved,
+            messages,
+            crotch_z,
+            profile=profile,
+            skeleton=skeleton,
+            template_applied=template_applied,
+        ):
+            _append_part(parts, p)
+
+        # Coincident trap L/R guard
+        traps = [p for p in parts if p.role == "trap_soft" and p.center is not None]
+        if len(traps) >= 2:
+            c0, c1 = traps[0].center, traps[1].center
+            if (
+                c0 is not None
+                and c1 is not None
+                and abs(c0[0] - c1[0]) < 1e-6
+                and abs(c0[1] - c1[1]) < 1e-6
+                and abs(c0[2] - c1[2]) < 1e-6
+            ):
+                messages.append("trap_soft L/R coincident — check neck_base/shoulder joints")
 
     if not parts:
         raise ProportionError(
@@ -1551,7 +2280,7 @@ def build_blockout_recipe(
 
 
 def load_blockout_recipe(path: Path | str) -> BlockoutRecipePackage:
-    """Load blockout_recipe.json; accepts schema 1.0.0 only."""
+    """Load blockout_recipe.json; accepts schema 1.0.0 | 1.1.0."""
     p = Path(path)
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
@@ -1562,9 +2291,9 @@ def load_blockout_recipe(path: Path | str) -> BlockoutRecipePackage:
             details={"path": str(p)},
         ) from exc
     ver = data.get("schema_version") if isinstance(data, dict) else None
-    if ver != "1.0.0":
+    if ver not in ("1.0.0", "1.1.0"):
         raise ProportionError(
-            f"blockout recipe schema_version must be 1.0.0 (got {ver!r})",
+            f"blockout recipe schema_version must be 1.0.0 or 1.1.0 (got {ver!r})",
             code="recipe_failed",
             details={"path": str(p), "schema_version": ver},
         )
@@ -1648,6 +2377,8 @@ def emit_bpy_script(package: BlockoutRecipePackage) -> str:
             entry["rz_m"] = p.rz_m
         if p.radius_m is not None:
             entry["radius_m"] = p.radius_m
+        if p.parent_joint is not None:
+            entry["parent_joint"] = p.parent_joint
         parts_data.append(entry)
 
     lines: list[str] = [
@@ -2011,6 +2742,8 @@ def run_blockout_recipe(
     nofuse: bool = False,
     breast_tilt_deg: float | None = None,
     template_applied: Path | str | None = None,
+    profiles: str | None = None,
+    skeleton: Path | str | None = None,
 ) -> dict[str, Any]:
     """CLI helper: load report → build → write; return success payload."""
     report = load_report(report_path)
@@ -2024,6 +2757,34 @@ def run_blockout_recipe(
 
         tpl = load_template_applied(template_applied)
 
+    profile_doc: AnatomyProfileDocument | None = None
+    if profiles is not None and str(profiles).strip():
+        from meshops.proportion.anatomy_profile import load_anatomy_profile
+
+        profile_doc = load_anatomy_profile(str(profiles).strip())
+
+    skel: BlockoutSkeleton | None = None
+    if skeleton is not None:
+        from meshops.proportion.skeleton import load_blockout_skeleton
+
+        try:
+            skel = load_blockout_skeleton(skeleton)
+        except ProportionError as exc:
+            # Soft: continue without parent_joint (B6)
+            # Note: load errors still message; parts emit via landmarks.
+            # Re-raise only if code is not skeleton_failed/empty? Spec: message + continue.
+            if exc.code in ("skeleton_failed", "skeleton_empty"):
+                # Defer message into package via a temp list — build will not see it;
+                # attach after build.
+                skel = None
+                skel_err = f"skeleton unreadable: {exc} — parent_joint disabled"
+            else:
+                raise
+        else:
+            skel_err = None
+    else:
+        skel_err = None
+
     package = build_blockout_recipe(
         report,
         depth_package=depth_pkg,
@@ -2033,7 +2794,11 @@ def run_blockout_recipe(
         nofuse=nofuse,
         breast_tilt_deg=breast_tilt_deg,
         template_applied=tpl,
+        profile=profile_doc,
+        skeleton=skel,
     )
+    if skel_err is not None:
+        package.messages.append(skel_err)
     paths = write_blockout_recipe(out, package, format=format, force=force)
     return {
         "ok": True,
@@ -2054,9 +2819,12 @@ __all__ = [
     "RECIPE_HONESTY",
     "RECIPE_ID",
     "RECIPE_SCHEMA_VERSION",
+    "_BASELINE_ROLES_NO_PROFILE",
+    "_MICHELIN_FRAC",
     "BlockoutRecipePackage",
     "RecipeMetrics",
     "RecipePart",
+    "_midpoint_of_joints",
     "build_blockout_recipe",
     "emit_bpy_script",
     "load_blockout_recipe",

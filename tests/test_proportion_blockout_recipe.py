@@ -190,7 +190,7 @@ def test_recipe__full_torso_trap() -> None:
     assert trap.z_bottom_m is not None
     assert trap.z_top_m is not None
     assert trap.z_top_m > trap.z_bottom_m
-    assert pkg.schema_version == "1.0.0"
+    assert pkg.schema_version == "1.1.0"
     assert pkg.recipe_id == "humanoid_a_pose_v1"
     assert pkg.honesty == RECIPE_HONESTY
     assert pkg.axis_notes == AXIS_NOTES
@@ -482,18 +482,48 @@ def test_recipe__bpy_string_scan() -> None:
     assert "meshops_role" in script
 
 
-def test_recipe__schema_1_0_0_write(tmp_path: Path) -> None:
+def test_recipe__schema_1_1_0_write(tmp_path: Path) -> None:
     report = _full_torso_report()
     pkg = build_blockout_recipe(report, limbs=False)
     assert pkg.schema_version == RECIPE_SCHEMA_VERSION
-    assert pkg.schema_version == "1.0.0"
+    assert pkg.schema_version == "1.1.0"
     paths = write_blockout_recipe(tmp_path / "r", pkg, format="json", force=True)
     data = json.loads(paths[0].read_text(encoding="utf-8"))
-    assert data["schema_version"] == "1.0.0"
+    assert data["schema_version"] == "1.1.0"
     assert data["honesty"] == RECIPE_HONESTY
     loaded = load_blockout_recipe(paths[0])
     assert isinstance(loaded, BlockoutRecipePackage)
+    assert loaded.schema_version == "1.1.0"
+
+
+def test_recipe__load_schema_1_0_0_parent_joint_null(tmp_path: Path) -> None:
+    """Legacy 1.0.0 files load; parent_joint defaults null."""
+    p = tmp_path / "legacy.json"
+    p.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0.0",
+                "honesty": RECIPE_HONESTY,
+                "axis_notes": AXIS_NOTES,
+                "recipe_id": "humanoid_a_pose_v1",
+                "parts": [
+                    {
+                        "name": "RECIPE_neck",
+                        "role": "neck",
+                        "kind": "cylinder",
+                        "p0": [0.0, 0.0, 1.3],
+                        "p1": [0.0, 0.0, 1.4],
+                        "radius_m": 0.04,
+                        "label": "RECIPE_neck",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded = load_blockout_recipe(p)
     assert loaded.schema_version == "1.0.0"
+    assert loaded.parts[0].parent_joint is None
 
 
 def test_recipe__load_rejects_other_schema(tmp_path: Path) -> None:
@@ -847,8 +877,8 @@ def test_recipe__breast_tilt_metadata_only() -> None:
     pkg = build_blockout_recipe(report, limbs=False, breast_tilt_deg=20.0)
     assert any("breast_tilt_deg=20.0" in m or "breast_tilt_deg=20" in m for m in pkg.messages)
     assert any(m == "breast_tilt_applied: false" for m in pkg.messages)
-    # schema stays 1.0.0
-    assert pkg.schema_version == "1.0.0"
+    # schema write is 1.1.0 (0027)
+    assert pkg.schema_version == "1.1.0"
 
 
 def test_recipe__template_does_not_override_measured_glute_cs() -> None:

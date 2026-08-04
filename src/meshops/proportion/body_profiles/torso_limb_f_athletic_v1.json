@@ -1,0 +1,179 @@
+{
+  "id": "torso_limb_f_athletic_v1",
+  "schema_version": "1.0.0",
+  "honesty": "proportion_anatomy_profile_not_mesh_or_print_success",
+  "sex": "female",
+  "archetype": "adult_athletic",
+  "description": "Female athletic torso/limb mass shapes: dual breast, dual glute, thin traps, delts, biceps, scap, clavicle.",
+  "template_id_hint": "female_adult_athletic",
+  "regions": [
+    {
+      "id": "torso",
+      "enabled": true,
+      "preferred_torso_mode": "ovals",
+      "parts": [],
+      "notes": "preferred_torso_mode only — no second torso part"
+    },
+    {
+      "id": "traps",
+      "enabled": true,
+      "parts": [
+        {
+          "role": "trap_soft",
+          "kind": "ellipsoid",
+          "side": "both",
+          "count": 1,
+          "parent_joint_id": "neck_base",
+          "parent_joint_fallback": ["spine_high", "shoulder_l"],
+          "scale": {
+            "rx_frac_h": 0.035,
+            "ry_frac_h": 0.012,
+            "rz_frac_h": 0.028
+          },
+          "placement_rules": ["mid_bone", "y_back_pos", "dual_lr"],
+          "notes": "mid(neck_base, shoulder_*) thin trap ovals"
+        }
+      ]
+    },
+    {
+      "id": "delts",
+      "enabled": true,
+      "parts": [
+        {
+          "role": "deltoid_soft",
+          "kind": "ellipsoid",
+          "side": "both",
+          "count": 1,
+          "parent_joint_id": "shoulder_l",
+          "parent_joint_fallback": [],
+          "scale": {
+            "rx_frac_h": 0.045,
+            "ry_frac_h": 0.040,
+            "rz_frac_h": 0.038,
+            "use_diameter": "upper_arm",
+            "michelin_cap_frac_h": 0.045
+          },
+          "placement_rules": ["at_joint", "dual_lr", "michelin_cap"]
+        }
+      ]
+    },
+    {
+      "id": "biceps",
+      "enabled": true,
+      "parts": [
+        {
+          "role": "bicep_soft",
+          "kind": "ellipsoid",
+          "side": "both",
+          "count": 1,
+          "parent_joint_id": "shoulder_l",
+          "parent_joint_fallback": ["elbow_l"],
+          "scale": {
+            "rx_frac_h": 0.028,
+            "ry_frac_h": 0.026,
+            "rz_frac_h": 0.032,
+            "use_diameter": "upper_arm"
+          },
+          "placement_rules": ["mid_bone", "dual_lr"]
+        }
+      ]
+    },
+    {
+      "id": "chest",
+      "enabled": true,
+      "parts": [
+        {
+          "role": "breast_soft",
+          "kind": "ellipsoid",
+          "side": "both",
+          "count": 1,
+          "parent_joint_id": "spine_high",
+          "parent_joint_fallback": ["spine_mid"],
+          "scale": {
+            "rx_frac_h": 0.055,
+            "ry_frac_h": 0.040,
+            "rz_frac_h": 0.045,
+            "use_breast_metrics": true,
+            "use_soft_spacing": true,
+            "use_diameter": "bust",
+            "use_depth_band": "breast"
+          },
+          "placement_rules": [
+            "y_front_neg",
+            "dual_lr",
+            "gap_intermammary",
+            "nofuse_gap"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "back",
+      "enabled": true,
+      "parts": [
+        {
+          "role": "scap_soft",
+          "kind": "ellipsoid",
+          "side": "both",
+          "count": 1,
+          "parent_joint_id": "spine_high",
+          "parent_joint_fallback": ["spine_mid"],
+          "scale": {
+            "rx_frac_h": 0.040,
+            "ry_frac_h": 0.015,
+            "rz_frac_h": 0.045
+          },
+          "placement_rules": ["at_joint", "y_back_pos", "dual_lr"]
+        }
+      ]
+    },
+    {
+      "id": "hips",
+      "enabled": true,
+      "parts": [],
+      "notes": "base owns iliac_soft — hips does not re-emit (C7)"
+    },
+    {
+      "id": "glutes",
+      "enabled": true,
+      "parts": [
+        {
+          "role": "glute_soft",
+          "kind": "ellipsoid",
+          "side": "both",
+          "count": 1,
+          "parent_joint_id": "pelvis",
+          "parent_joint_fallback": ["hip_l", "hip_r"],
+          "scale": {
+            "rx_frac_h": 0.072,
+            "ry_frac_h": 0.065,
+            "rz_frac_h": 0.070,
+            "use_soft_spacing": true,
+            "use_diameter": "hip",
+            "use_depth_band": "glute"
+          },
+          "placement_rules": ["y_back_pos", "dual_lr", "gap_glute_cleft", "nofuse_gap"]
+        }
+      ]
+    },
+    {
+      "id": "clavicle",
+      "enabled": true,
+      "parts": [
+        {
+          "role": "clavicle",
+          "kind": "capsule",
+          "side": "both",
+          "count": 1,
+          "parent_joint_id": "shoulder_l",
+          "parent_joint_fallback": ["spine_high"],
+          "scale": {
+            "radius_frac_h": 0.006
+          },
+          "placement_rules": ["dual_lr"]
+        }
+      ]
+    }
+  ],
+  "messages": []
+}
