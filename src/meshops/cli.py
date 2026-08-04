@@ -1950,6 +1950,11 @@ def proportion_scaffold_cmd(
         "--include-back-stub",
         help="Also write back.png stub when --stub-images",
     ),
+    include_top_stub: bool = typer.Option(
+        False,
+        "--include-top-stub",
+        help="Also write top.png stub when --stub-images (optional Package A overhead)",
+    ),
     force: bool = typer.Option(
         False,
         "--force",
@@ -1988,6 +1993,7 @@ def proportion_scaffold_cmd(
             with_template=with_template,
             stub_images=stub_images,
             include_back_stub=include_back_stub,
+            include_top_stub=include_top_stub,
             force=force,
         )
     except ProportionError as exc:

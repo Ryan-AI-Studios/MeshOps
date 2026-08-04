@@ -5,7 +5,7 @@ pixel proportion measurement alone.
 
 0024 consumer notes (measurement only):
 - foot/cranial depth_bands: use depth_frac / y_mid, not raw y_front as toe Y (C4)
-- breast_lower* assist ids are prep-only until 0027 (no fuse pair / diameter)
+- breast_lower* used for rz in 0030; lateral fuse/diameter still 0027
 """
 
 from __future__ import annotations

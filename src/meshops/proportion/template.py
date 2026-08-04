@@ -86,10 +86,11 @@ _LEFT_LANDMARK_KEYS: tuple[str, ...] = (
     "heel",
     "heel_l",
     "heel_r",
-    # Prep-only until 0027 — no fuse pair / diameter / recipe consumer (C1).
+    # breast_lower*: rz source in 0030; lateral fuse/diameter still 0027.
     "breast_lower",
     "breast_lower_l",
     "breast_lower_r",
+    "breast_upper",
     "spine_hint",
 )
 
@@ -127,6 +128,29 @@ _BACK_LANDMARK_KEYS: tuple[str, ...] = (
     "chin",
     "sole",
     "midline_x",
+    "glute_peak_l",
+    "glute_peak_r",
+    "glute_cleft",
+)
+
+# Top-down plan view (0030) — breast/glute soft-spacing primary vocabulary.
+_TOP_LANDMARK_KEYS: tuple[str, ...] = (
+    "bust_l",
+    "bust_r",
+    "shoulder_l",
+    "shoulder_r",
+    "breast_center_l",
+    "breast_center_r",
+    "breast_medial_l",
+    "breast_medial_r",
+    "breast_lateral_l",
+    "breast_lateral_r",
+    "glute_peak_l",
+    "glute_peak_r",
+    "glute_cleft",
+    "glute_medial_l",
+    "glute_medial_r",
+    "midline_x",
 )
 
 _FACING: dict[str, str] = {
@@ -134,6 +158,7 @@ _FACING: dict[str, str] = {
     "left": "camera_left",
     "three_quarter": "camera_front",
     "back": "camera_back",
+    "top": "unknown",
 }
 
 _KEYS_BY_VIEW: dict[str, tuple[str, ...]] = {
@@ -141,6 +166,7 @@ _KEYS_BY_VIEW: dict[str, tuple[str, ...]] = {
     "left": _LEFT_LANDMARK_KEYS,
     "three_quarter": _TQ_LANDMARK_KEYS,
     "back": _BACK_LANDMARK_KEYS,
+    "top": _TOP_LANDMARK_KEYS,
 }
 
 

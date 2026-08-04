@@ -382,12 +382,12 @@ def test_template_cli__writes(tmp_path: Path) -> None:
     assert payload["ok"] is True
     assert out.is_file()
     doc = json.loads(out.read_text(encoding="utf-8"))
-    assert doc["schema_version"] == "1.1.0"
+    assert doc["schema_version"] == "1.2.0"
     assert doc["pose"] == "unknown"
     assert doc["multi_figure"] is False
     assert "edge_pairs" in doc
     assert "front" in doc["edge_pairs"]
-    for key in ("front", "left", "three_quarter", "back"):
+    for key in ("front", "left", "three_quarter", "back", "top"):
         assert key in doc["views"]
         assert "landmarks" in doc["views"][key]
     blank = blank_assist_document()
@@ -465,7 +465,7 @@ def test_show_cli(tmp_path: Path) -> None:
     assert r.exit_code == 0, r.output
     payload = json.loads(r.stdout)
     assert payload["ok"] is True
-    assert payload["schema_version"] == "1.1.0"
+    assert payload["schema_version"] == "1.2.0"
 
 
 def test_point_to_landmark_fracs() -> None:
@@ -622,7 +622,7 @@ def test_literal_accepts_1_1_0() -> None:
         }
     )
     assert r.schema_version == "1.1.0"
-    assert PROPORTION_SCHEMA_VERSION == "1.1.0"
+    assert PROPORTION_SCHEMA_VERSION == "1.2.0"
 
 
 def test_load_1_0_0_report_missing_new_fields() -> None:
@@ -659,10 +659,10 @@ def test_show_loads_1_1_0_report(tmp_path: Path) -> None:
     d = make_package(tmp_path, assist=assist)
     out = tmp_path / "out"
     report = analyze_proportion(d, out_dir=out, run_heuristic_frame=False)
-    assert report.schema_version == "1.1.0"
+    assert report.schema_version == "1.2.0"
     assert report.thickness_band_count >= 1
     loaded = load_report(out / "proportion_report.json")
-    assert loaded.schema_version == "1.1.0"
+    assert loaded.schema_version == "1.2.0"
     assert len(loaded.diameters) >= 1
     assert loaded.diameters[0].band_id == "thigh_l"
     md = (out / "proportion_report.md").read_text(encoding="utf-8")
@@ -809,7 +809,7 @@ def test_no_pairs__empty(tmp_path: Path) -> None:
     report = analyze_proportion(d, run_heuristic_frame=False)
     assert report.diameters == []
     assert report.thickness_band_count == 0
-    assert report.schema_version == "1.1.0"
+    assert report.schema_version == "1.2.0"
     # chest/hip depth bands still present from left landmarks
     assert report.depth_band_count >= 2
     assert report.package_score == pytest.approx(100.0, abs=0.1)

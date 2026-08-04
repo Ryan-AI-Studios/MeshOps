@@ -39,6 +39,7 @@ _VIEW_PREFIX_ORDER: Final[tuple[str, ...]] = (
     "front",
     "left",
     "back",
+    "top",
 )
 
 # Depth-pair landmark ids → left view on reproject.
