@@ -401,6 +401,7 @@ def test_recipe__write_load_1_1_0_parent_joint_roundtrip(tmp_path: Path) -> None
 
 def test_classifier__profile_roles() -> None:
     cases = [
+        ("RECIPE_torso_trap", "torso"),  # bare trap must not steal 0019 default torso
         ("RECIPE_trap_soft_l", "neck"),
         ("RECIPE_scap_soft_r", "torso"),
         ("RECIPE_bicep_soft_l", "upper_arm"),
