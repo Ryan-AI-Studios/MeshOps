@@ -60,7 +60,7 @@ class PackageChecklist(BaseModel):
     proportion_subdir: str = "proportion"
     character_subdir: str = "character"
     view_keys_required: list[str] = Field(default_factory=lambda: list(REQUIRED_VIEW_KEYS))
-    view_keys_optional: list[str] = Field(default_factory=lambda: ["back"])
+    view_keys_optional: list[str] = Field(default_factory=lambda: ["back", "top"])
     notes: str | None = None
 
     @field_validator("height_m")

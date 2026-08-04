@@ -5,7 +5,9 @@ Authoring layout only — not mesh or print success (Difficulty §12 / N6).
 
 0024 soft note: measured cranial/foot depth_bands and foot_len_*_m messages may
 override template head/foot scales when present — not wired in v1 (document-only).
-neck diameter already preferred when available. breast_lower* is prep-only until 0027.
+neck diameter already preferred when available.
+breast_lower* used for rz in 0030; lateral fuse/diameter still 0027.
+0030: soft offsets prefer report.soft_spacing measured gaps (B7) over template fracs.
 """
 
 from __future__ import annotations
@@ -877,20 +879,64 @@ def _build_soft_ovals(
     breast_rz_scale = 1.0
     breast_y_override: float | None = None
     gap_frac: float | None = None
+    template_intermammary_m: float | None = None
     glute_r_override: float | None = None
     glute_y_override: float | None = None
     glute_z_override: float | None = None
     cleft_frac: float | None = None
+    template_glute_cleft_m: float | None = None
     if template_applied is not None:
         tc = template_applied.constants
         breast_ry_scale = float(tc.breast_ry_scale)
         breast_rz_scale = float(tc.breast_rz_scale)
         breast_y_override = tc.breast_y_m
         gap_frac = tc.intermammary_gap_frac
+        template_intermammary_m = getattr(tc, "intermammary_gap_m", None)
         glute_r_override = tc.glute_r_m
         glute_y_override = tc.glute_y_m
         glute_z_override = tc.glute_z_m
         cleft_frac = tc.glute_cleft_frac
+        template_glute_cleft_m = getattr(tc, "glute_cleft_m", None)
+
+    # B7: measured soft_spacing first, then template gap_m, then frac * hw
+    measured_breast_gap: float | None = None
+    measured_glute_gap: float | None = None
+    soft = getattr(report, "soft_spacing", None)
+    if soft is not None:
+        mg = getattr(soft, "intermammary_gap_m", None)
+        if mg is not None:
+            try:
+                mf = float(mg)
+                if mf == mf:  # not NaN
+                    measured_breast_gap = mf
+            except (TypeError, ValueError):
+                pass
+        gg = getattr(soft, "glute_cleft_gap_m", None)
+        if gg is not None:
+            try:
+                gf = float(gg)
+                if gf == gf:
+                    measured_glute_gap = gf
+            except (TypeError, ValueError):
+                pass
+
+    def _breast_half_gap(bust_hw: float | None, rx: float) -> float | None:
+        if measured_breast_gap is not None:
+            return measured_breast_gap / 2.0
+        if template_intermammary_m is not None:
+            return float(template_intermammary_m) / 2.0
+        if bust_hw is not None and gap_frac is not None:
+            return (gap_frac * bust_hw) / 2.0
+        return None
+
+    def _glute_half_gap(hip_hw: float) -> float | None:
+        if measured_glute_gap is not None:
+            return measured_glute_gap / 2.0
+        if template_glute_cleft_m is not None:
+            return float(template_glute_cleft_m) / 2.0
+        if cleft_frac is not None:
+            return (cleft_frac * hip_hw) / 2.0
+        return None
 
     # Breast soft (single midline or paired via bust depth)
     breast_cs = _cs_level("bust") or _cs_level("chest") or _cs_level("breast")
@@ -901,10 +947,10 @@ def _build_soft_ovals(
         rx = float(breast_cs.rx_frac) * h * 0.35
         ry = float(breast_cs.ry_frac) * h * 0.5 * breast_ry_scale
         rz = max(0.02, (m.head_unit_m or 0.2) * 0.12) * breast_rz_scale
-        # paired softs offset from midline; gap from bust_hw when available (C6)
+        # paired softs offset from midline; B7 measured gap first
         bust_hw = _half_width_from_diameter(bust_diam) if bust_diam else None
-        if bust_hw is not None and gap_frac is not None:
-            half_gap = (gap_frac * bust_hw) / 2.0
+        half_gap = _breast_half_gap(bust_hw, rx)
+        if half_gap is not None:
             offset = max(half_gap + rx * 0.5, (m.shoulder_hw or 0.15) * 0.25)
         else:
             offset = (m.shoulder_hw or 0.15) * 0.35
@@ -935,10 +981,8 @@ def _build_soft_ovals(
         if hw is not None and breast_band.z_frac is not None:
             z_m = float(breast_band.z_frac) * h
             depth = float(breast_band.depth_m) if breast_band.depth_m is not None else 0.08 * h
-            if gap_frac is not None:
-                offset = max((gap_frac * hw) / 2.0 + hw * 0.12, hw * 0.35)
-            else:
-                offset = hw * 0.45
+            half_gap = _breast_half_gap(hw, hw * 0.25)
+            offset = max(half_gap + hw * 0.12, hw * 0.35) if half_gap is not None else hw * 0.45
             rx = hw * 0.25
             ry = depth * 0.35 * breast_ry_scale
             rz = 0.04 * h * breast_rz_scale
@@ -1012,12 +1056,9 @@ def _build_soft_ovals(
                 )
             )
             hip_hw = m.hip_hw or (r * 1.6)
-            # Outer toward hip_bridge: center so outer tip ≈ hip_hw
-            if cleft_frac is not None:
-                half_gap = (cleft_frac * hip_hw) / 2.0
-                offset = half_gap + r
-            else:
-                offset = max(hip_hw - r, r * 0.9)
+            # Outer toward hip_bridge: center so outer tip ≈ hip_hw; B7 measured first
+            half_gap = _glute_half_gap(float(hip_hw))
+            offset = half_gap + r if half_gap is not None else max(hip_hw - r, r * 0.9)
             glute_y = abs(float(glute_y_override)) if glute_y_override is not None else abs(r * 0.4)
             for side, sign in (("l", -1.0), ("r", 1.0)):
                 center = [sign * offset, glute_y, z_m]

@@ -442,11 +442,50 @@ def _bust_half_width_m(report: Any | None) -> float | None:
     return None
 
 
+def _measured_soft_gap_m(report: Any | None, field: str) -> float | None:
+    """B7: measured soft_spacing field when finite (first prefer)."""
+    if report is None:
+        return None
+    soft = getattr(report, "soft_spacing", None)
+    if soft is None:
+        return None
+    val = getattr(soft, field, None)
+    if val is None:
+        return None
+    try:
+        fv = float(val)
+    except (TypeError, ValueError):
+        return None
+    if fv != fv:  # NaN
+        return None
+    return fv
+
+
+def _hip_half_width_m(report: Any | None) -> float | None:
+    """Hip half-width from report diameters (band_id=hip) when present."""
+    if report is None:
+        return None
+    diameters = getattr(report, "diameters", None) or []
+    for d in diameters:
+        if getattr(d, "band_id", None) != "hip":
+            continue
+        hw = getattr(d, "half_width_m", None)
+        if hw is not None:
+            return float(hw)
+        width = getattr(d, "width_m", None)
+        if width is not None:
+            return float(width) / 2.0
+    return None
+
+
 def _intermammary_gap_m(
     template_applied: Any | None,
     report: Any | None = None,
 ) -> float | None:
-    """Resolved intermammary gap meters: gap_m, else frac * bust half-width."""
+    """B7 ladder: measured soft_spacing → template gap_m → frac * bust_hw → None."""
+    measured = _measured_soft_gap_m(report, "intermammary_gap_m")
+    if measured is not None:
+        return measured
     gap = _template_gap_m(template_applied, "intermammary_gap_m")
     if gap is not None:
         return gap
@@ -457,6 +496,26 @@ def _intermammary_gap_m(
     if bust_hw is None or bust_hw <= 0.0:
         return None
     return float(frac) * float(bust_hw)
+
+
+def _glute_cleft_gap_m(
+    template_applied: Any | None,
+    report: Any | None = None,
+) -> float | None:
+    """B7 ladder: measured soft_spacing → template glute_cleft_m → frac * hip_hw → None."""
+    measured = _measured_soft_gap_m(report, "glute_cleft_gap_m")
+    if measured is not None:
+        return measured
+    gap = _template_gap_m(template_applied, "glute_cleft_m")
+    if gap is not None:
+        return gap
+    frac = _template_gap_m(template_applied, "glute_cleft_frac")
+    if frac is None:
+        return None
+    hip_hw = _hip_half_width_m(report)
+    if hip_hw is None or hip_hw <= 0.0:
+        return None
+    return float(frac) * float(hip_hw)
 
 
 # ---------------------------------------------------------------------------
@@ -1000,7 +1059,7 @@ def validate_constraints(
     indexed = _index_parts(package)
     classified = [{"name": p.name, "role": r, "side": s} for p, r, s in indexed]
     breast_gap = _intermammary_gap_m(template_applied, report)
-    glute_gap = _template_gap_m(template_applied, "glute_cleft_m")
+    glute_gap = _glute_cleft_gap_m(template_applied, report)
 
     rules = [
         _check_ankle_over_heel(indexed),
@@ -1187,15 +1246,15 @@ def _band_weighted_free_dof_score(
         if target is None:
             continue
         total += w * abs(y - target)
-    # Soft gap penalties (duals) — breast uses frac*bust fallback when needed
-    for role, field, weight in (
+    # Soft gap penalties (duals) — B7 measured-first for breast and glute
+    for role, _field, weight in (
         ("breast", "intermammary_gap_m", BAND_W_BREAST),
         ("glute", "glute_cleft_m", BAND_W_GLUTE),
     ):
         if role == "breast":
             gap_m = _intermammary_gap_m(template_applied, report)
         else:
-            gap_m = _template_gap_m(template_applied, field)
+            gap_m = _glute_cleft_gap_m(template_applied, report)
         left = _find(indexed, role, "l")  # type: ignore[arg-type]
         right = _find(indexed, role, "r")  # type: ignore[arg-type]
         if gap_m is None or not left or not right:

@@ -94,12 +94,15 @@ def _write_stub_images(
     directory: Path,
     *,
     include_back: bool,
+    include_top: bool = False,
     force: bool,
 ) -> list[Path]:
     """Write frozen 1x1 PNG stubs only if missing (unless force)."""
     keys = list(REQUIRED_VIEW_KEYS)
     if include_back:
         keys.append("back")
+    if include_top:
+        keys.append("top")
     written: list[Path] = []
     for key in keys:
         dest = directory / f"{key}.png"
@@ -140,7 +143,7 @@ def _shared_checklist_kwargs(
         "package_mode": package_mode,
         "source_kind": source_kind,
         "view_keys_required": list(REQUIRED_VIEW_KEYS),
-        "view_keys_optional": ["back"],
+        "view_keys_optional": ["back", "top"],
     }
 
 
@@ -159,6 +162,7 @@ def scaffold_package(
     with_template: bool = False,
     stub_images: bool = False,
     include_back_stub: bool = False,
+    include_top_stub: bool = False,
     force: bool = False,
 ) -> ScaffoldResult:
     """Create multi-view package layout + package_checklist.json (+ optional stubs).
@@ -231,7 +235,14 @@ def scaffold_package(
                 paths.append(tpath)
 
             if stub_images:
-                paths.extend(_write_stub_images(root, include_back=include_back_stub, force=force))
+                paths.extend(
+                    _write_stub_images(
+                        root,
+                        include_back=include_back_stub,
+                        include_top=include_top_stub,
+                        force=force,
+                    )
+                )
 
             return ScaffoldResult(mode="single", paths=paths, analyze_hint=None)
 
@@ -314,8 +325,22 @@ def scaffold_package(
             paths.append(tpath)
 
         if stub_images:
-            paths.extend(_write_stub_images(prop_dir, include_back=include_back_stub, force=force))
-            paths.extend(_write_stub_images(char_dir, include_back=include_back_stub, force=force))
+            paths.extend(
+                _write_stub_images(
+                    prop_dir,
+                    include_back=include_back_stub,
+                    include_top=include_top_stub,
+                    force=force,
+                )
+            )
+            paths.extend(
+                _write_stub_images(
+                    char_dir,
+                    include_back=include_back_stub,
+                    include_top=include_top_stub,
+                    force=force,
+                )
+            )
 
         return ScaffoldResult(mode="dual", paths=paths, analyze_hint=analyze_hint)
 

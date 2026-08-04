@@ -1,4 +1,4 @@
-"""Proportion report models — schema_version "1.0.0"/"1.1.0" is **0012+0013 owned**.
+"""Proportion report models — schema_version "1.0.0"/"1.1.0"/"1.2.0" is **0012+0013+0030 owned**.
 
 Independence: ProportionReport schema_version does **not** share versioning,
 freeze rules, or compatibility with:
@@ -9,8 +9,8 @@ freeze rules, or compatibility with:
 - DesignManifest.schema_version (0003)
 - HostedReport schema (0007)
 
-Bump proportion schemas only when 0012/0013 contracts change.
-Write always "1.1.0"; load still accepts "1.0.0" (new fields default empty/0).
+Bump proportion schemas only when 0012/0013/0030 contracts change.
+Write always "1.2.0"; load still accepts "1.0.0"|"1.1.0" (new fields default null/empty).
 """
 
 from __future__ import annotations
@@ -21,9 +21,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from meshops.proportion.honesty import PROPORTION_HONESTY
 
-PROPORTION_SCHEMA_VERSION: Literal["1.0.0", "1.1.0"] = "1.1.0"
+PROPORTION_SCHEMA_VERSION: Literal["1.0.0", "1.1.0", "1.2.0"] = "1.2.0"
 
-ViewKey = Literal["front", "left", "three_quarter", "back"]
+ViewKey = Literal["front", "left", "three_quarter", "back", "top"]
 PoseKind = Literal["a_pose", "hanging", "unknown", "t_pose", "other"]
 FacingDirection = Literal[
     "camera_front",
@@ -34,9 +34,16 @@ FacingDirection = Literal[
 ]
 LandmarkMethod = Literal["assist", "heuristic_frame", "fixture_known", "pose_model"]
 CheckSeverity = Literal["info", "warn", "error"]
+BreastShape = Literal["sphere", "prolate", "oblate", "teardrop_proxy"]
 
 REQUIRED_VIEW_KEYS: tuple[str, ...] = ("front", "left", "three_quarter")
-CANONICAL_VIEW_KEYS: tuple[str, ...] = ("front", "left", "three_quarter", "back")
+CANONICAL_VIEW_KEYS: tuple[str, ...] = (
+    "front",
+    "left",
+    "three_quarter",
+    "back",
+    "top",
+)
 IMAGE_EXTENSIONS: tuple[str, ...] = (".png", ".jpg", ".jpeg", ".webp")
 
 # package_score weights (spec §3.1 F) — completeness only; 0013 does not reweight.
@@ -184,12 +191,50 @@ class QualityFlags(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class SoftSpacing(BaseModel):
+    """Plan-view soft-tissue spacing (authoring aid — N6; not clinical)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    intermammary_gap_m: float | None = None
+    breast_center_span_m: float | None = None  # centers only — never bust edges
+    glute_cleft_gap_m: float | None = None
+    glute_peak_span_m: float | None = None
+    source_views: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class BreastSideMetrics(BaseModel):
+    """Per-side breast size/shape proxies (authoring only — N6)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    circumference_proxy_m: float | None = None
+    volume_proxy_m3: float | None = None
+    shape: BreastShape | None = None
+    slant_deg: float | None = None
+    hang_tilt_deg: float | None = None  # always null in 0030; reserved for 0027
+    rx_m: float | None = None
+    ry_m: float | None = None
+    rz_m: float | None = None
+
+
+class BreastMetrics(BaseModel):
+    """Dual breast metrics when assist provides soft marks (authoring — N6)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    left: BreastSideMetrics | None = None
+    right: BreastSideMetrics | None = None
+    symmetry_notes: list[str] = Field(default_factory=list)
+
+
 class ProportionReport(BaseModel):
     """Versioned proportion contract for agents and Blender blockout."""
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["1.0.0", "1.1.0"] = PROPORTION_SCHEMA_VERSION
+    schema_version: Literal["1.0.0", "1.1.0", "1.2.0"] = PROPORTION_SCHEMA_VERSION
     honesty: str = PROPORTION_HONESTY
     package_score: float = Field(default=0.0, ge=0.0, le=100.0)
     pose: PoseKind | str = "unknown"
@@ -207,6 +252,8 @@ class ProportionReport(BaseModel):
     cross_sections: list[CrossSection] = Field(default_factory=list)
     thickness_band_count: int = 0
     depth_band_count: int = 0
+    soft_spacing: SoftSpacing | None = None
+    breast_metrics: BreastMetrics | None = None
     checks: list[CheckResult] = Field(default_factory=list)
     quality: QualityFlags = Field(default_factory=QualityFlags)
     messages: list[str] = Field(default_factory=list)

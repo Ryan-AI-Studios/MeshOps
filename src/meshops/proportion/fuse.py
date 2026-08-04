@@ -11,7 +11,7 @@ package_score depth gate remains chest/hip only (R8).
 
 Consumers of foot/cranial depth_bands must use depth_frac / y_mid, not raw
 y_front as "toe Y" — global auto-swap may invert y_front/y_back labels (C4).
-breast_lower* is assist vocabulary only until 0027 (no fuse pair here).
+breast_lower* used for rz in 0030; lateral fuse/diameter still 0027 (no fuse pair here).
 """
 
 from __future__ import annotations

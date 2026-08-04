@@ -27,6 +27,7 @@ from meshops.proportion.models import (
     QualityFlags,
     ViewLandmarks,
 )
+from meshops.proportion.soft_spacing import compute_soft_spacing
 
 
 def analyze_proportion(
@@ -222,8 +223,19 @@ def analyze_proportion(
     checks.extend(diameter_info_checks(diameters))
     checks.extend(depth_checks)
 
-    # package_score (R8 — chest/hip depth only; weights unchanged)
+    # package_score (R8 — chest/hip depth only; weights unchanged; top does not reweight)
     score, breakdown = compute_package_score(views)
+
+    # Soft spacing / breast metrics (0030) — after fuse/diameters/depth
+    soft_spacing, breast_metrics, soft_msgs = compute_soft_spacing(
+        views,
+        landmarks_xyz,
+        height_m=effective_height_m,
+        diameters=diameters,
+        depth_bands=depth_bands,
+    )
+    messages.extend(soft_msgs)
+    # B3: missing top → message only; never set partial_package for optional top (C4)
 
     report = ProportionReport(
         schema_version=PROPORTION_SCHEMA_VERSION,
@@ -241,6 +253,8 @@ def analyze_proportion(
         cross_sections=cross_sections,
         thickness_band_count=len(diameters),
         depth_band_count=len(depth_bands),
+        soft_spacing=soft_spacing,
+        breast_metrics=breast_metrics,
         checks=checks,
         quality=quality,
         messages=messages,
@@ -374,6 +388,38 @@ def report_to_markdown(report: ProportionReport) -> str:
                 f"- **{cs.level_id}**: rx_frac={cs.rx_frac:.4f}, "
                 f"ry_frac={cs.ry_frac:.4f}, z_frac={cs.z_frac:.3f}"
             )
+    else:
+        lines.append("- (none)")
+
+    lines.extend(["", "## Soft spacing", ""])
+    if report.soft_spacing is not None:
+        ss = report.soft_spacing
+        lines.append(f"- intermammary_gap_m: {ss.intermammary_gap_m}")
+        lines.append(f"- breast_center_span_m: {ss.breast_center_span_m}")
+        lines.append(f"- glute_cleft_gap_m: {ss.glute_cleft_gap_m}")
+        lines.append(f"- glute_peak_span_m: {ss.glute_peak_span_m}")
+        if ss.source_views:
+            lines.append(f"- source_views: {', '.join(ss.source_views)}")
+        for n in ss.notes:
+            lines.append(f"- note: {n}")
+    else:
+        lines.append("- (none)")
+
+    lines.extend(["", "## Breast metrics", ""])
+    if report.breast_metrics is not None:
+        bm = report.breast_metrics
+        for side_name, side in (("left", bm.left), ("right", bm.right)):
+            if side is None:
+                lines.append(f"- **{side_name}:** (null)")
+                continue
+            lines.append(
+                f"- **{side_name}:** rx={side.rx_m} ry={side.ry_m} rz={side.rz_m} "
+                f"shape={side.shape} slant_deg={side.slant_deg} "
+                f"vol={side.volume_proxy_m3} circ={side.circumference_proxy_m} "
+                f"hang_tilt={side.hang_tilt_deg}"
+            )
+        for n in bm.symmetry_notes:
+            lines.append(f"- symmetry: {n}")
     else:
         lines.append("- (none)")
 
