@@ -264,9 +264,13 @@ def test_profile__female_emit_dual_mass_and_traps() -> None:
     names = {p.name for p in pkg.parts}
 
     assert "trap_soft" in roles
+    assert "scap_soft" in roles
+    assert "clavicle" in roles
     assert "RECIPE_trap_soft_l" in names and "RECIPE_trap_soft_r" in names
     assert "RECIPE_breast_soft_l" in names and "RECIPE_breast_soft_r" in names
     assert "RECIPE_glute_soft_l" in names and "RECIPE_glute_soft_r" in names
+    assert "RECIPE_scap_soft_l" in names and "RECIPE_scap_soft_r" in names
+    assert "RECIPE_clavicle_l" in names and "RECIPE_clavicle_r" in names
     # no mid-chest singleton
     mid_breast = [p for p in pkg.parts if p.name == "RECIPE_breast_soft"]
     assert mid_breast == []
@@ -279,11 +283,22 @@ def test_profile__female_emit_dual_mass_and_traps() -> None:
     xs = sorted(p.center[0] for p in breasts if p.center)
     assert xs[0] < 0 < xs[1]
     assert abs(xs[1] - xs[0]) > 0.02  # not coincident when gap set
+    for p in breasts:
+        assert p.center is not None
+        assert p.center[1] < 0.0  # breast -Y (B8)
 
     traps = [p for p in pkg.parts if p.role == "trap_soft" and p.center]
     assert len(traps) == 2
     txs = [p.center[0] for p in traps if p.center]
     assert min(txs) < max(txs)  # L ≠ R
+
+    # D4: parent_joint side-correct (not left-default on R)
+    by_name = {p.name: p for p in pkg.parts}
+    assert by_name["RECIPE_bicep_soft_l"].parent_joint == "shoulder_l"
+    assert by_name["RECIPE_bicep_soft_r"].parent_joint == "shoulder_r"
+    assert by_name["RECIPE_clavicle_l"].parent_joint == "shoulder_l"
+    assert by_name["RECIPE_clavicle_r"].parent_joint == "shoulder_r"
+    assert by_name["RECIPE_deltoid_soft_r"].parent_joint == "shoulder_r"
 
 
 def test_profile__male_pec_no_breast_dual_mild_glute() -> None:

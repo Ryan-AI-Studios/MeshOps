@@ -97,10 +97,6 @@ _BASELINE_ROLES_NO_PROFILE: Final[frozenset[str]] = frozenset(
         "limb_segment",
     }
 )
-_PROFILE_ONLY_ROLES: Final[frozenset[str]] = frozenset(
-    {"trap_soft", "pec_soft", "scap_soft", "bicep_soft", "clavicle"}
-)
-
 Vec3 = tuple[float, float, float]
 
 
@@ -890,6 +886,18 @@ def _lm_midpoint(
     ]
 
 
+def _side_match_joint_id(cid: str, side: str) -> str:
+    """Rewrite L/R joint suffix to match emit side (shoulder_l + side=r → shoulder_r)."""
+    if side not in ("l", "r"):
+        return cid
+    if cid.endswith("_l") or cid.endswith("_r"):
+        base = cid[:-2]
+        return f"{base}_{side}"
+    if cid in ("shoulder", "elbow", "wrist", "hip", "knee", "ankle", "heel", "toe"):
+        return f"{cid}_{side}"
+    return cid
+
+
 def _resolve_parent_joint_id(
     preferred: str | None,
     fallbacks: list[str],
@@ -897,7 +905,11 @@ def _resolve_parent_joint_id(
     *,
     side: str,
 ) -> str | None:
-    """Pick first joint id with finite xyz; side-specific ids may use _l/_r."""
+    """Pick first joint id with finite xyz; side-specific ids use emit side.
+
+    Packs may store ``shoulder_l`` on ``side: both``; the emit side rewrites
+    wrong-side suffixes so R parts parent to ``shoulder_r`` (D4 / B6).
+    """
     candidates: list[str] = []
     if preferred:
         candidates.append(preferred)
@@ -906,18 +918,25 @@ def _resolve_parent_joint_id(
     for c in candidates:
         if c.endswith("_*") or c.endswith("*"):
             continue
-        if side in ("l", "r") and c.endswith(("_l", "_r")) is False:
-            # Prefer side-suffixed form when base joint missing (shoulder → shoulder_l).
-            sided = f"{c}_{side}"
-            if sided in joints:
+        if side in ("l", "r"):
+            sided = _side_match_joint_id(c, side)
+            if sided != c:
                 expanded.append(sided)
+            # Prefer side-suffixed form when base joint missing (shoulder → shoulder_l).
+            if not c.endswith(("_l", "_r")):
+                maybe = f"{c}_{side}"
+                if maybe not in expanded:
+                    expanded.append(maybe)
             expanded.append(c)
         else:
             expanded.append(c)
+    seen: set[str] = set()
     for cid in expanded:
-        # Side-specific rewrite for generic shoulder/hip/elbow
-        if side in ("l", "r") and cid in ("shoulder", "elbow", "wrist", "hip", "knee", "ankle"):
-            cid = f"{cid}_{side}"
+        if side in ("l", "r"):
+            cid = _side_match_joint_id(cid, side)
+        if cid in seen:
+            continue
+        seen.add(cid)
         if _joint_xyz(joints.get(cid)) is not None:
             return cid
     return None
@@ -1853,7 +1872,10 @@ def _emit_one_profile_part(
             mid = _lm_midpoint(lms, sh_id, el_id)
         if mid is not None:
             center = list(mid)
-        if parent_joint is None:
+        # Prefer side-correct shoulder as parent SoT (D4); mid placement is independent.
+        if _joint_xyz(joints.get(sh_id)) is not None:
+            parent_joint = sh_id
+        elif parent_joint is None:
             messages.append(f"parent_joint {role} unresolved — using landmark placement")
 
     elif role == "clavicle" and side_tag in ("l", "r"):
@@ -1874,7 +1896,8 @@ def _emit_one_profile_part(
             else:
                 messages.append(f"RECIPE_clavicle_{side_tag} skipped: missing shoulder")
                 return None
-        parent_joint = parent_id or sh_id if sh_j is not None else None
+        # Side-correct shoulder wins over pack left-default parent_joint_id.
+        parent_joint = sh_id if sh_j is not None else parent_id
 
     elif role in ("deltoid_soft",) and side_tag in ("l", "r"):
         sh_id = f"shoulder_{side_tag}"
@@ -2354,6 +2377,8 @@ def emit_bpy_script(package: BlockoutRecipePackage) -> str:
             entry["rz_m"] = p.rz_m
         if p.radius_m is not None:
             entry["radius_m"] = p.radius_m
+        if p.parent_joint is not None:
+            entry["parent_joint"] = p.parent_joint
         parts_data.append(entry)
 
     lines: list[str] = [
