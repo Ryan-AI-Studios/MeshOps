@@ -407,6 +407,61 @@ def test_face__scm_and_fuse() -> None:
     assert not any(p.name == "RECIPE_neck_head_fuse" for p in small)
 
 
+def test_face__scm_absent_message() -> None:
+    """B14: no shoulder_z / neck metrics → 0 SCM + skip message."""
+    report = _full_torso_report()
+    bounds = resolve_head_bounds(report, head_unit_m=1.72 / 7.5, height_m=1.72, messages=[])
+    assert bounds is not None
+    msgs: list[str] = []
+    parts = build_face_parts(
+        report,
+        bounds,
+        face=True,
+        neck_top_z=None,
+        neck_radius=None,
+        head_unit_m=1.72 / 7.5,
+        shoulder_z=None,
+        messages=msgs,
+    )
+    assert not any(p.role == "sternomastoid_soft" for p in parts)
+    assert any("sternomastoid skipped" in m for m in msgs)
+
+
+def test_face__hair_short_and_long_proxy() -> None:
+    report = _full_torso_report()
+    short = build_blockout_recipe(report, limbs=False, hair="short")
+    longp = build_blockout_recipe(report, limbs=False, hair="long_proxy")
+    none = build_blockout_recipe(report, limbs=False, hair="none")
+    assert any(p.role == "hair_mass" for p in short.parts)
+    assert any(p.role == "hair_mass" for p in longp.parts)
+    assert not any(p.role == "hair_mass" for p in none.parts)
+    # long_proxy rear (+Y) of head center
+    head = next(p for p in longp.parts if p.name == "RECIPE_head")
+    hair = next(p for p in longp.parts if p.role == "hair_mass")
+    assert head.center is not None and hair.center is not None
+    assert hair.center[1] > head.center[1]
+
+
+def test_face__nose_tip_y_freeze() -> None:
+    """B7: nose tip Y = head_center_y - 0.15 * head_ry."""
+    report = _full_torso_report()
+    pkg = build_blockout_recipe(report, limbs=False, face=True)
+    head = next(p for p in pkg.parts if p.name == "RECIPE_head")
+    nose = next(p for p in pkg.parts if p.name == "RECIPE_nose_soft")
+    assert head.center is not None and head.ry_m is not None
+    assert nose.p1 is not None
+    expected_tip_y = float(head.center[1]) - 0.15 * float(head.ry_m)
+    assert nose.p1[1] == pytest.approx(expected_tip_y, abs=1e-6)
+
+
+def test_face__neckline_v_proxy() -> None:
+    report = _full_torso_report()
+    pkg = build_blockout_recipe(report, limbs=False, neckline="v_proxy")
+    v_parts = [p for p in pkg.parts if p.role == "neckline"]
+    assert len(v_parts) == 2
+    assert all(p.name.startswith("RECIPE_neckline") for p in v_parts)
+
+
 def test_face__mcp_schema_properties_and_tool_count() -> None:
     """B12: catalog stay 43; inputSchema properties include face/hair/neckline."""
     import asyncio

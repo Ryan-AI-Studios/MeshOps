@@ -24,8 +24,8 @@ HeadPlacement = Literal["full3d", "front_plane"]
 HAIR_TIERS: Final[frozenset[str]] = frozenset({"none", "short", "bun", "long_proxy"})
 NECKLINE_TIERS: Final[frozenset[str]] = frozenset({"none", "crew", "v_proxy"})
 
-# B11 exact skip message
-FACE_KIT_SKIP_BOUNDS: Final[str] = "face kit skipped - chin/top bounds unresolved"
+# B11 exact skip message (em-dash per freeze)
+FACE_KIT_SKIP_BOUNDS: Final[str] = "face kit skipped — chin/top bounds unresolved"
 
 # Loomis / authoring freezes (plan §7)
 _EYE_Z_FRAC: Final[float] = 0.50
@@ -181,7 +181,7 @@ def _parent_joint(
     joints = _joints_map(skeleton)
     pid = _resolve_parent_joint_id(preferred, fallbacks, joints, side="none")
     if pid is None:
-        messages.append(f"parent_joint {role} unresolved - using landmark/Loomis placement")
+        messages.append(f"parent_joint {role} unresolved — using landmark/Loomis placement")
     return pid
 
 
@@ -445,7 +445,7 @@ def _build_scm(
             # Fallback: chin - neck_len ≈ shoulder
             neck_base_z = bounds.z_chin - float(neck_len_m)
         else:
-            messages.append("sternomastoid skipped - neck_base / shoulder unavailable")
+            messages.append("sternomastoid skipped — neck_base / shoulder unavailable")
             return []
 
     pj = _parent_joint(
