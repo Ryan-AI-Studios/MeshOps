@@ -656,6 +656,15 @@ def test_extra_forbid_soft_models() -> None:
         BreastSideMetrics.model_validate({"rx_m": 0.05, "bogus": 1})
 
 
+def test_source_views_canonical_order() -> None:
+    """C1: source_views = contrib views in front,left,three_quarter,back,top order."""
+    from meshops.proportion.soft_spacing import _ordered_sources
+
+    assert _ordered_sources({"top", "front", "back"}) == ["front", "back", "top"]
+    assert _ordered_sources({"three_quarter", "left"}) == ["left", "three_quarter"]
+    assert _ordered_sources(set()) == []
+
+
 def test_diameter_scale_path() -> None:
     views = {
         "top": _vl(
