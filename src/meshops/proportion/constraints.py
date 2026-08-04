@@ -220,8 +220,9 @@ def classify_part_name(name: str) -> tuple[ConstraintRole, Side]:
         return "calf", side
     # 8 — limbs, bridges, softs, axial
     # 0027 profile softs: ordered before generic fallthrough (AI2 B2).
-    # trap before torso/neck generics; bicep before upper_arm limb; clavicle before shoulder_bridge.
-    if "trap" in lower:
+    # Use trap_soft (not bare "trap") so RECIPE_torso_trap stays torso (0019 default).
+    # bicep before upper_arm limb; clavicle before shoulder_bridge; scap before torso.
+    if "trap_soft" in lower:
         return "neck", side
     if "bicep" in lower:
         return "upper_arm", side  # soft bead; exempt from limb no-dup vs limb_segment

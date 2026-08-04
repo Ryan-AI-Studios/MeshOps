@@ -132,6 +132,13 @@ def test_classify_calf_b_distal_and_calf_a_proximal() -> None:
     assert classify_part_name("RECIPE_calf_l") == ("calf", "l")
 
 
+def test_classify_torso_trap_stays_torso_not_neck() -> None:
+    """0027 must not map bare 'trap' — RECIPE_torso_trap is the 0019 default torso."""
+    assert classify_part_name("RECIPE_torso_trap") == ("torso", "none")
+    assert classify_part_name("RECIPE_trap_soft_l") == ("neck", "l")
+    assert classify_part_name("RECIPE_trap_soft_r") == ("neck", "r")
+
+
 def test_classify_unknown() -> None:
     role, side = classify_part_name("RECIPE_mystery_blob")
     assert role == "unknown"
