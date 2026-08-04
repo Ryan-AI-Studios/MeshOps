@@ -250,6 +250,24 @@ def classify_part_name(name: str) -> tuple[ConstraintRole, Side]:
         return "neck", side
     if "neckline" in lower:
         return "neck", side
+    # 0029 extremity softs (B5): must not map to foot_plate / limb no-dup.
+    # After face kit; before generic limb/foot fallthrough. Soft digits must not
+    # contain substring "foot". Explicit unknown so C_role_classified is quiet.
+    if "toe_soft" in lower:
+        return "unknown", side
+    if "ball_soft" in lower:
+        return "unknown", side
+    if "palm" in lower:
+        return "unknown", side
+    if "finger" in lower or "mitten" in lower:
+        return "unknown", side
+    if "thumb_soft" in lower:
+        return "unknown", side
+    # RECIPE_toe_{1..5}_* (full toes) — no "foot" substring → unknown (not foot_plate)
+    if "recipe_toe_" in lower or (
+        "toe_" in lower and "ank_foot" not in lower and "foot" not in lower
+    ):
+        return "unknown", side
     if "thigh" in lower or "limb_thigh" in lower:
         return "thigh", side
     if "upper_arm" in lower or "limb_upper_arm" in lower:
