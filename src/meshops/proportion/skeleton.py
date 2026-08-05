@@ -1118,6 +1118,10 @@ def _resolve_limb_side(
     if joints[sh_id].source == "missing":
         messages.append(f"joint {sh_id}: missing")
 
+    # Provenance for arm-chain Y inherit (0037 R1): capture before wrist overwrites locals.
+    # Real = landmark Y or depth ladder — not invent/default_arm_y (AI2 B1).
+    shoulder_y_real = bool(y_from or y_depth)
+
     # --- wrist (needed before elbow mid); arms have NO depth band (R2) ---
     lm, lid = _pick_lm(lms, wr_id)
     x, y, z, lid2, x_from, y_from, z_from = _raw_coords_from_lm(lm)
@@ -1133,10 +1137,19 @@ def _resolve_limb_side(
             x = shj.x_m if _finite(shj.x_m) else default_sh_x
             x_from = False
         if y is None and z is not None:
-            y = shj.y_m if _finite(shj.y_m) else default_arm_y
-            y_from = False
-            y_depth = False
-            messages.append(f"joint {wr_id}: front-plane placement (y_m estimated)")
+            if _finite(shj.y_m):
+                y = shj.y_m
+                y_from = False
+                y_depth = False
+                if shoulder_y_real:
+                    messages.append(f"joint {wr_id}: y_m inherited from {sh_id} (depth)")
+                else:
+                    messages.append(f"joint {wr_id}: front-plane placement (y_m estimated)")
+            else:
+                y = default_arm_y
+                y_from = False
+                y_depth = False
+                messages.append(f"joint {wr_id}: front-plane placement (y_m estimated)")
         if not _any_finite_xyz(
             lm.x_m if lm else None, lm.y_m if lm else None, lm.z_m if lm else None
         ) and _any_finite_xyz(x, y, z):
@@ -1180,10 +1193,19 @@ def _resolve_limb_side(
                 x = shx if _finite(shx) else default_sh_x
                 x_from = False
             if y is None and z is not None:
-                y = shy2 if _finite(shy2) else default_arm_y
-                y_from = False
-                y_depth = False
-                messages.append(f"joint {el_id}: front-plane placement (y_m estimated)")
+                if _finite(shy2):
+                    y = shy2
+                    y_from = False
+                    y_depth = False
+                    if shoulder_y_real:
+                        messages.append(f"joint {el_id}: y_m inherited from {sh_id} (depth)")
+                    else:
+                        messages.append(f"joint {el_id}: front-plane placement (y_m estimated)")
+                else:
+                    y = default_arm_y
+                    y_from = False
+                    y_depth = False
+                    messages.append(f"joint {el_id}: front-plane placement (y_m estimated)")
             if sh_xyz is not None and wr_xyz is not None:
                 mid = _mid3(sh_xyz, wr_xyz)
                 if x is None:

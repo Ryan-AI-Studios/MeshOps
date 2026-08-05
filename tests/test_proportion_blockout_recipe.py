@@ -1676,3 +1676,75 @@ def test_recipe__axial_band_skipped_when_height_null() -> None:
     assert any("source=fallback0" in m for m in pkg.messages)
     assert neck.p0[1] != pytest.approx(0.05, abs=1e-4)
     assert pkg.honesty == RECIPE_HONESTY
+
+
+# ---------------------------------------------------------------------------
+# 0037 — Recipe arm limbs prefer skeleton endpoints
+# ---------------------------------------------------------------------------
+
+
+def test_recipe__0037_t4_limbs_skeleton_arm_full3d() -> None:
+    """T4: with skeleton finite arm joints → upper_arm full3d + skeleton endpoints msg.
+
+    Without skeleton + null report Y → still front_plane (paired with
+    test_recipe__limbs_y_null_front_plane).
+    """
+    from meshops.proportion.skeleton import build_blockout_skeleton
+
+    # Report landmarks: arm Y null (would be front_plane without skeleton)
+    report = _full_torso_report(
+        extra_lms={
+            "elbow_l": _lm("elbow_l", x_m=-0.25, z_m=1.10),  # y null
+            "elbow_r": _lm("elbow_r", x_m=0.25, z_m=1.10),
+            "wrist_l": _lm("wrist_l", x_m=-0.30, z_m=0.90),
+            "wrist_r": _lm("wrist_r", x_m=0.30, z_m=0.90),
+            "knee_l": _lm("knee_l", x_m=-0.12, z_m=0.50),
+            "knee_r": _lm("knee_r", x_m=0.12, z_m=0.50),
+            "ankle_l": _lm("ankle_l", x_m=-0.10, z_m=0.08),
+            "ankle_r": _lm("ankle_r", x_m=0.10, z_m=0.08),
+            # Non-zero chest_mid so skeleton shoulder/elbow chain carry real Y
+            "chest_mid": _lm("chest_mid", x_m=0.0, y_m=0.08, z_m=1.25),
+        }
+    )
+    # Null shoulder Y on report so recipe-alone would front_plane upper_arm
+    report = report.model_copy(
+        update={
+            "landmarks_xyz": {
+                **report.landmarks_xyz,
+                "shoulder_l": _lm("shoulder_l", x_m=-0.20, y_m=None, z_m=1.38),
+                "shoulder_r": _lm("shoulder_r", x_m=0.20, y_m=None, z_m=1.38),
+            }
+        }
+    )
+
+    # Without skeleton → front_plane (baseline)
+    pkg_no = build_blockout_recipe(report, limbs=True)
+    arms_no = [
+        p
+        for p in pkg_no.parts
+        if p.name
+        in (
+            "RECIPE_limb_upper_arm_l",
+            "RECIPE_limb_upper_arm_r",
+            "RECIPE_limb_forearm_l",
+            "RECIPE_limb_forearm_r",
+        )
+    ]
+    assert arms_no
+    assert all(p.placement == "front_plane" for p in arms_no)
+
+    # With skeleton (finite arm joint XYZ after build) → full3d + skeleton message
+    skel = build_blockout_skeleton(report)
+    pkg = build_blockout_recipe(report, limbs=True, skeleton=skel)
+    ua_l = next(p for p in pkg.parts if p.name == "RECIPE_limb_upper_arm_l")
+    ua_r = next(p for p in pkg.parts if p.name == "RECIPE_limb_upper_arm_r")
+    fa_l = next(p for p in pkg.parts if p.name == "RECIPE_limb_forearm_l")
+    assert ua_l.placement == "full3d"
+    assert ua_r.placement == "full3d"
+    assert fa_l.placement == "full3d"
+    assert any("upper_arm_l: endpoints from skeleton joints" in m for m in pkg.messages)
+    assert any("forearm_l: endpoints from skeleton joints" in m for m in pkg.messages)
+    # Capsule Y tracks skeleton (non-zero chest depth), not invent-0 plane
+    assert ua_l.p0 is not None and ua_l.p1 is not None
+    assert ua_l.p0[1] == pytest.approx(0.08, abs=1e-6)
+    assert ua_l.p1[1] == pytest.approx(0.08, abs=1e-6)
