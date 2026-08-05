@@ -1107,6 +1107,7 @@ def mesh_proportion_skeleton_build(
     out: str,
     format: str = "json",
     template_applied: str | None = None,
+    depth_at_landmarks: str | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
     """Emit joint/bone skeleton graph. Authoring only — SKELETON_HONESTY / N6."""
@@ -1128,6 +1129,9 @@ def mesh_proportion_skeleton_build(
         force=force,
         template_applied=(
             _resolve_tool_path(template_applied, work_root) if template_applied else None
+        ),
+        depth_at_landmarks=(
+            _resolve_tool_path(depth_at_landmarks, work_root) if depth_at_landmarks else None
         ),
     )
 

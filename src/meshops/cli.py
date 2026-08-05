@@ -2528,6 +2528,11 @@ def proportion_skeleton_build_cmd(
         "--template-applied",
         help="template_applied.json file or directory containing it (template_id only)",
     ),
+    depth_at_landmarks: Path | None = typer.Option(
+        None,
+        "--depth-at-landmarks",
+        help="Optional depth_at_landmarks.json file (0017)",
+    ),
     force: bool = typer.Option(
         False,
         "--force",
@@ -2551,6 +2556,7 @@ def proportion_skeleton_build_cmd(
             format=fmt,  # type: ignore[arg-type]
             force=force,
             template_applied=template_applied,
+            depth_at_landmarks=depth_at_landmarks,
         )
     except ProportionError as exc:
         _emit_error(exc, json_mode=json_out, code=1)

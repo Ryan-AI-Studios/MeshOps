@@ -749,13 +749,15 @@ def build_server(work_root: Path | None = None) -> Any:
         out: str,
         format: str = "json",
         template_applied: str | None = None,
+        depth_at_landmarks: str | None = None,
         force: bool = False,
     ) -> dict[str, Any]:
         """Emit joint/bone blockout skeleton graph from a proportion report.
 
         Authoring scaffold only — proportion_blockout_skeleton_not_mesh_or_print_success (N6).
         Not an animation rig. Writes blockout_skeleton.json (+ optional setup_skeleton.py)
-        under out directory. Raises ProportionError on failure (never ok:false success).
+        under out directory. Optional depth_at_landmarks file for depth Y ladder (0035).
+        Raises ProportionError on failure (never ok:false success).
         """
         return T.mesh_proportion_skeleton_build(
             wr,
@@ -763,6 +765,7 @@ def build_server(work_root: Path | None = None) -> Any:
             out=out,
             format=format,
             template_applied=template_applied,
+            depth_at_landmarks=depth_at_landmarks,
             force=force,
         )
 
