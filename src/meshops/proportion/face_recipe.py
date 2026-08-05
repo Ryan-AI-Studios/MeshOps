@@ -12,7 +12,7 @@ import math
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Final, Literal
 
-from meshops.proportion.models import LandmarkXYZ
+from meshops.proportion.models import DepthBand, LandmarkXYZ
 
 if TYPE_CHECKING:
     from meshops.proportion.blockout_recipe import RecipePart
@@ -149,16 +149,70 @@ def resolve_head_bounds(
                 "RECIPE_head skipped: no head diameter, head_unit_m, or height_m for radius"
             )
             return None
-    ry = float(rx) * 0.9
-    # Prefer chin/top landmark Y when present; else axial mid (chest_y) / 0.0
+    # ry prefer: cranial depth_m (meters) / 2 → landmark front/back span / 2 → 0.9*rx
+    # Unit freeze: depth_m and landmark y_m are meters; never band y_mid/y_front fractions.
+    ry: float
+    cranial_band: DepthBand | None = None
+    for band in report.depth_bands or []:
+        if band.band_id == "cranial":
+            cranial_band = band
+            break
+    if (
+        cranial_band is not None
+        and cranial_band.depth_m is not None
+        and math.isfinite(cranial_band.depth_m)
+    ):
+        ry = float(cranial_band.depth_m) / 2.0
+        messages.append("head ry from cranial depth_m")
+    else:
+        cf = lms.get("cranial_front")
+        cb = lms.get("cranial_back")
+        if (
+            cf is not None
+            and cb is not None
+            and cf.y_m is not None
+            and cb.y_m is not None
+            and math.isfinite(cf.y_m)
+            and math.isfinite(cb.y_m)
+        ):
+            ry = abs(float(cb.y_m) - float(cf.y_m)) / 2.0
+            messages.append("head ry from cranial_front/back span")
+        else:
+            ry = float(rx) * 0.9
+            messages.append("head ry fallback 0.9*rx (no cranial depth)")
+
+    # Prefer chin/top landmark Y; else cranial_mid / pair mean (meters); else chest_y / 0.0
     y = 0.0
+    has_y = False
     if chin.y_m is not None:
         y = float(chin.y_m)
+        has_y = True
     elif top is not None and top.y_m is not None:
         y = float(top.y_m)
+        has_y = True
     else:
-        y = float(chest_y) if chest_y is not None else 0.0
-    has_y = chin.y_m is not None or (top is not None and top.y_m is not None)
+        cm = lms.get("cranial_mid")
+        if cm is not None and cm.y_m is not None and math.isfinite(cm.y_m):
+            y = float(cm.y_m)
+            has_y = True
+            messages.append("head center y from cranial_mid")
+        else:
+            cf = lms.get("cranial_front")
+            cb = lms.get("cranial_back")
+            if (
+                cf is not None
+                and cb is not None
+                and cf.y_m is not None
+                and cb.y_m is not None
+                and math.isfinite(cf.y_m)
+                and math.isfinite(cb.y_m)
+            ):
+                y = (float(cf.y_m) + float(cb.y_m)) / 2.0
+                has_y = True
+                messages.append("head center y from cranial_front/back pair mean")
+            else:
+                y = float(chest_y) if chest_y is not None else 0.0
+                has_y = False
     placement: HeadPlacement = "full3d" if has_y else "front_plane"
     return HeadBounds(
         z_chin=z_chin,

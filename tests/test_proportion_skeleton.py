@@ -941,3 +941,151 @@ def test_skeleton__0037_t6_inherited_elbow_not_measured() -> None:
     assert "wrist_l" not in measured_ids
     assert "wrist_r" not in measured_ids
     assert pkg.counts.measured == len(measured_ids)
+
+
+# ---------------------------------------------------------------------------
+# 0038 — Skeleton cranial depth (ADD only; existing tests unedited)
+# ---------------------------------------------------------------------------
+
+
+def _landmarks_with_cranial(
+    *,
+    y_front: float = -0.02,
+    y_back: float = 0.12,
+    with_mid: bool = False,
+    front_only: bool = False,
+    height_m: float = 1.72,
+) -> dict[str, LandmarkXYZ]:
+    """Base = _full_landmarks; clear head-family landmark Y so depth ladder runs;
+    add cranial_front/back (and mid if with_mid). front_only skips back.
+    """
+    lms = _full_landmarks(height_m=height_m)
+    # Clear Y so _try_depth_y engages; keep X/Z for R3 measured (x_from_lm + z_from_lm).
+    for key in ("cranial_vertex", "chin", "hair_crown"):
+        lm = lms[key]
+        lms[key] = _lm(key, x_m=lm.x_m, y_m=None, z_m=lm.z_m)
+    if with_mid:
+        lms["cranial_mid"] = _lm(
+            "cranial_mid",
+            x_m=0.0,
+            y_m=(y_front + y_back) / 2.0,
+            z_m=1.61,
+        )
+    lms["cranial_front"] = _lm("cranial_front", x_m=0.0, y_m=y_front, z_m=1.60)
+    if not front_only:
+        lms["cranial_back"] = _lm("cranial_back", x_m=0.0, y_m=y_back, z_m=1.60)
+    return lms
+
+
+def _clear_head_family_y(lms: dict[str, LandmarkXYZ]) -> dict[str, LandmarkXYZ]:
+    """Clear cranial_vertex/chin/hair_crown Y so depth ladder is the only Y path."""
+    out = dict(lms)
+    for key in ("cranial_vertex", "chin", "hair_crown"):
+        if key in out:
+            lm = out[key]
+            out[key] = _lm(key, x_m=lm.x_m, y_m=None, z_m=lm.z_m)
+    return out
+
+
+def test_skeleton__0038_t1_cranial_mid_head_measured() -> None:
+    """T1: cranial_mid finite y → head measured; y≈mid; msg has cranial_mid (depth)."""
+    y_front, y_back = -0.02, 0.12
+    mid_y = (y_front + y_back) / 2.0
+    lms = _landmarks_with_cranial(y_front=y_front, y_back=y_back, with_mid=True)
+    pkg = build_blockout_skeleton(_report(lms))
+    j = _by_id(pkg)
+    assert j["head"].source == "measured"
+    assert j["head"].y_m == pytest.approx(mid_y)
+    assert any("cranial_mid" in m and "(depth)" in m and "head" in m for m in pkg.messages), (
+        pkg.messages
+    )
+
+
+def test_skeleton__0038_t2_cranial_front_back_pair_mean() -> None:
+    """T2: front+back Y, no mid → head measured; y≈mean; msg cranial_front+cranial_back."""
+    y_front, y_back = -0.02, 0.12
+    mean_y = (y_front + y_back) / 2.0
+    lms = _landmarks_with_cranial(y_front=y_front, y_back=y_back, with_mid=False)
+    assert "cranial_mid" not in lms
+    pkg = build_blockout_skeleton(_report(lms))
+    j = _by_id(pkg)
+    assert j["head"].source == "measured"
+    assert j["head"].y_m == pytest.approx(mean_y)
+    assert any(
+        "cranial_front+cranial_back" in m and "(depth)" in m and "head" in m for m in pkg.messages
+    ), pkg.messages
+
+
+def test_skeleton__0038_t3_cranial_band_only_measured() -> None:
+    """T3: depth_bands band_id cranial only → head measured via band*H."""
+    h = 1.72
+    y_mid_frac = 0.05
+    lms = _clear_head_family_y(_full_landmarks(height_m=h))
+    bands = [_band("cranial", y_mid=y_mid_frac)]
+    pkg = build_blockout_skeleton(_report(lms, height_m=h, depth_bands=bands))
+    j = _by_id(pkg)
+    assert j["head"].source == "measured"
+    assert j["head"].y_m == pytest.approx(y_mid_frac * h)
+    assert any("cranial" in m and "(depth)" in m and "head" in m for m in pkg.messages), (
+        pkg.messages
+    )
+
+
+def test_skeleton__0038_t4_one_sided_front_stays_estimated() -> None:
+    """T4: one-sided cranial_front only → head estimated; no crash; no false measured."""
+    lms = _landmarks_with_cranial(front_only=True)
+    assert "cranial_back" not in lms
+    pkg = build_blockout_skeleton(_report(lms))
+    j = _by_id(pkg)
+    assert j["head"].source == "estimated"
+    assert j["head"].y_m is not None
+    assert not any("cranial_front+cranial_back" in m for m in pkg.messages)
+    assert not any("cranial_mid" in m and "(depth)" in m for m in pkg.messages)
+
+
+def test_skeleton__0038_t5_product_like_null_cranial_estimated() -> None:
+    """T5: product-like null cranial (cleared head Y, no assist) → estimated + front-plane."""
+    lms = _clear_head_family_y(_full_landmarks())
+    assert "cranial_front" not in lms
+    assert "cranial_back" not in lms
+    assert "cranial_mid" not in lms
+    pkg = build_blockout_skeleton(_report(lms))
+    j = _by_id(pkg)
+    assert j["head"].source == "estimated"
+    assert any("head" in m and "front-plane" in m for m in pkg.messages), pkg.messages
+    assert not any("cranial" in m and "(depth)" in m for m in pkg.messages)
+
+
+def test_skeleton__0038_t6_chin_crown_measured_neck_top_optional() -> None:
+    """T6: chin+crown measured when R1 pair + XZ ok; neck_top may stay estimated (OK)."""
+    y_front, y_back = -0.02, 0.12
+    mean_y = (y_front + y_back) / 2.0
+    lms = _landmarks_with_cranial(y_front=y_front, y_back=y_back, with_mid=False)
+    pkg = build_blockout_skeleton(_report(lms))
+    j = _by_id(pkg)
+    assert j["head"].source == "measured"
+    assert j["chin"].source == "measured"
+    assert j["crown"].source == "measured"
+    assert j["chin"].y_m == pytest.approx(mean_y)
+    assert j["crown"].y_m == pytest.approx(mean_y)
+    # neck_top often estimated (mid X/Z fails R3) — not a T6 failure
+    assert j["neck_top"].y_m is not None
+    assert j["neck_top"].source in ("measured", "estimated")
+
+
+def test_skeleton__0038_non_cranial_family_ignores_cranial_pair() -> None:
+    """B1 isolation: hip/chest family must not consume cranial_front/back pair Y."""
+    # Front XZ hips with null Y; only cranial pair present (no hip_mid / hip band).
+    lms = {
+        "hip_l": _lm("hip_l", x_m=-0.12, y_m=None, z_m=0.90),
+        "hip_r": _lm("hip_r", x_m=0.12, y_m=None, z_m=0.90),
+        "cranial_front": _lm("cranial_front", x_m=0.0, y_m=-0.02, z_m=1.60),
+        "cranial_back": _lm("cranial_back", x_m=0.0, y_m=0.12, z_m=1.60),
+    }
+    pkg = build_blockout_skeleton(_report(lms, height_m=1.72))
+    j = _by_id(pkg)
+    assert j["hip_l"].source == "estimated"
+    assert j["hip_r"].source == "estimated"
+    # Must not claim hip Y from cranial pair
+    assert not any("cranial_front+cranial_back" in m and "hip" in m for m in pkg.messages)
+    assert not any("joint hip" in m and "cranial" in m and "(depth)" in m for m in pkg.messages)

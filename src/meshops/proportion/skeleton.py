@@ -235,17 +235,24 @@ def _resolve_depth_y_m(
     samples: DepthSamplesPackage | None,
     height_m: float | None,
 ) -> tuple[float, str] | None:
-    """(y_m, source_id) or None. Order: mid → band*H → samples (R1)."""
+    """(y_m, source_id) or None. Order: mid → cranial pair → band*H → samples (R1/0038)."""
     family = _depth_family_for_joint(joint_id)
     if family is None:
         return None
     mid_ids, band_ids = family
 
-    # 2. Named mid landmark from report landmarks_xyz
+    # 1. Named mid landmark from report landmarks_xyz
     for mid_id in mid_ids:
         lm = lms.get(mid_id)
         if lm is not None and _finite(lm.y_m):
             return float(lm.y_m), mid_id
+
+    # 2. Cranial family only (AI1 B1): both cranial_front + cranial_back landmark y_m
+    if "cranial" in band_ids:
+        cf = lms.get("cranial_front")
+        cb = lms.get("cranial_back")
+        if cf is not None and cb is not None and _finite(cf.y_m) and _finite(cb.y_m):
+            return (float(cf.y_m) + float(cb.y_m)) / 2.0, "cranial_front+cranial_back"
 
     # 3. depth_bands: y_m = y_mid * height_m when height finite nonzero
     if bands and height_m is not None and math.isfinite(height_m) and height_m != 0.0:
