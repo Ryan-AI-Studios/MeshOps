@@ -9,7 +9,9 @@ import json
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
+from meshops.cli import app
 from meshops.proportion.blockout_recipe import (
     BlockoutRecipePackage,
     RecipePart,
@@ -29,6 +31,8 @@ from meshops.proportion.fuse_plan import (
     run_blockout_fuse_plan,
 )
 from meshops.proportion.honesty import RECIPE_HONESTY
+
+runner = CliRunner()
 
 
 def _minimal_join_ready_package() -> BlockoutRecipePackage:
@@ -126,3 +130,58 @@ def test_t9_fuse_plan_defaults_and_honesty(tmp_path: Path) -> None:
     assert data["max_local_grow"] == 1.08
     assert any("light_smooth" in s for s in data["procedure"])
     assert "smooth" not in data or isinstance(data.get("smooth"), type(None))
+
+
+def test_cli_blockout_emit_setup_writes_setup_py(tmp_path: Path) -> None:
+    """CLI smoke: blockout-emit-setup with recipe JSON → writes setup py (force)."""
+    recipe_path = tmp_path / "blockout_recipe.json"
+    write_blockout_recipe(recipe_path, _minimal_join_ready_package(), format="json", force=True)
+    out_py = tmp_path / "setup_blockout_recipe.py"
+    result = runner.invoke(
+        app,
+        [
+            "proportion",
+            "blockout-emit-setup",
+            "--recipe",
+            str(recipe_path),
+            "--out",
+            str(out_py),
+            "--force",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload.get("join_ready") is True
+    assert out_py.is_file()
+    text = out_py.read_text(encoding="utf-8")
+    assert RECIPE_HONESTY in text
+    assert "# join_ready: True" in text
+
+
+def test_cli_blockout_fuse_plan_writes_fuse_plan(tmp_path: Path) -> None:
+    """CLI smoke: blockout-fuse-plan with recipe JSON → fuse_plan + FUSE_HONESTY."""
+    recipe_path = tmp_path / "blockout_recipe.json"
+    write_blockout_recipe(recipe_path, _minimal_join_ready_package(), format="json", force=True)
+    out = tmp_path / "fuse_plan.json"
+    result = runner.invoke(
+        app,
+        [
+            "proportion",
+            "blockout-fuse-plan",
+            "--recipe",
+            str(recipe_path),
+            "--out",
+            str(out),
+            "--force",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload.get("honesty") == FUSE_HONESTY
+    assert out.is_file()
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["honesty"] == FUSE_HONESTY

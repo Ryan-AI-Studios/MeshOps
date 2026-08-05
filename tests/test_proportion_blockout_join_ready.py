@@ -6,9 +6,13 @@ Authoring only - not mesh/print success (N6 / FUSE_HONESTY).
 from __future__ import annotations
 
 import copy
+import json
+from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
+from meshops.cli import app
 from meshops.proportion.blockout_recipe import (
     BlockoutRecipePackage,
     RecipePart,
@@ -19,6 +23,8 @@ from meshops.proportion.connection_metrics import (
     connection_gap_metrics,
 )
 from meshops.proportion.errors import ProportionError
+
+runner = CliRunner()
 
 
 def _ellipsoid(
@@ -254,6 +260,50 @@ def test_t5_nofuse_join_ready_mutual_exclusion() -> None:
         build_blockout_recipe(report, nofuse=True, join_ready=True)
     assert ei.value.code == "recipe_failed"
     assert "mutually exclusive" in str(ei.value).lower()
+
+
+def test_t5_cli_nofuse_join_ready_mutual_exclusion(tmp_path: Path) -> None:
+    """CLI: --nofuse --join-ready together → non-zero + mutually exclusive / recipe_failed."""
+    from meshops.proportion.models import ProportionReport, QualityFlags
+
+    # Exclusion fires before report load; still provide a path for a realistic CLI call.
+    report_path = tmp_path / "proportion_report.json"
+    report_path.write_text(
+        json.dumps(
+            ProportionReport(
+                schema_version="1.2.0",
+                honesty="proportion_measurement_not_mesh_or_print_success",
+                quality=QualityFlags(),
+            ).model_dump(mode="json"),
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app,
+        [
+            "proportion",
+            "blockout-recipe",
+            "--report",
+            str(report_path),
+            "--out",
+            str(tmp_path / "out"),
+            "--nofuse",
+            "--join-ready",
+            "--force",
+            "--json",
+        ],
+    )
+    assert result.exit_code != 0, result.output
+    combined = f"{result.stdout}\n{result.stderr}\n{result.output}".lower()
+    assert "mutually exclusive" in combined or "recipe_failed" in combined
+    if result.stdout.strip():
+        payload = json.loads(result.stdout)
+        assert payload.get("ok") is False
+        assert (
+            payload.get("code") == "recipe_failed"
+            or "mutually exclusive" in str(payload.get("message", "")).lower()
+        )
 
 
 def test_t6_multi_class_no_toe_growth() -> None:
