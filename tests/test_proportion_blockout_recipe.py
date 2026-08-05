@@ -1621,6 +1621,23 @@ def test_recipe__glute_y_pos_after_outer_align() -> None:
             assert g.center[1] > 0.0, f"mode={mode} glute y={g.center[1]}"
 
 
+def test_recipe__oval_glute_outer_pass_without_optimize() -> None:
+    """0036 R3: base oval glute path → C_glute_outer pass pre-optimize (rx half-extent)."""
+    from meshops.proportion.constraints import validate_constraints
+
+    report = _report_with_soft_cs()
+    pkg = build_blockout_recipe(report, limbs=False, glute="oval")
+    ovals = [p for p in pkg.parts if p.role == "glute_soft"]
+    assert len(ovals) >= 2
+    assert all(p.name.startswith("RECIPE_glute_soft_") for p in ovals)
+    assert any(p.rx_m is not None for p in ovals)
+    assert any("glute_l: outer X aligned to hip_bridge" in m for m in pkg.messages)
+    assert any("glute_r: outer X aligned to hip_bridge" in m for m in pkg.messages)
+    result = validate_constraints(pkg, report=report)
+    by_id = {r.id: r for r in result.rules}
+    assert by_id["C_glute_outer"].status == "pass", by_id["C_glute_outer"].message
+
+
 def test_recipe__hip_y_prefers_hip_mid() -> None:
     """B6: hip_mid.y_m wins over mean(hip_l, hip_r) for pelvis oval plane."""
     report = _axial_pin_report(chest_front_y=-0.13, chest_mid_y=0.0, shoulder_y=None)

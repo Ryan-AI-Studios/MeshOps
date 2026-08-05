@@ -2662,7 +2662,8 @@ def _align_glute_outer_to_hip_bridge(
             aligned = True
         if aligned:
             messages.append(f"glute_{side}: outer X aligned to hip_bridge (|ΔX| target 0)")
-        elif missing_half:
+        if missing_half:
+            # Emit even when some siblings aligned (observability; product paths always set rx)
             messages.append(f"glute_{side}: outer X align skipped (no glute half-extent)")
 
 
