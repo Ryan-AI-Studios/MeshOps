@@ -588,6 +588,55 @@ def test_calf_slant_split_distal_toward_ankle_pass() -> None:
     assert part_y(pkg.parts[1]) == pytest.approx(0.05)
 
 
+def test_calf_slant_split_with_shaft_pass() -> None:
+    """0034: a + cyl (role=calf) + b + ank_foot → C_calf_slant pass (not skip)."""
+    pkg = _pkg(
+        [
+            _part(
+                "RECIPE_calf_a_l",
+                kind="ellipsoid",
+                center=[0.1, 0.0, 0.45],
+                rx_m=0.04,
+                ry_m=0.04,
+                rz_m=0.04,
+            ),
+            _part(
+                "RECIPE_calf_cyl_l",
+                kind="capsule",
+                center=None,
+                rx_m=None,
+                ry_m=None,
+                rz_m=None,
+                radius_m=0.04,
+                p0=[0.1, 0.0, 0.45],
+                p1=[0.1, 0.05, 0.15],
+            ),
+            _part(
+                "RECIPE_calf_b_l",
+                kind="ellipsoid",
+                center=[0.1, 0.05, 0.15],
+                rx_m=0.038,
+                ry_m=0.038,
+                rz_m=0.038,
+            ),
+            _part(
+                "RECIPE_ank_foot_l",
+                kind="ellipsoid",
+                center=[0.1, 0.05, 0.08],
+                rx_m=0.03,
+                ry_m=0.03,
+                rz_m=0.03,
+            ),
+        ]
+    )
+    assert classify_part_name("RECIPE_calf_cyl_l") == ("calf", "l")
+    report = validate_constraints(pkg)
+    by_id = {r.id: r for r in report.rules}
+    assert by_id["C_calf_slant"].status == "pass"
+    # Shaft present must not force whole-calf skip when prox+dist exist
+    assert "whole calf only" not in by_id["C_calf_slant"].message.lower()
+
+
 def test_duplicate_limb_dot001_fails() -> None:
     pkg = _pkg(
         [
