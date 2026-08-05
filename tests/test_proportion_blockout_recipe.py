@@ -15,6 +15,8 @@ from meshops.proportion.blockout_recipe import (
     MIDLINE_X_TOL_M,
     RECIPE_SCHEMA_VERSION,
     BlockoutRecipePackage,
+    RecipePart,
+    _sync_calf_distal_to_ankle,
     build_blockout_recipe,
     emit_bpy_script,
     load_blockout_recipe,
@@ -511,7 +513,53 @@ def test_recipe__calf_distal_syncs_to_ank_foot() -> None:
         assert float(cyl.p1[1]) == pytest.approx(ay)
         # Proximal Y stays at knee (0.0 in this fixture)
         assert float(cyl.p0[1]) == pytest.approx(0.0)
+        # B6 Y rewrite from ank_foot → placement is full3d (even if emit was front_plane)
+        assert dist.placement == "full3d"
+        assert cyl.placement == "full3d"
         assert any(f"calf_{side}: distal/cyl p1 Y synced to ank_foot" in m for m in pkg.messages)
+
+
+def test_recipe__sync_calf_distal_upgrades_front_plane_placement() -> None:
+    """0034 P3-2: ankle-sourced Y rewrite marks distal/cyl placement full3d."""
+    parts = [
+        RecipePart(
+            name="RECIPE_calf_b_l",
+            role="limb_segment",
+            kind="ellipsoid",
+            center=[0.1, 0.0, 0.15],
+            rx_m=0.038,
+            ry_m=0.038,
+            rz_m=0.038,
+            placement="front_plane",
+        ),
+        RecipePart(
+            name="RECIPE_calf_cyl_l",
+            role="limb_segment",
+            kind="capsule",
+            p0=[0.1, 0.0, 0.45],
+            p1=[0.1, 0.0, 0.15],
+            radius_m=0.04,
+            placement="front_plane",
+        ),
+        RecipePart(
+            name="RECIPE_ank_foot_l",
+            role="ankle_bridge",
+            kind="ellipsoid",
+            center=[0.1, 0.07, 0.08],
+            rx_m=0.03,
+            ry_m=0.03,
+            rz_m=0.03,
+            placement="full3d",
+        ),
+    ]
+    messages: list[str] = []
+    _sync_calf_distal_to_ankle(parts, messages)
+    by_name = {p.name: p for p in parts}
+    assert float(by_name["RECIPE_calf_b_l"].center[1]) == pytest.approx(0.07)  # type: ignore[index]
+    assert float(by_name["RECIPE_calf_cyl_l"].p1[1]) == pytest.approx(0.07)  # type: ignore[index]
+    assert by_name["RECIPE_calf_b_l"].placement == "full3d"
+    assert by_name["RECIPE_calf_cyl_l"].placement == "full3d"
+    assert any("distal/cyl p1 Y synced to ank_foot" in m for m in messages)
 
 
 def test_recipe__calf_split_feet_slant_pass() -> None:

@@ -1626,6 +1626,9 @@ def _sync_calf_distal_to_ankle(
 
     Idempotent absolute set. No ankle → leave landmark Y. Name-matched to avoid
     import cycle with constraints.classify_part_name.
+
+    When Y is rewritten from ank_foot, also set placement=full3d so front_plane
+    calves (null joint y_m at emit) do not keep stale plane metadata after sync.
     """
     by_name = {p.name: p for p in parts}
     for side in ("l", "r"):
@@ -1637,11 +1640,13 @@ def _sync_calf_distal_to_ankle(
         dist = by_name.get(f"RECIPE_calf_b_{side}")
         if dist is not None and dist.center is not None and len(dist.center) >= 3:
             dist.center = [float(dist.center[0]), ay, float(dist.center[2])]
+            dist.placement = "full3d"
             updated = True
         cyl = by_name.get(f"RECIPE_calf_cyl_{side}")
         if cyl is not None and cyl.p1 is not None and len(cyl.p1) >= 3:
             # Keep p0[1] = proximal Y; only p1 Y tracks ankle.
             cyl.p1 = [float(cyl.p1[0]), ay, float(cyl.p1[2])]
+            cyl.placement = "full3d"
             updated = True
         # Honesty: only claim sync when distal and/or cyl were actually written
         # (feet without limbs leave ank_foot present but no calf parts).
