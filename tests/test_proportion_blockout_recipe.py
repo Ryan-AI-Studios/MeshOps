@@ -991,12 +991,20 @@ def test_recipe__torso_ovals_d6_names_no_trap() -> None:
 def _torso_oval_span_from_report(report: ProportionReport) -> float:
     """Match _build_torso_ovals span: z_top=max(shoulder_z, chest_z), z_bottom=hip_z."""
     lms = report.landmarks_xyz
-    sh_zs = [
-        float(lms[k].z_m)
-        for k in ("shoulder_l", "shoulder_r")
-        if k in lms and lms[k].z_m is not None
-    ]
-    hip_zs = [float(lms[k].z_m) for k in ("hip_l", "hip_r") if k in lms and lms[k].z_m is not None]
+    sh_zs: list[float] = []
+    for k in ("shoulder_l", "shoulder_r"):
+        if k not in lms:
+            continue
+        zm = lms[k].z_m
+        if zm is not None:
+            sh_zs.append(float(zm))
+    hip_zs: list[float] = []
+    for k in ("hip_l", "hip_r"):
+        if k not in lms:
+            continue
+        zm = lms[k].z_m
+        if zm is not None:
+            hip_zs.append(float(zm))
     assert sh_zs and hip_zs
     shoulder_z = sum(sh_zs) / len(sh_zs)
     hip_z = sum(hip_zs) / len(hip_zs)
@@ -1005,8 +1013,10 @@ def _torso_oval_span_from_report(report: ProportionReport) -> float:
         if band.band_id == "chest" and band.z_frac is not None and report.height_m is not None:
             chest_z = float(band.z_frac) * float(report.height_m)
             break
-    if chest_z is None and "chest_front" in lms and lms["chest_front"].z_m is not None:
-        chest_z = float(lms["chest_front"].z_m)
+    if chest_z is None and "chest_front" in lms:
+        chest_front_z = lms["chest_front"].z_m
+        if chest_front_z is not None:
+            chest_z = float(chest_front_z)
     if chest_z is None:
         chest_z = shoulder_z
     z_top = max(shoulder_z, chest_z)
