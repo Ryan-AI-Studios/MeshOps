@@ -15,6 +15,7 @@ breast_lower* used for rz in 0030; lateral fuse/diameter still 0027.
 load 1.0|1.1|1.2|1.3|1.4.
 0034: product split calf RECIPE_calf_{a,cyl,b}_{side} (not limb_calf) so C_calf_slant
 can pass; B6 distal/cyl p1 Y sync to ank_foot after feet emit.
+0036: post-pass aligns glute_soft outer X to hip_bridge outer (pre-optimize C_glute_outer).
 """
 
 from __future__ import annotations
@@ -2506,6 +2507,9 @@ def build_blockout_recipe(
     # 0033 B3/B8: attach breast hang tilt to breast_soft ellipsoids after all emitters
     _apply_breast_tilt(parts, tilt_val=tilt_val, messages=messages)
 
+    # 0036: glute outer tip X = hip_bridge outer X (same formula as constraints opt clamp)
+    _align_glute_outer_to_hip_bridge(parts, messages)
+
     if not parts:
         raise ProportionError(
             "nothing to emit: zero recipe parts after resolution",
@@ -2538,6 +2542,128 @@ def build_blockout_recipe(
         counts={"parts": len(parts), "by_role": by_role},
         metrics=metrics,
     )
+
+
+# ---------------------------------------------------------------------------
+# 0036 — glute outer X = hip_bridge outer at emit
+# Parity with constraints._hip_outer_x / set_part_x / outer clamp (recipe-local;
+# do not import constraints — avoid cycles). Does not call optimize_package.
+# ---------------------------------------------------------------------------
+
+
+def _side_from_recipe_name(name: str) -> Literal["l", "r"] | None:
+    """Simple _l / _r suffix (after optional Blender .###); else None."""
+    base = name.lower()
+    if "." in base:
+        # Strip trailing .001 style suffixes only when last segment is digits.
+        head, tail = base.rsplit(".", 1)
+        if tail.isdigit():
+            base = head
+    if base.endswith("_l"):
+        return "l"
+    if base.endswith("_r"):
+        return "r"
+    return None
+
+
+def _part_center_x(part: RecipePart) -> float | None:
+    """Center X from center, else mid(p0, p1)."""
+    if part.center is not None and len(part.center) >= 1:
+        return float(part.center[0])
+    if part.p0 is not None and part.p1 is not None and len(part.p0) >= 1 and len(part.p1) >= 1:
+        return 0.5 * (float(part.p0[0]) + float(part.p1[0]))
+    return None
+
+
+def _half_extent_x_local(part: RecipePart) -> float | None:
+    """Half-extent X: prefer rx_m, else radius_m, else top/bottom half-width."""
+    if part.rx_m is not None:
+        return float(part.rx_m)
+    if part.radius_m is not None:
+        return float(part.radius_m)
+    if part.top_half_width_m is not None and part.bottom_half_width_m is not None:
+        return max(float(part.top_half_width_m), float(part.bottom_half_width_m))
+    if part.top_half_width_m is not None:
+        return float(part.top_half_width_m)
+    if part.bottom_half_width_m is not None:
+        return float(part.bottom_half_width_m)
+    return None
+
+
+def _hip_bridge_outer_x(parts: list[RecipePart], side: Literal["l", "r"]) -> float | None:
+    """Hip bridge outer tip X for *side*. Prefer side-tagged, then any hip_bridge."""
+    side_bridges = [
+        p for p in parts if p.role == "hip_bridge" and _side_from_recipe_name(p.name) == side
+    ]
+    bridges = side_bridges
+    if not bridges:
+        bridges = [p for p in parts if p.role == "hip_bridge"]
+    if not bridges:
+        return None
+    bridge = bridges[0]
+    cx = _part_center_x(bridge)
+    if cx is None:
+        return None
+    half = _half_extent_x_local(bridge)
+    if half is None:
+        return cx  # midline bridge without width — weak (parity with constraints)
+    if side == "r":
+        return cx + half
+    return cx - half
+
+
+def _set_part_x_local(part: RecipePart, x: float) -> None:
+    """Mirror constraints.set_part_x: set center X and shift p0/p1 by same Δ."""
+    if part.center is not None and len(part.center) >= 3:
+        old = float(part.center[0])
+        part.center = [float(x), float(part.center[1]), float(part.center[2])]
+        dx = float(x) - old
+        if part.p0 is not None and len(part.p0) >= 3:
+            part.p0 = [float(part.p0[0]) + dx, float(part.p0[1]), float(part.p0[2])]
+        if part.p1 is not None and len(part.p1) >= 3:
+            part.p1 = [float(part.p1[0]) + dx, float(part.p1[1]), float(part.p1[2])]
+        return
+    if part.p0 is not None and part.p1 is not None:
+        mid = (float(part.p0[0]) + float(part.p1[0])) / 2.0
+        dx = float(x) - mid
+        part.p0 = [float(part.p0[0]) + dx, float(part.p0[1]), float(part.p0[2])]
+        part.p1 = [float(part.p1[0]) + dx, float(part.p1[1]), float(part.p1[2])]
+
+
+def _align_glute_outer_to_hip_bridge(
+    parts: list[RecipePart],
+    messages: list[str],
+) -> None:
+    """0036: for each side, set all glute_soft outer tips to hip_bridge outer X.
+
+    right: center_x = hip_outer - half; left: center_x = hip_outer + half.
+    Selects by role==glute_soft only (never name prefix — two_spheres uses
+    RECIPE_glute_sphere_*). Aligns all matching on that side (safety net).
+    """
+    for side in ("l", "r"):
+        glutes = [
+            p for p in parts if p.role == "glute_soft" and _side_from_recipe_name(p.name) == side
+        ]
+        if not glutes:
+            continue
+        hip_outer = _hip_bridge_outer_x(parts, side)
+        if hip_outer is None:
+            messages.append(f"glute_{side}: outer X align skipped (no hip_bridge outer)")
+            continue
+        aligned = False
+        missing_half = False
+        for g in glutes:
+            half = _half_extent_x_local(g)
+            if half is None:
+                missing_half = True
+                continue
+            target_x = hip_outer - half if side == "r" else hip_outer + half
+            _set_part_x_local(g, target_x)
+            aligned = True
+        if aligned:
+            messages.append(f"glute_{side}: outer X aligned to hip_bridge (|ΔX| target 0)")
+        elif missing_half:
+            messages.append(f"glute_{side}: outer X align skipped (no glute half-extent)")
 
 
 def _apply_breast_tilt(
@@ -2828,7 +2954,10 @@ def emit_bpy_script(package: BlockoutRecipePackage) -> str:
         "        return None",
         "    midpoint = (p0 + p1) / 2.0",
         "    radius = radius_m / scale_len",
-        "    rot = Vector((0.0, 0.0, 1.0)).rotation_difference(v.normalized()).to_matrix().to_4x4()",
+        (
+            "    rot = Vector((0.0, 0.0, 1.0)).rotation_difference(v.normalized())"
+            ".to_matrix().to_4x4()"
+        ),
         "    mat = (",
         "        Matrix.Translation(midpoint)",
         "        @ rot",
