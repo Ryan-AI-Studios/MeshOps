@@ -203,7 +203,7 @@ def test_face__default_no_face_roles() -> None:
     }
     assert roles.isdisjoint(face_roles)
     assert "RECIPE_neck_head_fuse" not in {p.name for p in pkg.parts}
-    assert pkg.schema_version == RECIPE_SCHEMA_VERSION == "1.3.0"
+    assert pkg.schema_version == RECIPE_SCHEMA_VERSION == "1.4.0"
 
 
 def test_face__face_flag_core_features() -> None:
@@ -282,12 +282,12 @@ def test_face__schema_load_1_1_and_write_current(tmp_path: Path) -> None:
     assert loaded12.schema_version == "1.2.0"
     assert any(p.role == "jaw" for p in loaded12.parts)
 
-    # New writes are 1.3.0
-    assert pkg_face.schema_version == "1.3.0"
-    paths = write_blockout_recipe(tmp_path / "out13", pkg_face, format="json", force=True)
-    loaded13 = load_blockout_recipe(paths[0])
-    assert loaded13.schema_version == "1.3.0"
-    assert any(p.role == "jaw" for p in loaded13.parts)
+    # New writes are 1.4.0
+    assert pkg_face.schema_version == "1.4.0"
+    paths = write_blockout_recipe(tmp_path / "out14", pkg_face, format="json", force=True)
+    loaded14 = load_blockout_recipe(paths[0])
+    assert loaded14.schema_version == "1.4.0"
+    assert any(p.role == "jaw" for p in loaded14.parts)
 
 
 def test_face__classifier_b5_tokens() -> None:

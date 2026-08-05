@@ -11,6 +11,8 @@ breast_lower* used for rz in 0030; lateral fuse/diameter still 0027.
 0027: anatomy profiles (--profiles) skip_roles merge + parent_joint; schema 1.1.0.
 0028: face/hair/neckline RECIPE kit (opt-in); schema write 1.2.0; load 1.0|1.1|1.2.
 0029: hands/feet RECIPE kit (opt-in); schema write 1.3.0; load 1.0|1.1|1.2|1.3.
+0033: breast hang tilt on breast_soft (rotation_euler_deg + bpy TRS); schema write 1.4.0;
+load 1.0|1.1|1.2|1.3|1.4.
 """
 
 from __future__ import annotations
@@ -42,7 +44,7 @@ if TYPE_CHECKING:
     from meshops.proportion.depth_samples import DepthSamplesPackage
     from meshops.proportion.skeleton import BlockoutSkeleton, SkeletonJoint
 
-RECIPE_SCHEMA_VERSION: Final[Literal["1.0.0", "1.1.0", "1.2.0", "1.3.0"]] = "1.3.0"
+RECIPE_SCHEMA_VERSION: Final[Literal["1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0"]] = "1.4.0"
 RECIPE_ID: Final[Literal["humanoid_a_pose_v1"]] = "humanoid_a_pose_v1"
 
 JSON_BASENAME: Final[str] = "blockout_recipe.json"
@@ -156,6 +158,8 @@ class RecipePart(BaseModel):
     label: str = ""
     notes: str | None = None
     parent_joint: str | None = None  # 1.1.0 additive; null on 1.0.0 loads
+    # 1.4.0 additive: Euler XYZ degrees [rx, ry, rz]; null = identity R in bpy emit
+    rotation_euler_deg: list[float] | None = None
 
     @model_validator(mode="after")
     def _label_recipe_prefix(self) -> RecipePart:
@@ -183,11 +187,11 @@ class RecipeMetrics(BaseModel):
 
 
 class BlockoutRecipePackage(BaseModel):
-    """blockout_recipe.json package (schema 1.0.0 | 1.1.0 | 1.2.0 | 1.3.0)."""
+    """blockout_recipe.json package (schema 1.0.0 | 1.1.0 | 1.2.0 | 1.3.0 | 1.4.0)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["1.0.0", "1.1.0", "1.2.0", "1.3.0"] = RECIPE_SCHEMA_VERSION
+    schema_version: Literal["1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0"] = RECIPE_SCHEMA_VERSION
     honesty: str = RECIPE_HONESTY
     source_report_schema: str | None = None
     height_m: float | None = None
@@ -2205,13 +2209,11 @@ def build_blockout_recipe(
     if template_applied is not None:
         messages.append(f"template_applied: id={template_applied.template_id}")
 
-    # Breast hang (B9): CLI → template tilt — never slant (C2 message-only hang)
+    # Breast hang ladder (B1 / 0027 B9): CLI → template tilt — never slant as hang.
+    # Applied true/false + rotation attach happen in post-pass after profile emit (0033 B8).
     tilt_val: float | None = breast_tilt_deg
     if tilt_val is None and template_applied is not None:
         tilt_val = float(template_applied.constants.breast_tilt_x_deg)
-    if tilt_val is not None:
-        messages.append(f"breast_tilt_deg={tilt_val}")
-        messages.append("breast_tilt_applied: false")
 
     resolved = _resolve_metrics(report, depth_package=depth_package, messages=messages)
     crotch_z = _crotch_z(report, resolved.height_m, messages)
@@ -2384,6 +2386,9 @@ def build_blockout_recipe(
             ):
                 messages.append("trap_soft L/R coincident — check neck_base/shoulder joints")
 
+    # 0033 B3/B8: attach breast hang tilt to breast_soft ellipsoids after all emitters
+    _apply_breast_tilt(parts, tilt_val=tilt_val, messages=messages)
+
     if not parts:
         raise ProportionError(
             "nothing to emit: zero recipe parts after resolution",
@@ -2418,8 +2423,47 @@ def build_blockout_recipe(
     )
 
 
+def _apply_breast_tilt(
+    parts: list[RecipePart],
+    *,
+    tilt_val: float | None,
+    messages: list[str],
+) -> None:
+    """0033: set rotation_euler_deg on breast_soft ellipsoids; emit applied messages.
+
+    Mutates *parts* in place (replaces matching entries). Role-required — never
+    pec_soft / glute_soft / kind-only. Hang source already resolved (B1 ladder).
+    """
+    if tilt_val is None:
+        return
+
+    messages.append(f"breast_tilt_deg={tilt_val}")
+
+    finite = math.isfinite(float(tilt_val))
+    apply = finite and abs(float(tilt_val)) >= _NEAR_ZERO_LEN
+    breast_idxs = [
+        i for i, p in enumerate(parts) if p.role == "breast_soft" and p.kind == "ellipsoid"
+    ]
+
+    if apply and breast_idxs:
+        rot = [float(tilt_val), 0.0, 0.0]
+        for i in breast_idxs:
+            parts[i] = parts[i].model_copy(update={"rotation_euler_deg": rot})
+        messages.append("breast_tilt_applied: true")
+        messages.append("breast_tilt_axis=X sign=+tip_down_face_negY")
+        return
+
+    messages.append("breast_tilt_applied: false")
+    if not finite:
+        messages.append("breast_tilt_reason=nonfinite")
+    elif not apply:
+        messages.append("breast_tilt_reason=zero")
+    elif not breast_idxs:
+        messages.append("breast_tilt_reason=no_breast_soft")
+
+
 def load_blockout_recipe(path: Path | str) -> BlockoutRecipePackage:
-    """Load blockout_recipe.json; accepts schema 1.0.0 | 1.1.0 | 1.2.0 | 1.3.0."""
+    """Load blockout_recipe.json; accepts schema 1.0.0 | 1.1.0 | 1.2.0 | 1.3.0 | 1.4.0."""
     p = Path(path)
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
@@ -2430,9 +2474,10 @@ def load_blockout_recipe(path: Path | str) -> BlockoutRecipePackage:
             details={"path": str(p)},
         ) from exc
     ver = data.get("schema_version") if isinstance(data, dict) else None
-    if ver not in ("1.0.0", "1.1.0", "1.2.0", "1.3.0"):
+    if ver not in ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0"):
         raise ProportionError(
-            f"blockout recipe schema_version must be 1.0.0, 1.1.0, 1.2.0, or 1.3.0 (got {ver!r})",
+            "blockout recipe schema_version must be 1.0.0, 1.1.0, 1.2.0, "
+            f"1.3.0, or 1.4.0 (got {ver!r})",
             code="recipe_failed",
             details={"path": str(p), "schema_version": ver},
         )
@@ -2518,6 +2563,8 @@ def emit_bpy_script(package: BlockoutRecipePackage) -> str:
             entry["radius_m"] = p.radius_m
         if p.parent_joint is not None:
             entry["parent_joint"] = p.parent_joint
+        if p.rotation_euler_deg is not None:
+            entry["rotation_euler_deg"] = list(p.rotation_euler_deg)
         parts_data.append(entry)
 
     lines: list[str] = [
@@ -2533,7 +2580,7 @@ def emit_bpy_script(package: BlockoutRecipePackage) -> str:
         "",
         "import math",
         "import bpy",
-        "from mathutils import Matrix, Vector",
+        "from mathutils import Matrix, Vector, Euler",
         "",
         "PARTS = " + _py_repr(parts_data),
         f"HONESTY = {_py_repr(RECIPE_HONESTY)}",
@@ -2689,17 +2736,27 @@ def emit_bpy_script(package: BlockoutRecipePackage) -> str:
         "    return obj",
         "",
         "",
-        "def ensure_ellipsoid(name, center_m, rx_m, ry_m, rz_m, collection):",
+        "def ensure_ellipsoid(",
+        "    name, center_m, rx_m, ry_m, rz_m, collection, rotation_euler_deg=None",
+        "):",
+        "    # T @ R @ S — R from Euler XYZ degrees when rotation_euler_deg length 3",
         "    cx, cy, cz = to_bu(*center_m)",
         "    sx = rx_m / scale_len",
         "    sy = ry_m / scale_len",
         "    sz = rz_m / scale_len",
-        "    mat = (",
-        "        Matrix.Translation(Vector((cx, cy, cz)))",
-        "        @ Matrix.Scale(sx, 4, (1, 0, 0))",
+        "    T = Matrix.Translation(Vector((cx, cy, cz)))",
+        "    R = Matrix.Identity(4)",
+        "    if rotation_euler_deg is not None and len(rotation_euler_deg) == 3:",
+        "        rx, ry, rz = rotation_euler_deg",
+        "        R = Euler(",
+        "            (math.radians(rx), math.radians(ry), math.radians(rz)), 'XYZ'",
+        "        ).to_matrix().to_4x4()",
+        "    S = (",
+        "        Matrix.Scale(sx, 4, (1, 0, 0))",
         "        @ Matrix.Scale(sy, 4, (0, 1, 0))",
         "        @ Matrix.Scale(sz, 4, (0, 0, 1))",
         "    )",
+        "    mat = T @ R @ S",
         "    obj = bpy.data.objects.get(name)",
         '    if obj is None or obj.type != "MESH":',
         "        if obj is not None:",
@@ -2747,7 +2804,8 @@ def emit_bpy_script(package: BlockoutRecipePackage) -> str:
         "            n_parts += 1",
         "    elif kind == 'ellipsoid' and p.get('center') is not None:",
         "        ensure_ellipsoid(",
-        "            name, p['center'], p['rx_m'], p['ry_m'], p['rz_m'], recipes_col",
+        "            name, p['center'], p['rx_m'], p['ry_m'], p['rz_m'], recipes_col,",
+        "            p.get('rotation_euler_deg'),",
         "        )",
         "        n_parts += 1",
         "",
