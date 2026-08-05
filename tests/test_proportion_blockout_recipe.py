@@ -930,6 +930,17 @@ def test_recipe__breast_tilt_zero_not_applied() -> None:
         assert b.rotation_euler_deg is None
 
 
+def test_recipe__breast_tilt_no_cli_no_template_silent() -> None:
+    """0033 §2.8: no CLI and no template → no tilt messages; no rotation."""
+    report = _report_with_soft_cs()
+    pkg = build_blockout_recipe(report, limbs=False)
+    assert not any("breast_tilt_deg=" in m for m in pkg.messages)
+    assert not any("breast_tilt_applied" in m for m in pkg.messages)
+    for b in pkg.parts:
+        if b.role == "breast_soft":
+            assert b.rotation_euler_deg is None
+
+
 def test_recipe__breast_tilt_profile_dual() -> None:
     """0033: profile dual breast_soft + tilt 20 → both L/R rotated."""
     from meshops.proportion.anatomy_profile import load_anatomy_profile
