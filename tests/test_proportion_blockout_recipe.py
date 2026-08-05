@@ -190,7 +190,7 @@ def test_recipe__full_torso_trap() -> None:
     assert trap.z_bottom_m is not None
     assert trap.z_top_m is not None
     assert trap.z_top_m > trap.z_bottom_m
-    assert pkg.schema_version == "1.3.0"
+    assert pkg.schema_version == "1.4.0"
     assert pkg.recipe_id == "humanoid_a_pose_v1"
     assert pkg.honesty == RECIPE_HONESTY
     assert pkg.axis_notes == AXIS_NOTES
@@ -486,14 +486,14 @@ def test_recipe__schema_1_1_0_write(tmp_path: Path) -> None:
     report = _full_torso_report()
     pkg = build_blockout_recipe(report, limbs=False)
     assert pkg.schema_version == RECIPE_SCHEMA_VERSION
-    assert pkg.schema_version == "1.3.0"
+    assert pkg.schema_version == "1.4.0"
     paths = write_blockout_recipe(tmp_path / "r", pkg, format="json", force=True)
     data = json.loads(paths[0].read_text(encoding="utf-8"))
-    assert data["schema_version"] == "1.3.0"
+    assert data["schema_version"] == "1.4.0"
     assert data["honesty"] == RECIPE_HONESTY
     loaded = load_blockout_recipe(paths[0])
     assert isinstance(loaded, BlockoutRecipePackage)
-    assert loaded.schema_version == "1.3.0"
+    assert loaded.schema_version == "1.4.0"
 
 
 def test_recipe__load_schema_1_0_0_parent_joint_null(tmp_path: Path) -> None:
@@ -832,7 +832,7 @@ def test_recipe__template_applied_dir_resolves(tmp_path: Path) -> None:
     )
     assert payload["ok"] is True
     assert any("template_applied: id=female_adult_athletic" in m for m in payload["messages"])
-    assert any("breast_tilt_applied: false" in m for m in payload["messages"])
+    assert any("breast_tilt_applied: true" in m for m in payload["messages"])
     assert any("breast_tilt_deg=" in m for m in payload["messages"])
 
 
@@ -901,13 +901,188 @@ def test_recipe__template_applied_unknown_id_fails(tmp_path: Path) -> None:
     assert ei.value.code == "recipe_failed"
 
 
-def test_recipe__breast_tilt_metadata_only() -> None:
+def test_recipe__breast_tilt_applied() -> None:
+    """0033: CLI 20 + soft CS breasts → applied true + rotation_euler_deg [20,0,0]."""
     report = _report_with_soft_cs()
     pkg = build_blockout_recipe(report, limbs=False, breast_tilt_deg=20.0)
     assert any("breast_tilt_deg=20.0" in m or "breast_tilt_deg=20" in m for m in pkg.messages)
+    assert any(m == "breast_tilt_applied: true" for m in pkg.messages)
+    assert any("tip_down" in m or "breast_tilt_axis" in m for m in pkg.messages)
+    breasts = [p for p in pkg.parts if p.role == "breast_soft"]
+    assert len(breasts) >= 1
+    for b in breasts:
+        assert b.kind == "ellipsoid"
+        assert b.rotation_euler_deg is not None
+        assert b.rotation_euler_deg == pytest.approx([20.0, 0.0, 0.0])
+    # schema write is 1.4.0 (0033)
+    assert pkg.schema_version == "1.4.0"
+
+
+def test_recipe__breast_tilt_zero_not_applied() -> None:
+    """0033 B12: explicit CLI 0 → applied false; no rotation on breast parts."""
+    report = _report_with_soft_cs()
+    pkg = build_blockout_recipe(report, limbs=False, breast_tilt_deg=0.0)
+    assert any("breast_tilt_deg=0" in m for m in pkg.messages)
     assert any(m == "breast_tilt_applied: false" for m in pkg.messages)
-    # schema write is 1.3.0 (0029)
-    assert pkg.schema_version == "1.3.0"
+    breasts = [p for p in pkg.parts if p.role == "breast_soft"]
+    assert len(breasts) >= 1
+    for b in breasts:
+        assert b.rotation_euler_deg is None
+
+
+def test_recipe__breast_tilt_no_cli_no_template_silent() -> None:
+    """0033 §2.8: no CLI and no template → no tilt messages; no rotation."""
+    report = _report_with_soft_cs()
+    pkg = build_blockout_recipe(report, limbs=False)
+    assert not any("breast_tilt_deg=" in m for m in pkg.messages)
+    assert not any("breast_tilt_applied" in m for m in pkg.messages)
+    for b in pkg.parts:
+        if b.role == "breast_soft":
+            assert b.rotation_euler_deg is None
+
+
+def test_recipe__breast_tilt_profile_dual() -> None:
+    """0033: profile dual breast_soft + tilt 20 → both L/R rotated."""
+    from meshops.proportion.anatomy_profile import load_anatomy_profile
+    from meshops.proportion.skeleton import BlockoutSkeleton, SkeletonBone, SkeletonJoint
+
+    report = _report_with_soft_cs()
+    profile = load_anatomy_profile("torso_limb_f_athletic_v1")
+
+    def _j(
+        id_: str,
+        *,
+        x: float,
+        y: float,
+        z: float,
+        side: str = "none",
+        parent: str | None = None,
+    ) -> SkeletonJoint:
+        return SkeletonJoint(
+            id=id_,
+            parent=parent,
+            side=side,  # type: ignore[arg-type]
+            x_m=x,
+            y_m=y,
+            z_m=z,
+            source="estimated",
+        )
+
+    skel = BlockoutSkeleton(
+        schema_version="1.0.0",
+        honesty="proportion_blockout_skeleton_not_mesh_or_print_success",
+        joints=[
+            _j("root", x=0.0, y=0.0, z=0.0),
+            _j("pelvis", x=0.0, y=0.0, z=0.95, parent="root"),
+            _j("spine_high", x=0.0, y=0.0, z=1.25, parent="pelvis"),
+            _j("neck_base", x=0.0, y=0.0, z=1.42, parent="spine_high"),
+            _j("shoulder_l", x=-0.20, y=0.0, z=1.38, side="l", parent="spine_high"),
+            _j("shoulder_r", x=0.20, y=0.0, z=1.38, side="r", parent="spine_high"),
+            _j("elbow_l", x=-0.28, y=-0.05, z=1.10, side="l", parent="shoulder_l"),
+            _j("elbow_r", x=0.28, y=-0.05, z=1.10, side="r", parent="shoulder_r"),
+        ],
+        bones=[
+            SkeletonBone(id="spine", joint_a="pelvis", joint_b="spine_high", length_m=0.3),
+            SkeletonBone(id="upper_arm_l", joint_a="shoulder_l", joint_b="elbow_l", length_m=0.3),
+            SkeletonBone(id="upper_arm_r", joint_a="shoulder_r", joint_b="elbow_r", length_m=0.3),
+        ],
+    )
+    pkg = build_blockout_recipe(
+        report,
+        limbs=False,
+        breast_tilt_deg=20.0,
+        profile=profile,
+        skeleton=skel,
+    )
+    breasts = [p for p in pkg.parts if p.role == "breast_soft"]
+    assert len(breasts) >= 2
+    names = {p.name for p in breasts}
+    assert any(n.endswith("_l") for n in names)
+    assert any(n.endswith("_r") for n in names)
+    for b in breasts:
+        assert b.rotation_euler_deg == pytest.approx([20.0, 0.0, 0.0])
+    assert any(m == "breast_tilt_applied: true" for m in pkg.messages)
+
+
+def test_recipe__breast_tilt_bpy_string() -> None:
+    """0033: emit_bpy_script includes Euler/radians/20 for breast; other ellipsoids OK."""
+    report = _report_with_soft_cs()
+    pkg = build_blockout_recipe(report, limbs=False, breast_tilt_deg=20.0)
+    script = emit_bpy_script(pkg)
+    assert "breast_soft" in script or "RECIPE_breast" in script
+    assert "rotation_euler_deg" in script
+    assert "Euler" in script
+    assert "math.radians" in script
+    assert "20" in script or "20.0" in script
+    # non-breast ellipsoids still emit without requiring rotation key on every part
+    assert "ensure_ellipsoid(" in script
+    assert "rotation_euler_deg=None" in script or "p.get('rotation_euler_deg')" in script
+
+
+def test_recipe__breast_tilt_skips_pec_and_glute() -> None:
+    """0033 B3: pec_soft / glute_soft do not get rotation_euler_deg."""
+    from meshops.proportion.anatomy_profile import load_anatomy_profile
+
+    report = _report_with_soft_cs()
+    profile = load_anatomy_profile("torso_limb_m_athletic_v1")
+    pkg = build_blockout_recipe(
+        report,
+        limbs=False,
+        breast_tilt_deg=20.0,
+        profile=profile,
+        glute="two_spheres",
+    )
+    pecs = [p for p in pkg.parts if p.role == "pec_soft"]
+    glutes = [p for p in pkg.parts if p.role == "glute_soft"]
+    assert len(pecs) >= 1 or len(glutes) >= 1
+    for p in pecs + glutes:
+        assert p.rotation_euler_deg is None
+    # male profile has no breast_soft → applied false
+    assert not any(p.role == "breast_soft" for p in pkg.parts)
+    assert any(m == "breast_tilt_applied: false" for m in pkg.messages)
+
+
+def test_recipe__breast_tilt_nonfinite_not_applied() -> None:
+    """0033 B12: nonfinite tilt → applied false + reason nonfinite."""
+    report = _report_with_soft_cs()
+    pkg = build_blockout_recipe(report, limbs=False, breast_tilt_deg=float("nan"))
+    assert any(m == "breast_tilt_applied: false" for m in pkg.messages)
+    assert any(m == "breast_tilt_reason=nonfinite" for m in pkg.messages)
+    for b in pkg.parts:
+        if b.role == "breast_soft":
+            assert b.rotation_euler_deg is None
+
+
+def test_recipe__load_schema_1_3_without_rotation(tmp_path: Path) -> None:
+    """0033: load gate accepts 1.3.0 packages without rotation_euler_deg."""
+    report = _report_with_soft_cs()
+    pkg = build_blockout_recipe(report, limbs=False, breast_tilt_deg=20.0)
+    data = json.loads(pkg.model_dump_json())
+    data["schema_version"] = "1.3.0"
+    for p in data["parts"]:
+        p.pop("rotation_euler_deg", None)
+    path = tmp_path / "recipe_1_3.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    loaded = load_blockout_recipe(path)
+    assert loaded.schema_version == "1.3.0"
+    for p in loaded.parts:
+        assert p.rotation_euler_deg is None
+
+
+def test_recipe__set_part_y_preserves_breast_tilt() -> None:
+    """0033 B9: set_part_y mutates Y only — rotation_euler_deg survives."""
+    from meshops.proportion.constraints import set_part_y
+
+    report = _report_with_soft_cs()
+    pkg = build_blockout_recipe(report, limbs=False, breast_tilt_deg=20.0)
+    breasts = [p for p in pkg.parts if p.role == "breast_soft"]
+    assert len(breasts) >= 1
+    b0 = breasts[0]
+    assert b0.rotation_euler_deg == pytest.approx([20.0, 0.0, 0.0])
+    assert b0.center is not None
+    set_part_y(b0, -0.05)
+    assert b0.center[1] == pytest.approx(-0.05)
+    assert b0.rotation_euler_deg == pytest.approx([20.0, 0.0, 0.0])
 
 
 def test_recipe__template_does_not_override_measured_glute_cs() -> None:

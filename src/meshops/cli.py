@@ -2361,7 +2361,10 @@ def proportion_blockout_recipe_cmd(
     breast_tilt_deg: float | None = typer.Option(
         None,
         "--breast-tilt-deg",
-        help="Breast tilt degrees metadata only (not applied in bpy v1)",
+        help=(
+            "Breast hang tilt degrees about +X (applied to breast_soft "
+            "ellipsoids + bpy TRS when non-zero; +tip_down face -Y)"
+        ),
     ),
     nofuse: bool = typer.Option(
         False,

@@ -267,7 +267,7 @@ def test_ext__default_no_extremity_roles() -> None:
         "ball_soft",
     }
     assert roles.isdisjoint(extremity_roles)
-    assert pkg.schema_version == RECIPE_SCHEMA_VERSION == "1.3.0"
+    assert pkg.schema_version == RECIPE_SCHEMA_VERSION == "1.4.0"
 
 
 def test_ext__feet_wedge_roles_and_rear_third() -> None:
@@ -409,13 +409,13 @@ def test_ext__ank_foot_assert_raises() -> None:
     _assert_ank_foot_name("RECIPE_ank_foot_l", "ankle_bridge")
 
 
-def test_ext__schema_write_1_3_load_1_2(tmp_path: Path) -> None:
+def test_ext__schema_write_1_4_load_1_2(tmp_path: Path) -> None:
     report = _report_with_extremities()
     pkg = build_blockout_recipe(report, limbs=False, hands=True, feet=True)
-    assert pkg.schema_version == "1.3.0"
-    paths = write_blockout_recipe(tmp_path / "out13", pkg, format="json", force=True)
+    assert pkg.schema_version == "1.4.0"
+    paths = write_blockout_recipe(tmp_path / "out14", pkg, format="json", force=True)
     loaded = load_blockout_recipe(paths[0])
-    assert loaded.schema_version == "1.3.0"
+    assert loaded.schema_version == "1.4.0"
 
     # Load 1.2.0 face recipe still OK
     face_pkg = build_blockout_recipe(report, limbs=False, face=True)
