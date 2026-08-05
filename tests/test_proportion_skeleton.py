@@ -834,10 +834,16 @@ def test_skeleton__0037_t2_real_shoulder_depth_elbow_wrist_inherit() -> None:
     # Provenance messages — inherited (depth), not front-plane-only for those joints
     inherit_el = [m for m in pkg.messages if "elbow_l" in m and "inherited" in m]
     inherit_wr = [m for m in pkg.messages if "wrist_l" in m and "inherited" in m]
+    inherit_el_r = [m for m in pkg.messages if "elbow_r" in m and "inherited" in m]
+    inherit_wr_r = [m for m in pkg.messages if "wrist_r" in m and "inherited" in m]
     assert inherit_el, f"expected inherited msg for elbow_l; msgs={pkg.messages}"
     assert inherit_wr, f"expected inherited msg for wrist_l; msgs={pkg.messages}"
+    assert inherit_el_r, f"expected inherited msg for elbow_r; msgs={pkg.messages}"
+    assert inherit_wr_r, f"expected inherited msg for wrist_r; msgs={pkg.messages}"
     assert any("(depth)" in m for m in inherit_el)
     assert any("(depth)" in m for m in inherit_wr)
+    assert any("(depth)" in m for m in inherit_el_r)
+    assert any("(depth)" in m for m in inherit_wr_r)
     # Must not be front-plane-only for those joints
     assert not any("elbow_l" in m and "front-plane" in m for m in pkg.messages), (
         "elbow_l must not use front-plane when shoulder depth is real"
@@ -845,9 +851,13 @@ def test_skeleton__0037_t2_real_shoulder_depth_elbow_wrist_inherit() -> None:
     assert not any("wrist_l" in m and "front-plane" in m for m in pkg.messages), (
         "wrist_l must not use front-plane when shoulder depth is real"
     )
+    assert not any("elbow_r" in m and "front-plane" in m for m in pkg.messages)
+    assert not any("wrist_r" in m and "front-plane" in m for m in pkg.messages)
     # Pure inherit is estimated, never measured
     assert j["elbow_l"].source == "estimated"
     assert j["wrist_l"].source == "estimated"
+    assert j["elbow_r"].source == "estimated"
+    assert j["wrist_r"].source == "estimated"
 
 
 def test_skeleton__0037_t2b_invent_shoulder_keeps_front_plane_msgs() -> None:
