@@ -159,7 +159,7 @@ class RecipePart(BaseModel):
     notes: str | None = None
     parent_joint: str | None = None  # 1.1.0 additive; null on 1.0.0 loads
     # 1.4.0 additive: Euler XYZ degrees [rx, ry, rz]; null = identity R in bpy emit
-    rotation_euler_deg: list[float] | None = None
+    rotation_euler_deg: list[float] | None = Field(default=None, min_length=3, max_length=3)
 
     @model_validator(mode="after")
     def _label_recipe_prefix(self) -> RecipePart:

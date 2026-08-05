@@ -1031,6 +1031,49 @@ def test_recipe__breast_tilt_skips_pec_and_glute() -> None:
     assert any(m == "breast_tilt_applied: false" for m in pkg.messages)
 
 
+def test_recipe__breast_tilt_nonfinite_not_applied() -> None:
+    """0033 B12: nonfinite tilt → applied false + reason nonfinite."""
+    report = _report_with_soft_cs()
+    pkg = build_blockout_recipe(report, limbs=False, breast_tilt_deg=float("nan"))
+    assert any(m == "breast_tilt_applied: false" for m in pkg.messages)
+    assert any(m == "breast_tilt_reason=nonfinite" for m in pkg.messages)
+    for b in pkg.parts:
+        if b.role == "breast_soft":
+            assert b.rotation_euler_deg is None
+
+
+def test_recipe__load_schema_1_3_without_rotation(tmp_path: Path) -> None:
+    """0033: load gate accepts 1.3.0 packages without rotation_euler_deg."""
+    report = _report_with_soft_cs()
+    pkg = build_blockout_recipe(report, limbs=False, breast_tilt_deg=20.0)
+    data = json.loads(pkg.model_dump_json())
+    data["schema_version"] = "1.3.0"
+    for p in data["parts"]:
+        p.pop("rotation_euler_deg", None)
+    path = tmp_path / "recipe_1_3.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    loaded = load_blockout_recipe(path)
+    assert loaded.schema_version == "1.3.0"
+    for p in loaded.parts:
+        assert p.rotation_euler_deg is None
+
+
+def test_recipe__set_part_y_preserves_breast_tilt() -> None:
+    """0033 B9: set_part_y mutates Y only — rotation_euler_deg survives."""
+    from meshops.proportion.constraints import set_part_y
+
+    report = _report_with_soft_cs()
+    pkg = build_blockout_recipe(report, limbs=False, breast_tilt_deg=20.0)
+    breasts = [p for p in pkg.parts if p.role == "breast_soft"]
+    assert len(breasts) >= 1
+    b0 = breasts[0]
+    assert b0.rotation_euler_deg == pytest.approx([20.0, 0.0, 0.0])
+    assert b0.center is not None
+    set_part_y(b0, -0.05)
+    assert b0.center[1] == pytest.approx(-0.05)
+    assert b0.rotation_euler_deg == pytest.approx([20.0, 0.0, 0.0])
+
+
 def test_recipe__template_does_not_override_measured_glute_cs() -> None:
     """Measured CS glute radii win over template glute_r when template_applied present."""
     from meshops.proportion.body_template import (
