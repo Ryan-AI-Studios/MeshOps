@@ -9,10 +9,11 @@ import pytest
 from typer.testing import CliRunner
 
 from meshops.cli import app
+from meshops.proportion.depth_samples import DepthSample, DepthSamplesPackage
 from meshops.proportion.errors import ProportionError
 from meshops.proportion.guides import AXIS_NOTES
-from meshops.proportion.honesty import SKELETON_HONESTY
-from meshops.proportion.models import LandmarkXYZ, ProportionReport, QualityFlags
+from meshops.proportion.honesty import DEPTH_HONESTY, SKELETON_HONESTY
+from meshops.proportion.models import DepthBand, LandmarkXYZ, ProportionReport, QualityFlags
 from meshops.proportion.skeleton import (
     BPY_BASENAME,
     JSON_BASENAME,
@@ -20,6 +21,7 @@ from meshops.proportion.skeleton import (
     BlockoutSkeleton,
     SkeletonBone,
     SkeletonJoint,
+    _depth_family_for_joint,
     build_blockout_skeleton,
     emit_bpy_script,
     run_skeleton_build,
@@ -79,14 +81,67 @@ def _report(
     *,
     height_m: float | None = 1.72,
     head_unit_frac: float | None = 1.0 / 7.5,
+    depth_bands: list[DepthBand] | None = None,
 ) -> ProportionReport:
     return ProportionReport(
         schema_version="1.1.0",
         height_m=height_m,
         head_unit_frac=head_unit_frac,
         landmarks_xyz=lms if lms is not None else {},
+        depth_bands=list(depth_bands or []),
         quality=QualityFlags(),
     )
+
+
+def _band(
+    band_id: str,
+    *,
+    y_mid: float = 0.03,
+    depth_frac: float = 0.06,
+) -> DepthBand:
+    """Minimal DepthBand (y_mid is height fraction; meters via y_mid * height_m)."""
+    return DepthBand(
+        band_id=band_id,
+        depth_px=20.0,
+        depth_frac=depth_frac,
+        depth_m=None,
+        y_front=y_mid + depth_frac / 2.0,
+        y_back=y_mid - depth_frac / 2.0,
+        y_mid=y_mid,
+        z_frac=None,
+        confidence=0.8,
+        sources=["left"],
+        orientation_swapped=False,
+    )
+
+
+def _landmarks_with_mids(*, height_m: float = 1.72) -> dict[str, LandmarkXYZ]:
+    """Front XZ on limbs (y missing) + mid landmarks with real y_m (0035 T1 helper).
+
+    Does not replace `_full_landmarks` used by existing tests.
+    """
+    _ = height_m
+    return {
+        "hip_l": _lm("hip_l", x_m=-0.12, y_m=None, z_m=0.90),
+        "hip_r": _lm("hip_r", x_m=0.12, y_m=None, z_m=0.90),
+        "knee_l": _lm("knee_l", x_m=-0.12, y_m=None, z_m=0.48),
+        "knee_r": _lm("knee_r", x_m=0.12, y_m=None, z_m=0.48),
+        "ankle_l": _lm("ankle_l", x_m=-0.12, y_m=None, z_m=0.08),
+        "ankle_r": _lm("ankle_r", x_m=0.12, y_m=None, z_m=0.08),
+        "shoulder_l": _lm("shoulder_l", x_m=-0.20, y_m=None, z_m=1.40),
+        "shoulder_r": _lm("shoulder_r", x_m=0.20, y_m=None, z_m=1.40),
+        # Mid landmarks supply body-depth Y (meters)
+        "hip_mid": _lm("hip_mid", x_m=0.0, y_m=0.05, z_m=0.90),
+        "chest_mid": _lm("chest_mid", x_m=0.0, y_m=0.08, z_m=1.25),
+        "breast_mid": _lm("breast_mid", x_m=0.0, y_m=0.06, z_m=1.15),
+        "thigh_mid": _lm("thigh_mid", x_m=0.0, y_m=0.04, z_m=0.48),
+        "calf_mid": _lm("calf_mid", x_m=0.0, y_m=0.03, z_m=0.20),
+        # Scaffold (navel has no Y — prefer breast_mid for spine_mid)
+        "belt_hip": _lm("belt_hip", x_m=0.0, y_m=None, z_m=0.95),
+        "navel": _lm("navel", x_m=0.0, y_m=None, z_m=1.05),
+        "neck": _lm("neck", x_m=0.0, y_m=None, z_m=1.45),
+        "cranial_vertex": _lm("cranial_vertex", x_m=0.0, y_m=None, z_m=1.70),
+    }
 
 
 def _write_report(tmp: Path, report: ProportionReport) -> Path:
@@ -435,3 +490,301 @@ def test_skeleton__measured_joint_y_m_as_is_no_sign_flip() -> None:
     # Explicit anti-flip checks (would pass if someone remapped Y).
     assert elbow.y_m != pytest.approx(-y_as_is)
     assert elbow.y_m != pytest.approx(-x_m)
+
+
+# ---------------------------------------------------------------------------
+# 0035 — Skeleton depth when available (ADD only; existing tests unedited)
+# ---------------------------------------------------------------------------
+
+
+def test_skeleton__depth_mids_bands_measured_ge_8() -> None:
+    """T1: front XZ + mids/bands → counts.measured >= 8; prefer breast_mid for spine."""
+    lms = _landmarks_with_mids()
+    bands = [
+        _band("hip", y_mid=0.03),
+        _band("chest", y_mid=0.04),
+        _band("breast", y_mid=0.035),
+        _band("thigh", y_mid=0.02),
+        _band("calf", y_mid=0.015),
+    ]
+    pkg = build_blockout_skeleton(_report(lms, depth_bands=bands))
+    j = _by_id(pkg)
+    assert pkg.counts.measured >= 8, (
+        f"expected measured>=8 got {pkg.counts.measured}; "
+        f"sources={{k: v.source for k, v in j.items()}}"
+    )
+    # Core floor joints should be measured
+    for jid in (
+        "pelvis",
+        "hip_l",
+        "hip_r",
+        "knee_l",
+        "knee_r",
+        "ankle_l",
+        "ankle_r",
+        "spine_high",
+    ):
+        assert j[jid].source == "measured", f"{jid} source={j[jid].source} y={j[jid].y_m}"
+    # Prefer breast_mid (not navel) for spine_mid Y
+    assert j["spine_mid"].y_m == pytest.approx(0.06)
+    assert any("breast_mid" in m and "(depth)" in m for m in pkg.messages)
+    # Depth messages present
+    assert any("(depth)" in m for m in pkg.messages)
+
+
+def test_skeleton__front_xz_without_depth_stays_estimated() -> None:
+    """T2: same front XZ without mids/bands → no false measured from ladder."""
+    lms = {
+        "hip_l": _lm("hip_l", x_m=-0.12, y_m=None, z_m=0.90),
+        "hip_r": _lm("hip_r", x_m=0.12, y_m=None, z_m=0.90),
+        "knee_l": _lm("knee_l", x_m=-0.12, y_m=None, z_m=0.48),
+        "knee_r": _lm("knee_r", x_m=0.12, y_m=None, z_m=0.48),
+        "ankle_l": _lm("ankle_l", x_m=-0.12, y_m=None, z_m=0.08),
+        "ankle_r": _lm("ankle_r", x_m=0.12, y_m=None, z_m=0.08),
+        "shoulder_l": _lm("shoulder_l", x_m=-0.20, y_m=None, z_m=1.40),
+        "shoulder_r": _lm("shoulder_r", x_m=0.20, y_m=None, z_m=1.40),
+    }
+    pkg = build_blockout_skeleton(_report(lms, height_m=1.72))
+    j = _by_id(pkg)
+    for jid in ("hip_l", "hip_r", "knee_l", "knee_r", "ankle_l", "ankle_r", "shoulder_l"):
+        assert j[jid].source == "estimated", f"{jid} should be estimated, got {j[jid].source}"
+        assert j[jid].y_m is not None
+    assert not any("(depth)" in m for m in pkg.messages)
+
+
+def test_skeleton__t3_existing_front_plane_test_still_imported() -> None:
+    """T3: existing front-plane measured test stays green (unedited freeze)."""
+    # No code change to existing test; this marker documents the freeze.
+    assert callable(test_skeleton__measured_requires_full_xyz_front_plane_estimated)
+
+
+def test_skeleton__spine_high_chest_mid_measured() -> None:
+    """T4: spine_high with chest_mid full XYZ → measured."""
+    lms = {
+        "hip_l": _lm("hip_l", x_m=-0.12, y_m=0.0, z_m=0.90),
+        "hip_r": _lm("hip_r", x_m=0.12, y_m=0.0, z_m=0.90),
+        "chest_mid": _lm("chest_mid", x_m=0.0, y_m=0.08, z_m=1.25),
+        "navel": _lm("navel", x_m=0.0, y_m=0.02, z_m=1.05),
+        "belt_hip": _lm("belt_hip", x_m=0.0, y_m=0.0, z_m=0.95),
+    }
+    pkg = build_blockout_skeleton(_report(lms))
+    j = _by_id(pkg)
+    assert j["spine_high"].source == "measured"
+    assert j["spine_high"].y_m == pytest.approx(0.08)
+    assert j["spine_high"].z_m == pytest.approx(1.25)
+    assert j["spine_high"].landmark_id == "chest_mid"
+
+
+def test_skeleton__depth_samples_file_supplies_y(tmp_path: Path) -> None:
+    """T5: optional depth-samples file alone supplies Y when report lacks mid."""
+    lms = {
+        "hip_l": _lm("hip_l", x_m=-0.12, y_m=None, z_m=0.90),
+        "hip_r": _lm("hip_r", x_m=0.12, y_m=None, z_m=0.90),
+        "knee_l": _lm("knee_l", x_m=-0.12, y_m=None, z_m=0.48),
+        "knee_r": _lm("knee_r", x_m=0.12, y_m=None, z_m=0.48),
+        "ankle_l": _lm("ankle_l", x_m=-0.12, y_m=None, z_m=0.08),
+        "ankle_r": _lm("ankle_r", x_m=0.12, y_m=None, z_m=0.08),
+    }
+    # No mid landmarks and no bands on report — only depth file.
+    report = _report(lms)
+    report_path = _write_report(tmp_path, report)
+    samples = DepthSamplesPackage(
+        honesty=DEPTH_HONESTY,
+        height_m=1.72,
+        samples=[
+            DepthSample(
+                id="hip_mid",
+                role="landmark",
+                y_m=0.055,
+                source="fused_xyz",
+                confidence=0.9,
+            ),
+            DepthSample(
+                id="thigh_mid",
+                role="landmark",
+                y_m=0.04,
+                source="fused_xyz",
+                confidence=0.9,
+            ),
+            DepthSample(
+                id="calf_mid",
+                role="landmark",
+                y_m=0.03,
+                source="fused_xyz",
+                confidence=0.9,
+            ),
+        ],
+    )
+    depth_path = tmp_path / "depth_at_landmarks.json"
+    depth_path.write_text(json.dumps(samples.model_dump(mode="json"), indent=2), encoding="utf-8")
+    out = tmp_path / "skel_depth_file"
+    payload = run_skeleton_build(
+        report_path, out, format="json", force=True, depth_at_landmarks=depth_path
+    )
+    assert payload["ok"] is True
+    pkg = BlockoutSkeleton.model_validate(
+        json.loads((out / JSON_BASENAME).read_text(encoding="utf-8"))
+    )
+    j = _by_id(pkg)
+    assert j["hip_l"].source == "measured"
+    assert j["hip_l"].y_m == pytest.approx(0.055)
+    assert j["knee_l"].source == "measured"
+    assert j["ankle_l"].source == "measured"
+    assert any("hip_mid" in m and "(depth)" in m for m in pkg.messages)
+
+
+def test_skeleton__depth_family_arm_joints_no_band() -> None:
+    """T6: elbow/wrist/hand have no depth family band; chain inherit still allowed."""
+    assert _depth_family_for_joint("elbow_l") is None
+    assert _depth_family_for_joint("elbow_r") is None
+    assert _depth_family_for_joint("wrist_l") is None
+    assert _depth_family_for_joint("wrist_r") is None
+    assert _depth_family_for_joint("hand_l") is None
+    assert _depth_family_for_joint("hand_r") is None
+    # Non-arm joints still mapped
+    fam = _depth_family_for_joint("hip_l")
+    assert fam is not None
+    assert "hip_mid" in fam[0]
+    assert "hip" in fam[1]
+
+
+def test_skeleton__cli_depth_at_landmarks_file(tmp_path: Path) -> None:
+    """T7: CLI + MCP optional depth file path smoke (catalog stays 43)."""
+    from meshops.mcp import TOOL_NAMES
+    from meshops.mcp.tools import mesh_proportion_skeleton_build
+
+    assert len(TOOL_NAMES) == 43
+    assert "mesh_proportion_skeleton_build" in TOOL_NAMES
+
+    lms = {
+        "hip_l": _lm("hip_l", x_m=-0.12, y_m=None, z_m=0.90),
+        "hip_r": _lm("hip_r", x_m=0.12, y_m=None, z_m=0.90),
+    }
+    report_path = _write_report(tmp_path, _report(lms))
+    samples = DepthSamplesPackage(
+        honesty=DEPTH_HONESTY,
+        height_m=1.72,
+        samples=[
+            DepthSample(
+                id="hip_mid",
+                role="landmark",
+                y_m=0.05,
+                source="fused_xyz",
+                confidence=0.9,
+            ),
+        ],
+    )
+    depth_path = tmp_path / "depth_at_landmarks.json"
+    depth_path.write_text(json.dumps(samples.model_dump(mode="json"), indent=2), encoding="utf-8")
+    out = tmp_path / "cli_depth_out"
+    result = runner.invoke(
+        app,
+        [
+            "proportion",
+            "skeleton-build",
+            "--report",
+            str(report_path),
+            "--out",
+            str(out),
+            "--depth-at-landmarks",
+            str(depth_path),
+            "--force",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert (out / JSON_BASENAME).is_file()
+    pkg = BlockoutSkeleton.model_validate(
+        json.loads((out / JSON_BASENAME).read_text(encoding="utf-8"))
+    )
+    assert _by_id(pkg)["hip_l"].source == "measured"
+
+    # MCP tool param path (param ≠ new tool name)
+    out_mcp = tmp_path / "mcp_depth_out"
+    payload = mesh_proportion_skeleton_build(
+        tmp_path,
+        report=str(report_path),
+        out=str(out_mcp),
+        depth_at_landmarks=str(depth_path),
+        force=True,
+    )
+    assert payload["ok"] is True
+    pkg_mcp = BlockoutSkeleton.model_validate(
+        json.loads((out_mcp / JSON_BASENAME).read_text(encoding="utf-8"))
+    )
+    assert _by_id(pkg_mcp)["hip_l"].source == "measured"
+
+
+def test_skeleton__height_null_band_only_no_false_measured() -> None:
+    """T8: height_m null + band-only → no crash; no false measured from band meters."""
+    lms = {
+        "hip_l": _lm("hip_l", x_m=-0.12, y_m=None, z_m=0.90),
+        "hip_r": _lm("hip_r", x_m=0.12, y_m=None, z_m=0.90),
+        "shoulder_l": _lm("shoulder_l", x_m=-0.20, y_m=None, z_m=1.40),
+        "shoulder_r": _lm("shoulder_r", x_m=0.20, y_m=None, z_m=1.40),
+    }
+    bands = [_band("hip", y_mid=0.03), _band("chest", y_mid=0.04)]
+    pkg = build_blockout_skeleton(
+        _report(lms, height_m=None, head_unit_frac=None, depth_bands=bands)
+    )
+    j = _by_id(pkg)
+    assert j["hip_l"].source == "estimated"
+    assert j["shoulder_l"].source == "estimated"
+    # Band path skipped without height — no depth-from-band messages for meters
+    assert not any("from hip (depth)" in m for m in pkg.messages)
+
+
+def test_skeleton__spine_low_stature_z_with_hip_mid_stays_estimated() -> None:
+    """T9: belt_hip absent + hip_mid Y → spine_low stays estimated (stature/mid Z — R3)."""
+    lms = {
+        "hip_l": _lm("hip_l", x_m=-0.12, y_m=0.0, z_m=0.90),
+        "hip_r": _lm("hip_r", x_m=0.12, y_m=0.0, z_m=0.90),
+        "hip_mid": _lm("hip_mid", x_m=0.0, y_m=0.05, z_m=0.90),
+        "navel": _lm("navel", x_m=0.0, y_m=0.02, z_m=1.05),
+        # no belt_hip — Z filled via mid pelvis→spine_mid or stature
+    }
+    pkg = build_blockout_skeleton(_report(lms, height_m=1.72))
+    j = _by_id(pkg)
+    assert j["spine_low"].source == "estimated"
+    # Depth Y may still be applied, but R3 blocks measured without real XZ
+    assert j["spine_low"].y_m is not None
+
+
+def test_skeleton__depth_y_does_not_suppress_neck_base_z_fill() -> None:
+    """P2 regression: depth-only Y on neck_base must still fill Z from shoulders/stature."""
+    lms = {
+        "hip_l": _lm("hip_l", x_m=-0.12, y_m=0.0, z_m=0.90),
+        "hip_r": _lm("hip_r", x_m=0.12, y_m=0.0, z_m=0.90),
+        "chest_mid": _lm("chest_mid", x_m=0.0, y_m=0.08, z_m=1.25),
+        "shoulder_l": _lm("shoulder_l", x_m=-0.20, y_m=0.0, z_m=1.40),
+        "shoulder_r": _lm("shoulder_r", x_m=0.20, y_m=0.0, z_m=1.40),
+        # no neck landmark — neck_base uses mean shoulder Z + chest_mid depth Y
+    }
+    pkg = build_blockout_skeleton(_report(lms))
+    j = _by_id(pkg)
+    nb = j["neck_base"]
+    assert nb.z_m is not None and nb.z_m == pytest.approx(1.40)
+    assert nb.y_m is not None and nb.y_m == pytest.approx(0.08)
+    # Synth X + depth Y + landmark shoulder Z mean → still estimated under R3 (X not landmark)
+    assert nb.source == "estimated"
+    assert any("mean shoulder" in m for m in pkg.messages)
+
+
+def test_skeleton__pair_mean_one_side_only_stays_estimated() -> None:
+    """P1 regression: one-sided / mixed-axis pair mean + depth Y must not false-measure."""
+    # Only hip_l has XZ; hip_r absent — pre-0035 pair gate → estimated even with hip_mid Y
+    lms_one = {
+        "hip_l": _lm("hip_l", x_m=-0.12, y_m=None, z_m=0.90),
+        "hip_mid": _lm("hip_mid", x_m=0.0, y_m=0.05, z_m=0.90),
+    }
+    pkg_one = build_blockout_skeleton(_report(lms_one))
+    assert _by_id(pkg_one)["pelvis"].source == "estimated"
+    assert _by_id(pkg_one)["pelvis"].y_m == pytest.approx(0.05)
+
+    # Mixed-axis stitch: left X only + right Z only + hip_mid Y → estimated
+    lms_mix = {
+        "hip_l": _lm("hip_l", x_m=-0.12, y_m=None, z_m=None),
+        "hip_r": _lm("hip_r", x_m=None, y_m=None, z_m=0.90),
+        "hip_mid": _lm("hip_mid", x_m=0.0, y_m=0.05, z_m=0.90),
+    }
+    pkg_mix = build_blockout_skeleton(_report(lms_mix))
+    assert _by_id(pkg_mix)["pelvis"].source == "estimated"

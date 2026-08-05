@@ -25,10 +25,11 @@ from typing import Any, Final, Literal, TypeGuard
 from pydantic import BaseModel, ConfigDict, Field
 
 from meshops.proportion.analyze import load_report
+from meshops.proportion.depth_samples import DepthSamplesPackage
 from meshops.proportion.errors import ProportionError
 from meshops.proportion.guides import AXIS_NOTES
 from meshops.proportion.honesty import SKELETON_HONESTY
-from meshops.proportion.models import LandmarkXYZ, ProportionReport
+from meshops.proportion.models import DepthBand, LandmarkXYZ, ProportionReport
 
 SKELETON_SCHEMA_VERSION: Final[Literal["1.0.0"]] = "1.0.0"
 
@@ -192,46 +193,160 @@ def _pick_lm(lms: dict[str, LandmarkXYZ], *ids: str) -> tuple[LandmarkXYZ | None
     return None, None
 
 
-def _coords_from_lm(
-    lm: LandmarkXYZ | None,
+# Joint → (mid landmark ids priority, band ids priority). Arms omitted → None.
+_DEPTH_FAMILY_MAP: Final[dict[str, tuple[tuple[str, ...], tuple[str, ...]]]] = {
+    "pelvis": (("hip_mid",), ("hip",)),
+    "hip_l": (("hip_mid",), ("hip",)),
+    "hip_r": (("hip_mid",), ("hip",)),
+    "spine_low": (("hip_mid", "glute_mid"), ("hip", "glute")),
+    "spine_mid": (("breast_mid", "navel", "hip_mid", "chest_mid"), ("breast", "chest", "hip")),
+    "spine_high": (("chest_mid",), ("chest",)),
+    "shoulder_l": (("chest_mid",), ("chest",)),
+    "shoulder_r": (("chest_mid",), ("chest",)),
+    "neck_base": (("chest_mid",), ("chest",)),
+    "head": (("cranial_mid",), ("cranial",)),
+    "chin": (("cranial_mid",), ("cranial",)),
+    "crown": (("cranial_mid",), ("cranial",)),
+    "neck_top": (("cranial_mid",), ("cranial",)),
+    "knee_l": (("thigh_mid",), ("thigh",)),
+    "knee_r": (("thigh_mid",), ("thigh",)),
+    "ankle_l": (("calf_mid", "foot_mid"), ("calf", "foot")),
+    "ankle_r": (("calf_mid", "foot_mid"), ("calf", "foot")),
+    "heel_l": (("foot_mid",), ("foot",)),
+    "heel_r": (("foot_mid",), ("foot",)),
+    "toe_l": (("foot_mid",), ("foot",)),
+    "toe_r": (("foot_mid",), ("foot",)),
+}
+
+
+def _depth_family_for_joint(
     joint_id: str,
+) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+    """Return (mid_ids priority, band_ids priority) or None for arm joints with no band."""
+    if joint_id.startswith(("elbow_", "wrist_", "hand_")):
+        return None
+    return _DEPTH_FAMILY_MAP.get(joint_id)
+
+
+def _resolve_depth_y_m(
+    joint_id: str,
+    lms: dict[str, LandmarkXYZ],
+    bands: list[DepthBand] | None,
+    samples: DepthSamplesPackage | None,
+    height_m: float | None,
+) -> tuple[float, str] | None:
+    """(y_m, source_id) or None. Order: mid → band*H → samples (R1)."""
+    family = _depth_family_for_joint(joint_id)
+    if family is None:
+        return None
+    mid_ids, band_ids = family
+
+    # 2. Named mid landmark from report landmarks_xyz
+    for mid_id in mid_ids:
+        lm = lms.get(mid_id)
+        if lm is not None and _finite(lm.y_m):
+            return float(lm.y_m), mid_id
+
+    # 3. depth_bands: y_m = y_mid * height_m when height finite nonzero
+    if bands and height_m is not None and math.isfinite(height_m) and height_m != 0.0:
+        by_id = {b.band_id: b for b in bands}
+        for bid in band_ids:
+            band = by_id.get(bid)
+            if band is not None and _finite(band.y_mid):
+                y_m = float(band.y_mid) * float(height_m)
+                if math.isfinite(y_m):
+                    return y_m, bid
+
+    # 4. Optional depth_at_landmarks.json samples
+    if samples is not None:
+        sample_list = samples.samples
+        # Prefer role=landmark matching mid id
+        for mid_id in mid_ids:
+            for s in sample_list:
+                if s.role == "landmark" and s.id == mid_id and _finite(s.y_m):
+                    return float(s.y_m), mid_id
+        # Else band_mid / band_id family
+        for bid in band_ids:
+            for s in sample_list:
+                if not _finite(s.y_m):
+                    continue
+                if s.role == "band_mid" and (s.band_id == bid or s.id == f"band_{bid}_mid"):
+                    return float(s.y_m), bid
+                if s.band_id == bid and s.role in ("band_mid", "band_span"):
+                    return float(s.y_m), bid
+                if s.id == bid:
+                    return float(s.y_m), bid
+
+    return None
+
+
+def _try_depth_y(
+    joint_id: str,
+    y: float | None,
+    y_from_lm: bool,
+    *,
+    lms: dict[str, LandmarkXYZ],
+    bands: list[DepthBand] | None,
+    samples: DepthSamplesPackage | None,
+    height_m: float | None,
     messages: list[str],
-) -> tuple[float | None, float | None, float | None, JointSource, str | None]:
-    """Resolve landmark meters -> joint coords + source (AI1 A / B1 no flip)."""
+) -> tuple[float | None, bool, bool]:
+    """If y missing, try depth ladder before invent. Returns (y, y_from_lm, y_from_depth)."""
+    if y is not None:
+        return y, y_from_lm, False
+    got = _resolve_depth_y_m(joint_id, lms, bands, samples, height_m)
+    if got is not None:
+        y_m, src_id = got
+        messages.append(f"joint {joint_id}: y_m from {src_id} (depth)")
+        return y_m, False, True
+    return None, False, False
+
+
+def _joint_source(
+    x: float | None,
+    y: float | None,
+    z: float | None,
+    *,
+    x_from_lm: bool,
+    y_from_lm: bool,
+    y_from_depth: bool,
+    z_from_lm: bool,
+) -> JointSource:
+    """R3: measured only when full XYZ + real X/Z + direct/depth Y."""
+    if not _any_finite_xyz(x, y, z):
+        return "missing"
+    if _all_finite_xyz(x, y, z) and x_from_lm and z_from_lm and (y_from_lm or y_from_depth):
+        return "measured"
+    return "estimated"
+
+
+def _raw_coords_from_lm(
+    lm: LandmarkXYZ | None,
+) -> tuple[float | None, float | None, float | None, str | None, bool, bool, bool]:
+    """Landmark meters as-is (B1 no flip). No invent. x/y/z_from flags."""
     if lm is None:
-        return None, None, None, "missing", None
+        return None, None, None, None, False, False, False
     xm: float | None = lm.x_m if _finite(lm.x_m) else None
     ym: float | None = lm.y_m if _finite(lm.y_m) else None
     zm: float | None = lm.z_m if _finite(lm.z_m) else None
-    lid = lm.id
-
-    if xm is not None and ym is not None and zm is not None:
-        return xm, ym, zm, "measured", lid
-
-    # XZ measured, Y missing -> front-plane estimate (never measured).
-    if xm is not None and zm is not None and ym is None:
-        messages.append(f"joint {joint_id}: front-plane placement (y_m estimated)")
-        return xm, 0.0, zm, "estimated", lid
-
-    # Partial coords kept as-is; remaining filled by chain/stature later.
-    if _any_finite_xyz(xm, ym, zm):
-        messages.append(f"joint {joint_id}: partial landmark coords (source=estimated)")
-        return xm, ym, zm, "estimated", lid
-
-    return None, None, None, "missing", lid
+    return xm, ym, zm, lm.id, xm is not None, ym is not None, zm is not None
 
 
-def _mean_pair_xyz(
+def _raw_mean_pair_xyz(
     lms: dict[str, LandmarkXYZ],
     left_id: str,
     right_id: str,
-    messages: list[str],
-    joint_id: str,
-) -> tuple[float | None, float | None, float | None, JointSource, str | None]:
+) -> tuple[float | None, float | None, float | None, str | None, bool, bool, bool]:
+    """Mean of left/right landmarks without inventing axes.
+
+    Coordinates may come from one side alone, but R3 provenance flags are True
+    only when **both** sides contribute that axis (pre-0035 pair measured gate).
+    One-sided or mixed-axis stitch → coords usable, flags false → estimated.
+    """
     left = lms.get(left_id)
     right = lms.get(right_id)
     if left is None and right is None:
-        return None, None, None, "missing", None
+        return None, None, None, None, False, False, False
 
     def _parts(lm: LandmarkXYZ | None) -> tuple[float | None, float | None, float | None]:
         if lm is None:
@@ -258,25 +373,11 @@ def _mean_pair_xyz(
         if left is not None and right is not None
         else (left_id if left is not None else right_id)
     )
-
-    if xm is not None and ym is not None and zm is not None:
-        # Mean of measured pair — only measured if both sides fully finite.
-        if (
-            left is not None
-            and right is not None
-            and _all_finite_xyz(lx, ly, lz)
-            and _all_finite_xyz(rx, ry, rz)
-        ):
-            return xm, ym, zm, "measured", lid
-        return xm, ym, zm, "estimated", lid
-
-    if xm is not None and zm is not None and ym is None:
-        messages.append(f"joint {joint_id}: front-plane placement (y_m estimated)")
-        return xm, 0.0, zm, "estimated", lid
-
-    if _any_finite_xyz(xm, ym, zm):
-        return xm, ym, zm, "estimated", lid
-    return None, None, None, "missing", lid
+    # R3 / pre-0035: pair mean is landmark-backed only when both sides contribute.
+    x_from = lx is not None and rx is not None
+    y_from = ly is not None and ry is not None
+    z_from = lz is not None and rz is not None
+    return (xm, ym, zm, lid, x_from, y_from, z_from)
 
 
 def _stature_z(height_m: float | None, key: str) -> float | None:
@@ -357,32 +458,49 @@ def _resolve_pelvis(
     lms: dict[str, LandmarkXYZ],
     height_m: float | None,
     messages: list[str],
+    *,
+    bands: list[DepthBand] | None = None,
+    samples: DepthSamplesPackage | None = None,
 ) -> None:
     # Prefer mean hips, else crotch_pubic / belt_hip.
-    xm, ym, zm, src, lid = _mean_pair_xyz(lms, "hip_l", "hip_r", messages, "pelvis")
+    xm, ym, zm, lid, x_from, y_from, z_from = _raw_mean_pair_xyz(lms, "hip_l", "hip_r")
     if not _any_finite_xyz(xm, ym, zm):
         lm, lid2 = _pick_lm(lms, "crotch_pubic", "belt_hip")
-        xm, ym, zm, src, lid = _coords_from_lm(lm, "pelvis", messages)
+        xm, ym, zm, lid, x_from, y_from, z_from = _raw_coords_from_lm(lm)
         if lid is None:
             lid = lid2
 
-    if not _all_finite_xyz(xm, ym, zm):
+    ym, y_from, y_depth = _try_depth_y(
+        "pelvis",
+        ym,
+        y_from,
+        lms=lms,
+        bands=bands,
+        samples=samples,
+        height_m=height_m,
+        messages=messages,
+    )
+
+    if zm is None:
         sz = _stature_z(height_m, "pelvis")
         if sz is not None:
-            if not _any_finite_xyz(xm, ym, zm):
+            if not _any_finite_xyz(xm, ym, None):
                 messages.append("joint pelvis: estimated from stature frac ~0.50")
-            xm, ym, zm = _fill_missing_axis(xm, ym, zm, default_z=sz)
-            if src == "missing" or (src == "measured" and not _all_finite_xyz(xm, ym, zm)):
-                src = "estimated"
-
-    # Midline pelvis x≈0 when synthesizing from stature only.
-    if src != "measured" and xm is None:
+            zm = sz
+            z_from = False
+    if xm is None:
+        # Synthesized midline — not landmark X (R3).
         xm = 0.0
+        x_from = False
     if ym is None and _finite(zm):
         ym = 0.0
-        if src == "measured":
-            src = "estimated"
+        y_from = False
+        y_depth = False
+        messages.append("joint pelvis: front-plane placement (y_m estimated)")
 
+    src = _joint_source(
+        xm, ym, zm, x_from_lm=x_from, y_from_lm=y_from, y_from_depth=y_depth, z_from_lm=z_from
+    )
     _set_joint(
         joints,
         id="pelvis",
@@ -391,7 +509,7 @@ def _resolve_pelvis(
         x_m=xm,
         y_m=ym,
         z_m=zm,
-        source=src if _any_finite_xyz(xm, ym, zm) else "missing",
+        source=src,
         landmark_id=lid,
     )
     if joints["pelvis"].source == "missing":
@@ -403,29 +521,46 @@ def _resolve_spine(
     lms: dict[str, LandmarkXYZ],
     height_m: float | None,
     messages: list[str],
+    *,
+    bands: list[DepthBand] | None = None,
+    samples: DepthSamplesPackage | None = None,
 ) -> None:
-    """B7 spine ladder: mid<-navel; high<-chest mean z; low<-belt_hip or mid pelvis->mid."""
+    """B7 spine ladder: mid<-navel; high<-chest_mid/mean z; low<-belt_hip or mid pelvis->mid."""
     pelvis = joints.get("pelvis")
     py = pelvis.y_m if pelvis is not None and _finite(pelvis.y_m) else 0.0
     pz = pelvis.z_m if pelvis is not None and _finite(pelvis.z_m) else None
 
-    # --- spine_mid ← navel z @ x=0 ---
+    # --- spine_mid ← navel z @ x=0; depth Y from breast_mid etc. ---
     navel, navel_id = _pick_lm(lms, "navel")
-    mx, my, mz, msrc, mlid = _coords_from_lm(navel, "spine_mid", messages)
-    if mz is None:
-        mz = _stature_z(height_m, "spine_mid")
-        if mz is not None and msrc == "missing":
-            messages.append("joint spine_mid: estimated from stature frac ~0.62")
-            msrc = "estimated"
-    if mx is None:
-        mx = 0.0
-    if my is None and mz is not None:
-        my = py
-        if msrc == "measured":
-            msrc = "estimated"
-            messages.append("joint spine_mid: front-plane placement (y_m estimated)")
+    mx, my, mz, mlid, mx_from, my_from, mz_from = _raw_coords_from_lm(navel)
     if navel is not None and mlid is None:
         mlid = navel_id
+    my, my_from, my_depth = _try_depth_y(
+        "spine_mid",
+        my,
+        my_from,
+        lms=lms,
+        bands=bands,
+        samples=samples,
+        height_m=height_m,
+        messages=messages,
+    )
+    if mz is None:
+        mz = _stature_z(height_m, "spine_mid")
+        if mz is not None:
+            messages.append("joint spine_mid: estimated from stature frac ~0.62")
+            mz_from = False
+    if mx is None:
+        mx = 0.0
+        mx_from = False
+    if my is None and mz is not None:
+        my = py
+        my_from = False
+        my_depth = False
+        messages.append("joint spine_mid: front-plane placement (y_m estimated)")
+    msrc = _joint_source(
+        mx, my, mz, x_from_lm=mx_from, y_from_lm=my_from, y_from_depth=my_depth, z_from_lm=mz_from
+    )
     _set_joint(
         joints,
         id="spine_mid",
@@ -434,42 +569,96 @@ def _resolve_spine(
         x_m=mx,
         y_m=my,
         z_m=mz,
-        source=msrc if _any_finite_xyz(mx, my, mz) else "missing",
+        source=msrc,
         landmark_id=mlid or navel_id,
     )
 
-    # --- spine_high ← mean z chest_front/chest_back/underbust @ x=0 ---
-    chest_ids = ("chest_front", "chest_back", "underbust")
-    zs: list[float] = []
-    ys: list[float] = []
-    used: list[str] = []
-    for cid in chest_ids:
-        lm = lms.get(cid)
-        if lm is None:
-            continue
-        if _finite(lm.z_m):
-            zs.append(lm.z_m)
-            used.append(cid)
-        if _finite(lm.y_m):
-            ys.append(lm.y_m)
-    hx: float | None = 0.0
-    hy: float | None = (sum(ys) / len(ys)) if ys else None
-    hz: float | None = (sum(zs) / len(zs)) if zs else None
-    # Chest landmarks rarely have full XYZ at x=0; treat ladder z mean as estimated.
-    hsrc: JointSource
-    if zs:
-        hsrc = "estimated"
-        if hy is None:
+    # --- spine_high: prefer chest_mid (R4); else mean z chest front/back ---
+    cm = lms.get("chest_mid")
+    hx: float | None
+    hy: float | None
+    hz: float | None
+    hlid: str | None
+    hx_from: bool
+    hy_from: bool
+    hz_from: bool
+    hy_depth: bool
+    if cm is not None and _any_finite_xyz(cm.x_m, cm.y_m, cm.z_m):
+        hx, hy, hz, hlid, hx_from, hy_from, hz_from = _raw_coords_from_lm(cm)
+        hy, hy_from, hy_depth = _try_depth_y(
+            "spine_high",
+            hy,
+            hy_from,
+            lms=lms,
+            bands=bands,
+            samples=samples,
+            height_m=height_m,
+            messages=messages,
+        )
+        if hx is None:
+            hx = 0.0
+            hx_from = False
+        if hz is None:
+            hz = _stature_z(height_m, "spine_high")
+            if hz is not None:
+                messages.append("joint spine_high: estimated from stature frac ~0.72")
+                hz_from = False
+        if hy is None and hz is not None:
             hy = py
+            hy_from = False
+            hy_depth = False
             messages.append("joint spine_high: front-plane placement (y_m estimated)")
     else:
-        hz = _stature_z(height_m, "spine_high")
-        if hz is not None:
-            messages.append("joint spine_high: estimated from stature frac ~0.72")
-            hsrc = "estimated"
-            hy = py
+        chest_ids = ("chest_front", "chest_back", "underbust")
+        zs: list[float] = []
+        ys: list[float] = []
+        used: list[str] = []
+        for cid in chest_ids:
+            lm = lms.get(cid)
+            if lm is None:
+                continue
+            if _finite(lm.z_m):
+                zs.append(lm.z_m)
+                used.append(cid)
+            if _finite(lm.y_m):
+                ys.append(lm.y_m)
+        hx = 0.0
+        hx_from = False  # synthesized midline x=0 (R3)
+        hy = (sum(ys) / len(ys)) if ys else None
+        hy_from = hy is not None
+        hy_depth = False
+        hz = (sum(zs) / len(zs)) if zs else None
+        hz_from = hz is not None
+        hlid = "+".join(used) if used else None
+        if hy is None:
+            hy, hy_from, hy_depth = _try_depth_y(
+                "spine_high",
+                None,
+                False,
+                lms=lms,
+                bands=bands,
+                samples=samples,
+                height_m=height_m,
+                messages=messages,
+            )
+        if zs:
+            if hy is None:
+                hy = py
+                hy_from = False
+                hy_depth = False
+                messages.append("joint spine_high: front-plane placement (y_m estimated)")
         else:
-            hsrc = "missing"
+            hz = _stature_z(height_m, "spine_high")
+            if hz is not None:
+                messages.append("joint spine_high: estimated from stature frac ~0.72")
+                hz_from = False
+                if hy is None:
+                    hy = py
+                    hy_from = False
+                    hy_depth = False
+    hsrc = _joint_source(
+        hx, hy, hz, x_from_lm=hx_from, y_from_lm=hy_from, y_from_depth=hy_depth, z_from_lm=hz_from
+    )
     _set_joint(
         joints,
         id="spine_high",
@@ -478,37 +667,71 @@ def _resolve_spine(
         x_m=hx,
         y_m=hy,
         z_m=hz,
-        source=hsrc if _any_finite_xyz(hx, hy, hz) else "missing",
-        landmark_id="+".join(used) if used else None,
+        source=hsrc,
+        landmark_id=hlid,
     )
 
     # --- spine_low ← belt_hip or between pelvis and spine_mid ---
     belt, belt_id = _pick_lm(lms, "belt_hip")
-    lx, ly, lz, lsrc, llid = _coords_from_lm(belt, "spine_low", messages)
-    if not _any_finite_xyz(lx, ly, lz):
+    lx, ly, lz, llid, lx_from, ly_from, lz_from = _raw_coords_from_lm(belt)
+    ly, ly_from, ly_depth = _try_depth_y(
+        "spine_low",
+        ly,
+        ly_from,
+        lms=lms,
+        bands=bands,
+        samples=samples,
+        height_m=height_m,
+        messages=messages,
+    )
+    if not _any_finite_xyz(lx, None, lz):
+        # No belt XZ — mid pelvis→spine_mid or stature (X/Z not landmark-backed).
         sm = joints["spine_mid"]
         if pz is not None and _finite(sm.z_m):
             lx = 0.0
-            ly = py
+            lx_from = False
+            if ly is None:
+                ly = py
+                ly_from = False
+                ly_depth = False
             lz = (pz + sm.z_m) / 2.0
-            lsrc = "estimated"
+            lz_from = False
             llid = None
             messages.append("joint spine_low: estimated mid pelvis->spine_mid")
         else:
             lz = _stature_z(height_m, "spine_low")
             if lz is not None:
                 lx = 0.0
-                ly = py
-                lsrc = "estimated"
+                lx_from = False
+                if ly is None:
+                    ly = py
+                    ly_from = False
+                    ly_depth = False
+                lz_from = False
                 messages.append("joint spine_low: estimated from stature frac ~0.55")
     else:
         if lx is None:
             lx = 0.0
+            lx_from = False
+        if lz is None:
+            sm = joints["spine_mid"]
+            if pz is not None and _finite(sm.z_m):
+                lz = (pz + sm.z_m) / 2.0
+                lz_from = False
+                messages.append("joint spine_low: estimated mid pelvis->spine_mid")
+            else:
+                lz = _stature_z(height_m, "spine_low")
+                if lz is not None:
+                    lz_from = False
+                    messages.append("joint spine_low: estimated from stature frac ~0.55")
         if ly is None and lz is not None:
             ly = py
-            if lsrc == "measured":
-                lsrc = "estimated"
-                messages.append("joint spine_low: front-plane placement (y_m estimated)")
+            ly_from = False
+            ly_depth = False
+            messages.append("joint spine_low: front-plane placement (y_m estimated)")
+    lsrc = _joint_source(
+        lx, ly, lz, x_from_lm=lx_from, y_from_lm=ly_from, y_from_depth=ly_depth, z_from_lm=lz_from
+    )
     _set_joint(
         joints,
         id="spine_low",
@@ -517,7 +740,7 @@ def _resolve_spine(
         x_m=lx,
         y_m=ly,
         z_m=lz,
-        source=lsrc if _any_finite_xyz(lx, ly, lz) else "missing",
+        source=lsrc,
         landmark_id=llid or belt_id,
     )
     # Fix spine_mid parent now that spine_low exists.
@@ -529,36 +752,59 @@ def _resolve_neck_head(
     lms: dict[str, LandmarkXYZ],
     height_m: float | None,
     messages: list[str],
+    *,
+    bands: list[DepthBand] | None = None,
+    samples: DepthSamplesPackage | None = None,
 ) -> None:
     sh = joints.get("spine_high")
     shy = sh.y_m if sh is not None and _finite(sh.y_m) else 0.0
 
     # neck_base: neck or mean shoulder @ x=0
+    # Depth Y must not suppress X/Z fills (0035 P2 — limb-style independent axis fill).
     neck_lm, neck_lid = _pick_lm(lms, "neck")
-    nx, ny, nz, nsrc, nlid = _coords_from_lm(neck_lm, "neck_base", messages)
-    if not _any_finite_xyz(nx, ny, nz):
-        _sx, sy, sz, _ssrc, slid = _mean_pair_xyz(
-            lms, "shoulder_l", "shoulder_r", messages, "neck_base"
+    nx, ny, nz, nlid, nx_from, ny_from, nz_from = _raw_coords_from_lm(neck_lm)
+    ny, ny_from, ny_depth = _try_depth_y(
+        "neck_base",
+        ny,
+        ny_from,
+        lms=lms,
+        bands=bands,
+        samples=samples,
+        height_m=height_m,
+        messages=messages,
+    )
+    if nz is None:
+        _sx, sy, sz, slid, _sx_from, sy_from, sz_from = _raw_mean_pair_xyz(
+            lms, "shoulder_l", "shoulder_r"
         )
         if sz is not None:
-            nx, ny, nz = 0.0, (sy if sy is not None else shy), sz
-            nsrc = "estimated"
-            nlid = slid
+            if nx is None:
+                nx, nx_from = 0.0, False
+            if ny is None:
+                ny = sy if sy is not None else shy
+                ny_from = sy_from if sy is not None else False
+                ny_depth = False
+            nz, nz_from = sz, sz_from
+            if nlid is None:
+                nlid = slid
             messages.append("joint neck_base: estimated from mean shoulder z @ x=0")
         else:
             nz = _stature_z(height_m, "neck_base")
             if nz is not None:
-                nx, ny = 0.0, shy
-                nsrc = "estimated"
+                if nx is None:
+                    nx, nx_from = 0.0, False
+                if ny is None:
+                    ny, ny_from, ny_depth = shy, False, False
+                nz_from = False
                 messages.append("joint neck_base: estimated from stature frac ~0.85")
-    else:
-        if nx is None:
-            nx = 0.0
-        if ny is None and nz is not None:
-            ny = shy
-            if nsrc == "measured":
-                nsrc = "estimated"
-                messages.append("joint neck_base: front-plane placement (y_m estimated)")
+    if nx is None:
+        nx, nx_from = 0.0, False
+    if ny is None and nz is not None:
+        ny, ny_from, ny_depth = shy, False, False
+        messages.append("joint neck_base: front-plane placement (y_m estimated)")
+    nsrc = _joint_source(
+        nx, ny, nz, x_from_lm=nx_from, y_from_lm=ny_from, y_from_depth=ny_depth, z_from_lm=nz_from
+    )
     _set_joint(
         joints,
         id="neck_base",
@@ -567,27 +813,40 @@ def _resolve_neck_head(
         x_m=nx,
         y_m=ny,
         z_m=nz,
-        source=nsrc if _any_finite_xyz(nx, ny, nz) else "missing",
+        source=nsrc,
         landmark_id=nlid or neck_lid,
     )
 
-    # head ← cranial_vertex → hair_crown (B6)
+    # head ← cranial_vertex → hair_crown (B6); depth Y does not suppress Z fill
     head_lm, head_lid = _pick_lm(lms, "cranial_vertex", "hair_crown")
-    hx, hy, hz, hsrc, hlid = _coords_from_lm(head_lm, "head", messages)
-    if not _any_finite_xyz(hx, hy, hz):
+    hx, hy, hz, hlid, hx_from, hy_from, hz_from = _raw_coords_from_lm(head_lm)
+    hy, hy_from, hy_depth = _try_depth_y(
+        "head",
+        hy,
+        hy_from,
+        lms=lms,
+        bands=bands,
+        samples=samples,
+        height_m=height_m,
+        messages=messages,
+    )
+    if hz is None:
         hz = _stature_z(height_m, "head")
         if hz is not None:
-            hx, hy = 0.0, shy
-            hsrc = "estimated"
+            if hx is None:
+                hx, hx_from = 0.0, False
+            if hy is None:
+                hy, hy_from, hy_depth = shy, False, False
+            hz_from = False
             messages.append("joint head: estimated from stature frac ~0.96")
-    else:
-        if hx is None:
-            hx = 0.0
-        if hy is None and hz is not None:
-            hy = 0.0
-            if hsrc == "measured":
-                hsrc = "estimated"
-                messages.append("joint head: front-plane placement (y_m estimated)")
+    if hx is None:
+        hx, hx_from = 0.0, False
+    if hy is None and hz is not None:
+        hy, hy_from, hy_depth = 0.0, False, False
+        messages.append("joint head: front-plane placement (y_m estimated)")
+    hsrc = _joint_source(
+        hx, hy, hz, x_from_lm=hx_from, y_from_lm=hy_from, y_from_depth=hy_depth, z_from_lm=hz_from
+    )
     _set_joint(
         joints,
         id="head",
@@ -596,34 +855,56 @@ def _resolve_neck_head(
         x_m=hx,
         y_m=hy,
         z_m=hz,
-        source=hsrc if _any_finite_xyz(hx, hy, hz) else "missing",
+        source=hsrc,
         landmark_id=hlid or head_lid,
     )
 
-    # neck_top: estimate between neck_base and head if no landmark
+    # neck_top: estimate between neck_base and head if no landmark; depth Y independent
     ntop_lm, ntop_lid = _pick_lm(lms, "neck_top")
-    tx, ty, tz, tsrc, tlid = _coords_from_lm(ntop_lm, "neck_top", messages)
-    if not _any_finite_xyz(tx, ty, tz):
+    tx, ty, tz, tlid, tx_from, ty_from, tz_from = _raw_coords_from_lm(ntop_lm)
+    ty, ty_from, ty_depth = _try_depth_y(
+        "neck_top",
+        ty,
+        ty_from,
+        lms=lms,
+        bands=bands,
+        samples=samples,
+        height_m=height_m,
+        messages=messages,
+    )
+    if tz is None and not _any_finite_xyz(tx, None, tz):
+        # No landmark XZ — prefer mid neck_base→head when both full; else stature Z.
         nb = joints["neck_base"]
         hd = joints["head"]
         if _joint_xyz(nb) and _joint_xyz(hd):
             mid = _mid3(_joint_xyz(nb), _joint_xyz(hd))  # type: ignore[arg-type]
-            tx, ty, tz = mid
-            tsrc = "estimated"
+            if tx is None:
+                tx, tx_from = mid[0], False
+            if ty is None:
+                ty, ty_from, ty_depth = mid[1], False, False
+            tz, tz_from = mid[2], False
             messages.append("joint neck_top: estimated mid neck_base→head")
         else:
             tz = _stature_z(height_m, "neck_top")
             if tz is not None:
-                tx, ty = 0.0, shy
-                tsrc = "estimated"
+                if tx is None:
+                    tx, tx_from = 0.0, False
+                if ty is None:
+                    ty, ty_from, ty_depth = shy, False, False
+                tz_from = False
                 messages.append("joint neck_top: estimated from stature frac ~0.88")
-    else:
-        if tx is None:
-            tx = 0.0
-        if ty is None and tz is not None:
-            ty = shy
-            if tsrc == "measured":
-                tsrc = "estimated"
+    elif tz is None:
+        tz = _stature_z(height_m, "neck_top")
+        if tz is not None:
+            tz_from = False
+            messages.append("joint neck_top: estimated from stature frac ~0.88")
+    if tx is None:
+        tx, tx_from = 0.0, False
+    if ty is None and tz is not None:
+        ty, ty_from, ty_depth = shy, False, False
+    tsrc = _joint_source(
+        tx, ty, tz, x_from_lm=tx_from, y_from_lm=ty_from, y_from_depth=ty_depth, z_from_lm=tz_from
+    )
     _set_joint(
         joints,
         id="neck_top",
@@ -632,30 +913,44 @@ def _resolve_neck_head(
         x_m=tx,
         y_m=ty,
         z_m=tz,
-        source=tsrc if _any_finite_xyz(tx, ty, tz) else "missing",
+        source=tsrc,
         landmark_id=tlid or ntop_lid,
     )
     # head parent already neck_top
     joints["head"] = joints["head"].model_copy(update={"parent": "neck_top"})
 
-    # chin ← chin parent=head
+    # chin ← chin parent=head; depth Y does not suppress Z fill
     chin_lm, chin_lid = _pick_lm(lms, "chin")
-    cx, cy, cz, csrc, clid = _coords_from_lm(chin_lm, "chin", messages)
-    if not _any_finite_xyz(cx, cy, cz):
+    cx, cy, cz, clid, cx_from, cy_from, cz_from = _raw_coords_from_lm(chin_lm)
+    cy, cy_from, cy_depth = _try_depth_y(
+        "chin",
+        cy,
+        cy_from,
+        lms=lms,
+        bands=bands,
+        samples=samples,
+        height_m=height_m,
+        messages=messages,
+    )
+    if cz is None:
         cz = _stature_z(height_m, "chin")
         if cz is not None:
             head_y = joints["head"].y_m
-            cx, cy = 0.0, (head_y if _finite(head_y) else 0.0)
-            csrc = "estimated"
+            if cx is None:
+                cx, cx_from = 0.0, False
+            if cy is None:
+                cy = head_y if _finite(head_y) else 0.0
+                cy_from, cy_depth = False, False
+            cz_from = False
             messages.append("joint chin: estimated from stature frac ~0.92")
-    else:
-        if cx is None:
-            cx = 0.0
-        if cy is None and cz is not None:
-            cy = 0.0
-            if csrc == "measured":
-                csrc = "estimated"
-                messages.append("joint chin: front-plane placement (y_m estimated)")
+    if cx is None:
+        cx, cx_from = 0.0, False
+    if cy is None and cz is not None:
+        cy, cy_from, cy_depth = 0.0, False, False
+        messages.append("joint chin: front-plane placement (y_m estimated)")
+    csrc = _joint_source(
+        cx, cy, cz, x_from_lm=cx_from, y_from_lm=cy_from, y_from_depth=cy_depth, z_from_lm=cz_from
+    )
     _set_joint(
         joints,
         id="chin",
@@ -664,34 +959,61 @@ def _resolve_neck_head(
         x_m=cx,
         y_m=cy,
         z_m=cz,
-        source=csrc if _any_finite_xyz(cx, cy, cz) else "missing",
+        source=csrc,
         landmark_id=clid or chin_lid,
     )
 
-    # crown ← hair_crown else copy head + message (B6)
+    # crown ← hair_crown else copy head + message (B6); depth Y independent of Z fill
     crown_lm, crown_lid = _pick_lm(lms, "hair_crown")
-    crx, cry, crz, crsrc, crlid = _coords_from_lm(crown_lm, "crown", messages)
-    if not _any_finite_xyz(crx, cry, crz):
+    crx, cry, crz, crlid, crx_from, cry_from, crz_from = _raw_coords_from_lm(crown_lm)
+    cry, cry_from, cry_depth = _try_depth_y(
+        "crown",
+        cry,
+        cry_from,
+        lms=lms,
+        bands=bands,
+        samples=samples,
+        height_m=height_m,
+        messages=messages,
+    )
+    if crz is None and not _any_finite_xyz(crx, None, crz):
         hd = joints["head"]
         if _any_finite_xyz(hd.x_m, hd.y_m, hd.z_m):
-            crx, cry, crz = hd.x_m, hd.y_m, hd.z_m
-            crsrc = "estimated"
+            if crx is None:
+                crx, crx_from = hd.x_m, False
+            if cry is None:
+                cry, cry_from, cry_depth = hd.y_m, False, False
+            crz, crz_from = hd.z_m, False
             crlid = hd.landmark_id
             messages.append("joint crown: copied from head (no hair_crown landmark)")
         else:
             crz = _stature_z(height_m, "crown")
             if crz is not None:
-                crx, cry = 0.0, 0.0
-                crsrc = "estimated"
+                if crx is None:
+                    crx = 0.0
+                if cry is None:
+                    cry = 0.0
+                crx_from, cry_from, cry_depth, crz_from = False, False, False, False
                 messages.append("joint crown: estimated from stature frac ~1.00")
-    else:
-        if crx is None:
-            crx = 0.0
-        if cry is None and crz is not None:
-            cry = 0.0
-            if crsrc == "measured":
-                crsrc = "estimated"
-                messages.append("joint crown: front-plane placement (y_m estimated)")
+    elif crz is None:
+        crz = _stature_z(height_m, "crown")
+        if crz is not None:
+            crz_from = False
+            messages.append("joint crown: estimated from stature frac ~1.00")
+    if crx is None:
+        crx, crx_from = 0.0, False
+    if cry is None and crz is not None:
+        cry, cry_from, cry_depth = 0.0, False, False
+        messages.append("joint crown: front-plane placement (y_m estimated)")
+    crsrc = _joint_source(
+        crx,
+        cry,
+        crz,
+        x_from_lm=crx_from,
+        y_from_lm=cry_from,
+        y_from_depth=cry_depth,
+        z_from_lm=crz_from,
+    )
     _set_joint(
         joints,
         id="crown",
@@ -700,7 +1022,7 @@ def _resolve_neck_head(
         x_m=crx,
         y_m=cry,
         z_m=crz,
-        source=crsrc if _any_finite_xyz(crx, cry, crz) else "missing",
+        source=crsrc,
         landmark_id=crlid or crown_lid,
     )
 
@@ -713,6 +1035,8 @@ def _resolve_limb_side(
     *,
     side: Literal["l", "r"],
     sign: float,
+    bands: list[DepthBand] | None = None,
+    samples: DepthSamplesPackage | None = None,
 ) -> None:
     """Shoulder→elbow→wrist→hand and hip→knee→ankle→heel/toe for one side."""
     s = side
@@ -734,25 +1058,52 @@ def _resolve_limb_side(
         default_hip_x = sign * _HIP_HALF_WIDTH_FRAC * float(height_m)
     default_arm_y = _A_POSE_ARM_Y_FRAC * float(height_m) if height_m is not None else 0.0
 
+    def _depth_y(jid: str, y: float | None, y_from: bool) -> tuple[float | None, bool, bool]:
+        return _try_depth_y(
+            jid,
+            y,
+            y_from,
+            lms=lms,
+            bands=bands,
+            samples=samples,
+            height_m=height_m,
+            messages=messages,
+        )
+
     # --- shoulder ---
     lm, lid = _pick_lm(lms, sh_id)
-    x, y, z, src, lid2 = _coords_from_lm(lm, sh_id, messages)
+    x, y, z, lid2, x_from, y_from, z_from = _raw_coords_from_lm(lm)
     lid = lid2 or lid
+    y, y_from, y_depth = _depth_y(sh_id, y, y_from)
     if not _all_finite_xyz(x, y, z):
-        sz = z if z is not None else _stature_z(height_m, "shoulder")
+        if z is None:
+            z = _stature_z(height_m, "shoulder")
+            if z is not None:
+                z_from = False
         if x is None and default_sh_x is not None:
             x = default_sh_x
-        if y is None and sz is not None:
+            x_from = False
+        if y is None and z is not None:
             y = default_arm_y
-            if src == "measured":
-                src = "estimated"
-                messages.append(f"joint {sh_id}: front-plane placement (y_m estimated)")
-            elif src == "missing" and sz is not None:
-                messages.append(f"joint {sh_id}: estimated from stature/lateral defaults")
-                src = "estimated"
-        z = sz
-        if src == "missing" and _any_finite_xyz(x, y, z):
-            src = "estimated"
+            y_from = False
+            y_depth = False
+            messages.append(f"joint {sh_id}: front-plane placement (y_m estimated)")
+        elif y is None and z is None and x is None and default_sh_x is not None:
+            messages.append(f"joint {sh_id}: estimated from stature/lateral defaults")
+    src = _joint_source(
+        x, y, z, x_from_lm=x_from, y_from_lm=y_from, y_from_depth=y_depth, z_from_lm=z_from
+    )
+    if (
+        src == "estimated"
+        and not _any_finite_xyz(
+            lm.x_m if lm else None, lm.y_m if lm else None, lm.z_m if lm else None
+        )
+        and _any_finite_xyz(x, y, z)
+        and z is not None
+        and (not z_from or not x_from)
+        and not any(f"joint {sh_id}: estimated from stature" in m for m in messages)
+    ):
+        messages.append(f"joint {sh_id}: estimated from stature/lateral defaults")
     _set_joint(
         joints,
         id=sh_id,
@@ -761,30 +1112,38 @@ def _resolve_limb_side(
         x_m=x,
         y_m=y,
         z_m=z,
-        source=src if _any_finite_xyz(x, y, z) else "missing",
+        source=src,
         landmark_id=lid,
     )
     if joints[sh_id].source == "missing":
         messages.append(f"joint {sh_id}: missing")
 
-    # --- wrist (needed before elbow mid) ---
+    # --- wrist (needed before elbow mid); arms have NO depth band (R2) ---
     lm, lid = _pick_lm(lms, wr_id)
-    x, y, z, src, lid2 = _coords_from_lm(lm, wr_id, messages)
+    x, y, z, lid2, x_from, y_from, z_from = _raw_coords_from_lm(lm)
     lid = lid2 or lid
+    y_depth = False
     if not _all_finite_xyz(x, y, z):
-        sz = z if z is not None else _stature_z(height_m, "wrist")
+        if z is None:
+            z = _stature_z(height_m, "wrist")
+            if z is not None:
+                z_from = False
         shj = joints[sh_id]
         if x is None:
             x = shj.x_m if _finite(shj.x_m) else default_sh_x
-        if y is None and sz is not None:
+            x_from = False
+        if y is None and z is not None:
             y = shj.y_m if _finite(shj.y_m) else default_arm_y
-            if src == "measured":
-                src = "estimated"
-                messages.append(f"joint {wr_id}: front-plane placement (y_m estimated)")
-        z = sz
-        if src == "missing" and _any_finite_xyz(x, y, z):
-            src = "estimated"
+            y_from = False
+            y_depth = False
+            messages.append(f"joint {wr_id}: front-plane placement (y_m estimated)")
+        if not _any_finite_xyz(
+            lm.x_m if lm else None, lm.y_m if lm else None, lm.z_m if lm else None
+        ) and _any_finite_xyz(x, y, z):
             messages.append(f"joint {wr_id}: estimated from stature/chain")
+    src = _joint_source(
+        x, y, z, x_from_lm=x_from, y_from_lm=y_from, y_from_depth=y_depth, z_from_lm=z_from
+    )
     _set_joint(
         joints,
         id=wr_id,
@@ -793,45 +1152,57 @@ def _resolve_limb_side(
         x_m=x,
         y_m=y,
         z_m=z,
-        source=src if _any_finite_xyz(x, y, z) else "missing",
+        source=src,
         landmark_id=lid,
     )
 
-    # --- elbow: landmark or mid shoulder-wrist ---
+    # --- elbow: landmark or mid shoulder-wrist (chain inherit Y allowed; no band) ---
     lm, lid = _pick_lm(lms, el_id)
-    x, y, z, src, lid2 = _coords_from_lm(lm, el_id, messages)
+    x, y, z, lid2, x_from, y_from, z_from = _raw_coords_from_lm(lm)
     lid = lid2 or lid
+    y_depth = False
     if not _all_finite_xyz(x, y, z):
         sh_xyz = _joint_xyz(joints[sh_id])
         wr_xyz = _joint_xyz(joints[wr_id])
         if sh_xyz is not None and wr_xyz is not None and not _any_finite_xyz(x, y, z):
             mid = _mid3(sh_xyz, wr_xyz)
             x, y, z = mid
-            src = "estimated"
+            x_from, y_from, y_depth, z_from = False, False, False, False
             messages.append(f"joint {el_id}: estimated mid shoulder->wrist")
         else:
-            sz = z if z is not None else _stature_z(height_m, "elbow")
+            if z is None:
+                z = _stature_z(height_m, "elbow")
+                if z is not None:
+                    z_from = False
             shx = joints[sh_id].x_m
             shy2 = joints[sh_id].y_m
             if x is None:
                 x = shx if _finite(shx) else default_sh_x
-            if y is None and sz is not None:
+                x_from = False
+            if y is None and z is not None:
                 y = shy2 if _finite(shy2) else default_arm_y
-                if src == "measured":
-                    src = "estimated"
-                    messages.append(f"joint {el_id}: front-plane placement (y_m estimated)")
-            z = sz
-            if src == "missing" and _any_finite_xyz(x, y, z):
-                src = "estimated"
-                messages.append(f"joint {el_id}: estimated from stature/chain")
-            # Partial fill via mid when possible
+                y_from = False
+                y_depth = False
+                messages.append(f"joint {el_id}: front-plane placement (y_m estimated)")
             if sh_xyz is not None and wr_xyz is not None:
                 mid = _mid3(sh_xyz, wr_xyz)
-                x = x if x is not None else mid[0]
-                y = y if y is not None else mid[1]
-                z = z if z is not None else mid[2]
-                if src == "missing":
-                    src = "estimated"
+                if x is None:
+                    x, x_from = mid[0], False
+                if y is None:
+                    y, y_from, y_depth = mid[1], False, False
+                if z is None:
+                    z, z_from = mid[2], False
+            if (
+                not _any_finite_xyz(
+                    lm.x_m if lm else None, lm.y_m if lm else None, lm.z_m if lm else None
+                )
+                and _any_finite_xyz(x, y, z)
+                and not any(f"joint {el_id}:" in m for m in messages)
+            ):
+                messages.append(f"joint {el_id}: estimated from stature/chain")
+    src = _joint_source(
+        x, y, z, x_from_lm=x_from, y_from_lm=y_from, y_from_depth=y_depth, z_from_lm=z_from
+    )
     _set_joint(
         joints,
         id=el_id,
@@ -840,7 +1211,7 @@ def _resolve_limb_side(
         x_m=x,
         y_m=y,
         z_m=z,
-        source=src if _any_finite_xyz(x, y, z) else "missing",
+        source=src,
         landmark_id=lid,
     )
     # wrist parent already elbow
@@ -850,7 +1221,7 @@ def _resolve_limb_side(
     if joints[wr_id].source == "missing":
         messages.append(f"joint {wr_id}: missing")
 
-    # --- hand only if fingertip known (B5) ---
+    # --- hand only if fingertip known (B5); no depth band ---
     tip_lm = lms.get(tip_id)
     if tip_lm is not None and (_finite(tip_lm.x_m) or _finite(tip_lm.y_m) or _finite(tip_lm.z_m)):
         tip_x: float | None = tip_lm.x_m if _finite(tip_lm.x_m) else None
@@ -910,23 +1281,29 @@ def _resolve_limb_side(
 
     # --- hip ---
     lm, lid = _pick_lm(lms, hip_id, f"greater_trochanter_{s}")
-    x, y, z, src, lid2 = _coords_from_lm(lm, hip_id, messages)
+    x, y, z, lid2, x_from, y_from, z_from = _raw_coords_from_lm(lm)
     lid = lid2 or lid
+    y, y_from, y_depth = _depth_y(hip_id, y, y_from)
     if not _all_finite_xyz(x, y, z):
-        sz = z if z is not None else _stature_z(height_m, "hip")
+        if z is None:
+            z = _stature_z(height_m, "hip")
+            if z is not None:
+                z_from = False
         if x is None and default_hip_x is not None:
             x = default_hip_x
-        if y is None and sz is not None:
+            x_from = False
+        if y is None and z is not None:
             y = 0.0
-            if src == "measured":
-                src = "estimated"
-                messages.append(f"joint {hip_id}: front-plane placement (y_m estimated)")
-            elif src == "missing":
-                messages.append(f"joint {hip_id}: estimated from stature/lateral defaults")
-                src = "estimated"
-        z = sz
-        if src == "missing" and _any_finite_xyz(x, y, z):
-            src = "estimated"
+            y_from = False
+            y_depth = False
+            messages.append(f"joint {hip_id}: front-plane placement (y_m estimated)")
+        if not _any_finite_xyz(
+            lm.x_m if lm else None, lm.y_m if lm else None, lm.z_m if lm else None
+        ) and _any_finite_xyz(x, y, z):
+            messages.append(f"joint {hip_id}: estimated from stature/lateral defaults")
+    src = _joint_source(
+        x, y, z, x_from_lm=x_from, y_from_lm=y_from, y_from_depth=y_depth, z_from_lm=z_from
+    )
     _set_joint(
         joints,
         id=hip_id,
@@ -935,7 +1312,7 @@ def _resolve_limb_side(
         x_m=x,
         y_m=y,
         z_m=z,
-        source=src if _any_finite_xyz(x, y, z) else "missing",
+        source=src,
         landmark_id=lid,
     )
     if joints[hip_id].source == "missing":
@@ -943,22 +1320,30 @@ def _resolve_limb_side(
 
     # --- ankle before knee mid ---
     lm, lid = _pick_lm(lms, an_id)
-    x, y, z, src, lid2 = _coords_from_lm(lm, an_id, messages)
+    x, y, z, lid2, x_from, y_from, z_from = _raw_coords_from_lm(lm)
     lid = lid2 or lid
+    y, y_from, y_depth = _depth_y(an_id, y, y_from)
     if not _all_finite_xyz(x, y, z):
-        sz = z if z is not None else _stature_z(height_m, "ankle")
+        if z is None:
+            z = _stature_z(height_m, "ankle")
+            if z is not None:
+                z_from = False
         hipj = joints[hip_id]
         if x is None:
             x = hipj.x_m if _finite(hipj.x_m) else default_hip_x
-        if y is None and sz is not None:
+            x_from = False
+        if y is None and z is not None:
             y = hipj.y_m if _finite(hipj.y_m) else 0.0
-            if src == "measured":
-                src = "estimated"
-                messages.append(f"joint {an_id}: front-plane placement (y_m estimated)")
-        z = sz
-        if src == "missing" and _any_finite_xyz(x, y, z):
-            src = "estimated"
+            y_from = False
+            y_depth = False
+            messages.append(f"joint {an_id}: front-plane placement (y_m estimated)")
+        if not _any_finite_xyz(
+            lm.x_m if lm else None, lm.y_m if lm else None, lm.z_m if lm else None
+        ) and _any_finite_xyz(x, y, z):
             messages.append(f"joint {an_id}: estimated from stature/chain")
+    src = _joint_source(
+        x, y, z, x_from_lm=x_from, y_from_lm=y_from, y_from_depth=y_depth, z_from_lm=z_from
+    )
     _set_joint(
         joints,
         id=an_id,
@@ -967,42 +1352,57 @@ def _resolve_limb_side(
         x_m=x,
         y_m=y,
         z_m=z,
-        source=src if _any_finite_xyz(x, y, z) else "missing",
+        source=src,
         landmark_id=lid,
     )
 
     # --- knee: landmark or mid hip-ankle ---
     lm, lid = _pick_lm(lms, kn_id)
-    x, y, z, src, lid2 = _coords_from_lm(lm, kn_id, messages)
+    x, y, z, lid2, x_from, y_from, z_from = _raw_coords_from_lm(lm)
     lid = lid2 or lid
+    y, y_from, y_depth = _depth_y(kn_id, y, y_from)
     if not _all_finite_xyz(x, y, z):
         hip_xyz = _joint_xyz(joints[hip_id])
         an_xyz = _joint_xyz(joints[an_id])
         if hip_xyz is not None and an_xyz is not None and not _any_finite_xyz(x, y, z):
             mid = _mid3(hip_xyz, an_xyz)
             x, y, z = mid
-            src = "estimated"
+            x_from, y_from, y_depth, z_from = False, False, False, False
             messages.append(f"joint {kn_id}: estimated mid hip->ankle")
         else:
-            sz = z if z is not None else _stature_z(height_m, "knee")
+            if z is None:
+                z = _stature_z(height_m, "knee")
+                if z is not None:
+                    z_from = False
             hpx = joints[hip_id].x_m
             hpy = joints[hip_id].y_m
             if x is None:
                 x = hpx if _finite(hpx) else default_hip_x
-            if y is None and sz is not None:
+                x_from = False
+            if y is None and z is not None:
                 y = hpy if _finite(hpy) else 0.0
-                if src == "measured":
-                    src = "estimated"
-                    messages.append(f"joint {kn_id}: front-plane placement (y_m estimated)")
-            z = sz
+                y_from = False
+                y_depth = False
+                messages.append(f"joint {kn_id}: front-plane placement (y_m estimated)")
             if hip_xyz is not None and an_xyz is not None:
                 mid = _mid3(hip_xyz, an_xyz)
-                x = x if x is not None else mid[0]
-                y = y if y is not None else mid[1]
-                z = z if z is not None else mid[2]
-            if src == "missing" and _any_finite_xyz(x, y, z):
-                src = "estimated"
+                if x is None:
+                    x, x_from = mid[0], False
+                if y is None:
+                    y, y_from, y_depth = mid[1], False, False
+                if z is None:
+                    z, z_from = mid[2], False
+            if (
+                not _any_finite_xyz(
+                    lm.x_m if lm else None, lm.y_m if lm else None, lm.z_m if lm else None
+                )
+                and _any_finite_xyz(x, y, z)
+                and not any(f"joint {kn_id}:" in m for m in messages)
+            ):
                 messages.append(f"joint {kn_id}: estimated from stature/chain")
+    src = _joint_source(
+        x, y, z, x_from_lm=x_from, y_from_lm=y_from, y_from_depth=y_depth, z_from_lm=z_from
+    )
     _set_joint(
         joints,
         id=kn_id,
@@ -1011,7 +1411,7 @@ def _resolve_limb_side(
         x_m=x,
         y_m=y,
         z_m=z,
-        source=src if _any_finite_xyz(x, y, z) else "missing",
+        source=src,
         landmark_id=lid,
     )
     joints[an_id] = joints[an_id].model_copy(update={"parent": kn_id})
@@ -1026,32 +1426,34 @@ def _resolve_limb_side(
         (toe_id, (toe_id,), "toe"),
     ):
         lm, lid = _pick_lm(lms, *keys)
-        x, y, z, src, lid2 = _coords_from_lm(lm, jid, messages)
+        x, y, z, lid2, x_from, y_from, z_from = _raw_coords_from_lm(lm)
         lid = lid2 or lid
+        y, y_from, y_depth = _depth_y(jid, y, y_from)
         if not _all_finite_xyz(x, y, z):
             anj = joints[an_id]
-            sz = (
-                z
-                if z is not None
-                else (anj.z_m if _finite(anj.z_m) else _stature_z(height_m, zkey))
-            )
+            if z is None:
+                z = anj.z_m if _finite(anj.z_m) else _stature_z(height_m, zkey)
+                # chain from ankle Z is not direct landmark on this joint
+                if z is not None and not (lm is not None and _finite(lm.z_m)):
+                    z_from = False
             if x is None:
                 x = anj.x_m if _finite(anj.x_m) else default_hip_x
+                x_from = False
             # Foot: toes -Y, heels +Y per AXIS_NOTES when inventing depth
-            if y is None and sz is not None:
+            if y is None and z is not None:
                 if jid.startswith("toe"):
                     y = -0.08 if height_m is None else -0.05 * height_m
                 else:
                     y = 0.04 if height_m is None else 0.03 * height_m
-                if src == "measured":
-                    src = "estimated"
+                y_from = False
+                y_depth = False
+                if lm is not None and _finite(lm.x_m) and _finite(lm.z_m):
                     messages.append(f"joint {jid}: front-plane placement (y_m estimated)")
-                elif src == "missing":
-                    src = "estimated"
+                else:
                     messages.append(f"joint {jid}: estimated near ankle (foot depth default)")
-            z = sz
-            if src == "missing" and _any_finite_xyz(x, y, z):
-                src = "estimated"
+        src = _joint_source(
+            x, y, z, x_from_lm=x_from, y_from_lm=y_from, y_from_depth=y_depth, z_from_lm=z_from
+        )
         _set_joint(
             joints,
             id=jid,
@@ -1060,7 +1462,7 @@ def _resolve_limb_side(
             x_m=x,
             y_m=y,
             z_m=z,
-            source=src if _any_finite_xyz(x, y, z) else "missing",
+            source=src,
             landmark_id=lid,
         )
 
@@ -1147,12 +1549,14 @@ def build_blockout_skeleton(
     report: ProportionReport,
     *,
     template_id: str | None = None,
+    depth_samples: DepthSamplesPackage | None = None,
 ) -> BlockoutSkeleton:
     """Resolve joints + bones from report. Raises skeleton_empty when D7 applies."""
     messages: list[str] = []
     height_m = float(report.height_m) if report.height_m is not None else None
     head_unit = _head_unit_m(report)
     lms = _lm_map(report)
+    bands: list[DepthBand] = list(report.depth_bands or [])
 
     if report.quality.needs_user_input:
         messages.append("quality.needs_user_input: skeleton still emitted — confirm primary figure")
@@ -1171,11 +1575,29 @@ def build_blockout_skeleton(
     joints: dict[str, SkeletonJoint] = {}
     try:
         _resolve_root(joints)
-        _resolve_pelvis(joints, lms, height_m, messages)
-        _resolve_spine(joints, lms, height_m, messages)
-        _resolve_neck_head(joints, lms, height_m, messages)
-        _resolve_limb_side(joints, lms, height_m, messages, side="l", sign=-1.0)
-        _resolve_limb_side(joints, lms, height_m, messages, side="r", sign=1.0)
+        _resolve_pelvis(joints, lms, height_m, messages, bands=bands, samples=depth_samples)
+        _resolve_spine(joints, lms, height_m, messages, bands=bands, samples=depth_samples)
+        _resolve_neck_head(joints, lms, height_m, messages, bands=bands, samples=depth_samples)
+        _resolve_limb_side(
+            joints,
+            lms,
+            height_m,
+            messages,
+            side="l",
+            sign=-1.0,
+            bands=bands,
+            samples=depth_samples,
+        )
+        _resolve_limb_side(
+            joints,
+            lms,
+            height_m,
+            messages,
+            side="r",
+            sign=1.0,
+            bands=bands,
+            samples=depth_samples,
+        )
     except ProportionError:
         raise
     except Exception as exc:
@@ -1505,6 +1927,26 @@ def load_blockout_skeleton(path: Path | str) -> BlockoutSkeleton:
         ) from exc
 
 
+def _load_depth_at_landmarks_file(path: Path | str) -> DepthSamplesPackage:
+    """File-only load of depth_at_landmarks.json (match recipe; code=skeleton_failed)."""
+    p = Path(path)
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return DepthSamplesPackage.model_validate(data)
+    except FileNotFoundError as exc:
+        raise ProportionError(
+            f"depth-at-landmarks file not found: {p}",
+            code="skeleton_failed",
+            details={"path": str(p)},
+        ) from exc
+    except Exception as exc:
+        raise ProportionError(
+            f"invalid depth-at-landmarks package: {p}: {exc}",
+            code="skeleton_failed",
+            details={"path": str(p)},
+        ) from exc
+
+
 def run_skeleton_build(
     report_path: Path | str,
     out: Path | str,
@@ -1512,6 +1954,7 @@ def run_skeleton_build(
     format: SkeletonFormat = "json",
     force: bool = False,
     template_applied: Path | str | None = None,
+    depth_at_landmarks: Path | str | None = None,
 ) -> dict[str, Any]:
     """CLI helper: load report → build → write; return success payload."""
     report = load_report(report_path)
@@ -1543,7 +1986,11 @@ def run_skeleton_build(
             ) from exc
         template_id = tpl.template_id
 
-    package = build_blockout_skeleton(report, template_id=template_id)
+    depth_pkg: DepthSamplesPackage | None = None
+    if depth_at_landmarks is not None:
+        depth_pkg = _load_depth_at_landmarks_file(depth_at_landmarks)
+
+    package = build_blockout_skeleton(report, template_id=template_id, depth_samples=depth_pkg)
     paths = write_blockout_skeleton(out, package, format=format, force=force)
     return {
         "ok": True,
@@ -1571,6 +2018,7 @@ __all__ = [
     "SkeletonCounts",
     "SkeletonFormat",
     "SkeletonJoint",
+    "_depth_family_for_joint",
     "build_blockout_skeleton",
     "emit_bpy_script",
     "load_blockout_skeleton",
