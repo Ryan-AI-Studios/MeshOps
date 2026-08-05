@@ -337,7 +337,9 @@ def resolve_join_connections(
 ) -> list[tuple[str, RecipePart, RecipePart, Axis]]:
     """List of (class_id, child, parent, axis) for join-ready post-pass.
 
-    Ankle emits both stack links as separate rows (class ankle_l / ankle_r).
+    Ankle emits both stack links as separate rows (class ankle_l / ankle_r),
+    distal-first (ank→plate before calf→ank) so multi-link pull does not reopen
+    the proximal gap. Heel is secondary parent when plate is missing.
     Toes never appear as children.
     """
     by_name = _parts_by_name(parts)
@@ -368,17 +370,18 @@ def resolve_join_connections(
             if thigh is not None and thigh is not child_h and not is_toe_part(thigh.name):
                 rows.append((f"hip_{side}", thigh, parent_h, 1))
 
-        # Ankle stack (Z): calf_b → ank_foot → foot_plate; heel secondary parent
+        # Ankle stack (Z): distal-first so calf pull sees ank at final position.
+        # Order: ank_foot→foot_plate (heel secondary parent), then calf_b→ank_foot.
         calf_b = by_name.get(f"RECIPE_calf_b_{side}")
         ank = by_name.get(f"RECIPE_ank_foot_{side}")
         plate = by_name.get(f"RECIPE_foot_plate_{side}")
         heel = by_name.get(f"RECIPE_heel_{side}")
-        if calf_b is not None and ank is not None and not is_toe_part(calf_b.name):
-            rows.append((f"ankle_{side}", calf_b, ank, 2))
         if ank is not None and plate is not None and not is_toe_part(ank.name):
             rows.append((f"ankle_{side}", ank, plate, 2))
         elif ank is not None and heel is not None and not is_toe_part(ank.name):
             rows.append((f"ankle_{side}", ank, heel, 2))
+        if calf_b is not None and ank is not None and not is_toe_part(calf_b.name):
+            rows.append((f"ankle_{side}", calf_b, ank, 2))
 
     for child, parent in _neck_pairs(parts, by_name):
         if not is_toe_part(child.name):

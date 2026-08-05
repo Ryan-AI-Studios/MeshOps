@@ -128,11 +128,12 @@ def _full_humanoid_separated() -> BlockoutRecipePackage:
             [-0.15, 0.15, 0.95],
             radius=0.04,
         ),
-        # Ankle stack — modest Z gaps
-        _ellipsoid("RECIPE_calf_b_l", "limb_segment", [0.12, 0.05, 0.16], r=0.04),
-        _ellipsoid("RECIPE_calf_b_r", "limb_segment", [-0.12, 0.05, 0.16], r=0.04),
-        _ellipsoid("RECIPE_ank_foot_l", "ankle_bridge", [0.12, 0.05, 0.09], r=0.035),
-        _ellipsoid("RECIPE_ank_foot_r", "ankle_bridge", [-0.12, 0.05, 0.09], r=0.035),
+        # Ankle stack — positive Z gaps (~0.03) closeable under B2 (pull + ≤1.08 grow).
+        # r=0.04 each; |dz|=0.11 → gap = 0.11 - 0.08 = 0.03 (must be > 0.01 before join).
+        _ellipsoid("RECIPE_calf_b_l", "limb_segment", [0.12, 0.05, 0.24], r=0.04),
+        _ellipsoid("RECIPE_calf_b_r", "limb_segment", [-0.12, 0.05, 0.24], r=0.04),
+        _ellipsoid("RECIPE_ank_foot_l", "ankle_bridge", [0.12, 0.05, 0.13], r=0.04),
+        _ellipsoid("RECIPE_ank_foot_r", "ankle_bridge", [-0.12, 0.05, 0.13], r=0.04),
         _ellipsoid("RECIPE_foot_plate_l", "foot_plate", [0.12, -0.02, 0.02], r=0.04),
         _ellipsoid("RECIPE_foot_plate_r", "foot_plate", [-0.12, -0.02, 0.02], r=0.04),
         _ellipsoid("RECIPE_heel_l", "heel", [0.12, 0.04, 0.03], r=0.025),
@@ -171,8 +172,10 @@ def test_t3_join_ready_closes_all_required_classes() -> None:
     """T3: join_ready post-pass → ALL required classes gap ≤ eps."""
     pkg = _full_humanoid_separated()
     before = connection_gap_metrics(pkg)
-    # Sanity: at least some classes start separated
+    # Sanity: at least some classes start separated; ankles must start open (P3.2)
     assert any(before[k] > 0.0 for k in REQUIRED_GAP_KEYS)
+    assert before["ankle_l"] > 0.01, f"ankle_l pre-closed: {before['ankle_l']}"
+    assert before["ankle_r"] > 0.01, f"ankle_r pre-closed: {before['ankle_r']}"
 
     messages: list[str] = []
     _apply_join_ready_overlaps(pkg.parts, messages)
@@ -183,9 +186,14 @@ def test_t3_join_ready_closes_all_required_classes() -> None:
     assert any("join_ready." in m for m in messages)
 
 
-def test_t4_join_ready_false_no_geometry_mutate() -> None:
-    """T4: join_ready=false → no geometry mutate from post-pass (call omitted)."""
+def test_t4_join_ready_false_skips_post_pass() -> None:
+    """T4: join_ready=false build-gate mirror → no geometry mutate; True control does.
+
+    Mirrors production ``if join_ready: _apply_join_ready_overlaps(...)`` so a
+    regression that always applied the post-pass would fail (not a tautology).
+    """
     pkg = _full_humanoid_separated()
+    before = connection_gap_metrics(pkg)
     snap = [
         (
             p.name,
@@ -199,8 +207,17 @@ def test_t4_join_ready_false_no_geometry_mutate() -> None:
         )
         for p in pkg.parts
     ]
-    # Not calling _apply_join_ready_overlaps — package.join_ready stays False
+
+    # Production gate mirror (build_blockout_recipe only applies when True)
+    join_ready = False
+    messages: list[str] = []
+    if join_ready:
+        _apply_join_ready_overlaps(pkg.parts, messages)
+
     assert pkg.join_ready is False
+    assert messages == []
+    after = connection_gap_metrics(pkg)
+    assert after == before
     for i, p in enumerate(pkg.parts):
         name, c, p0, p1, rx, ry, rz, rad = snap[i]
         assert p.name == name
@@ -211,6 +228,14 @@ def test_t4_join_ready_false_no_geometry_mutate() -> None:
         assert p.ry_m == ry
         assert p.rz_m == rz
         assert p.radius_m == rad
+
+    # Control: join_ready=True path mutates (or at least records class messages)
+    pkg2 = _full_humanoid_separated()
+    msgs2: list[str] = []
+    _apply_join_ready_overlaps(pkg2.parts, msgs2)
+    after2 = connection_gap_metrics(pkg2)
+    assert after2 != before or any("join_ready." in m for m in msgs2)
+    assert any("join_ready." in m for m in msgs2)
 
 
 def test_t5_nofuse_join_ready_mutual_exclusion() -> None:
@@ -234,6 +259,9 @@ def test_t5_nofuse_join_ready_mutual_exclusion() -> None:
 def test_t6_multi_class_no_toe_growth() -> None:
     """T6: multi-class synthetic closes all classes; no RECIPE_toe_* radius growth."""
     pkg = _full_humanoid_separated()
+    before = connection_gap_metrics(pkg)
+    assert before["ankle_l"] > 0.01 and before["ankle_r"] > 0.01
+
     toe_before = {
         p.name: (p.rx_m, p.ry_m, p.rz_m) for p in pkg.parts if p.name.startswith("RECIPE_toe_")
     }
