@@ -1520,8 +1520,9 @@ def _build_torso_ovals(
     for name, z_norm in layers:
         z_m = z_top - z_norm * span
         hw = _waist_width_at(z_norm, w_s, w_h, taper)
-        # Vertical radius ~ 1/6 of span; depth slightly less than half_depth
-        rz = max(0.02, span * 0.12)
+        # Vertical radius must exceed half layer spacing (0.35*span/2) so chest/waist/hip
+        # ovals overlap. 0.12 left a belly gap; 0.18 barely kissed; 0.22 ≈ 4cm overlap.
+        rz = max(0.025, span * 0.22)
         ry = half_depth * 0.9
         parts.append(
             RecipePart(

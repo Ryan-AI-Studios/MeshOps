@@ -331,6 +331,83 @@ def test_ext__foot_z_floor() -> None:
             assert abs(float(p.center[2]) - float(p.z_top_m) / 2.0) < 1e-6
 
 
+def test_ext__toe_heel_z_not_ankle_clone() -> None:
+    """Estimated heel/toe often inherit ankle Z — toe stays sole; heel bridges up; ank high."""
+    ank_z = 0.131
+    extra = _extremity_lms()
+    # Clone ankle height onto heel/toe (skeleton estimated pattern that floated toe_soft).
+    for side in ("l", "r"):
+        sx = -0.10 if side == "l" else 0.10
+        extra[f"ankle_{side}"] = _lm(f"ankle_{side}", x_m=sx, y_m=0.02, z_m=ank_z)
+        extra[f"heel_{side}"] = _lm(f"heel_{side}", x_m=sx, y_m=0.06, z_m=ank_z)
+        extra[f"toe_{side}"] = _lm(f"toe_{side}", x_m=sx, y_m=-0.12, z_m=ank_z)
+    report = _full_torso_report(
+        extra_lms=extra,
+        extra_diams=[
+            _diam("ank_foot_l", half_width_m=0.035),
+            _diam("ank_foot_r", half_width_m=0.035),
+        ],
+    )
+    pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="wedge")
+    by_name = {p.name: p for p in pkg.parts}
+    for side in ("l", "r"):
+        plate = by_name[f"RECIPE_foot_plate_{side}"]
+        heel = by_name[f"RECIPE_heel_{side}"]
+        toe = by_name[f"RECIPE_toe_soft_{side}"]
+        ank = by_name[f"RECIPE_ank_foot_{side}"]
+        assert plate.center is not None and heel.center is not None
+        assert toe.center is not None and ank.center is not None
+        z_top = float(plate.z_top_m or 0.03)
+        hz = float(heel.center[2])
+        hrz = float(heel.rz_m or 0.0)
+        az = float(ank.center[2])
+        arz = float(ank.rz_m or 0.0)
+        # Toe flat on sole — never mid-shin ankle clone
+        assert float(toe.center[2]) < z_top + 0.05
+        assert float(toe.center[2]) < ank_z * 0.5
+        # Heel is a tall bridge (not a decorative sole ball, not ankle-clone sphere)
+        assert hz < az  # center below ankle joint
+        assert hz + hrz >= az - arz * 0.6  # top reaches into ank_foot
+        assert hrz > z_top  # clearly taller than plate thickness
+        # Ankle bridge stays at real ankle height
+        assert az == pytest.approx(ank_z, abs=1e-6)
+        # Toe forward of heel (-Y)
+        assert float(toe.center[1]) < float(heel.center[1])
+
+
+def test_ext__palm_is_ellipsoid_not_box() -> None:
+    """Palm must be ellipsoid (world-axis box read as cube+stick)."""
+    report = _report_with_extremities()
+    pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="mitten")
+    for side in ("l", "r"):
+        palm = next(p for p in pkg.parts if p.name == f"RECIPE_palm_{side}")
+        mitt = next(p for p in pkg.parts if p.name == f"RECIPE_finger_mitten_{side}")
+        assert palm.kind == "ellipsoid"
+        assert mitt.kind == "ellipsoid"
+        assert palm.rx_m is not None and palm.rx_m > 0.015
+        assert mitt.rx_m is not None and mitt.rx_m > 0.01
+
+
+def test_ext__mitten_radius_vs_palm() -> None:
+    """T3 / B2: fat mitten cross-section r >= 0.70 x palm half-width (product pin 0.72).
+
+    Asserts mitt.rx_m (product mitt_r on X in both hang and tip-directed branches),
+    not max(rx,ry,rz) — length half-extent must not mask a thin stick.
+    """
+    report = _report_with_extremities()
+    pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="mitten")
+    for side in ("l", "r"):
+        palm = next(p for p in pkg.parts if p.name == f"RECIPE_palm_{side}")
+        mitt = next(p for p in pkg.parts if p.name == f"RECIPE_finger_mitten_{side}")
+        assert palm.kind == "ellipsoid"
+        assert mitt.kind == "ellipsoid"
+        assert palm.rx_m is not None
+        assert mitt.rx_m is not None
+        palm_half_w = float(palm.rx_m)
+        # mitt_r is always assigned to mitt_rx (hang: rx=mitt_r; tip-dir: rx=mitt_r)
+        assert float(mitt.rx_m) >= 0.70 * palm_half_w
+
+
 def test_ext__finger_direction_with_and_without_tip() -> None:
     """R7: with fingertip axis aligns wrist→tip; without primary -Z."""
     wrist = [0.0, 0.0, 1.0]
@@ -366,6 +443,9 @@ def test_ext__hands_mitten_recipe_only() -> None:
         assert not p.name.startswith("HAND_")
         assert not p.name.startswith("FOOT_")
         assert not p.name.startswith("DIGIT_")
+    # Mitten is bulk ellipsoid (not thin stick capsule)
+    mitt = next(p for p in pkg.parts if p.name == "RECIPE_finger_mitten_l")
+    assert mitt.kind == "ellipsoid"
 
 
 def test_ext__fingers_full_count() -> None:
