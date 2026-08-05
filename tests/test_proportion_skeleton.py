@@ -1071,3 +1071,21 @@ def test_skeleton__0038_t6_chin_crown_measured_neck_top_optional() -> None:
     # neck_top often estimated (mid X/Z fails R3) — not a T6 failure
     assert j["neck_top"].y_m is not None
     assert j["neck_top"].source in ("measured", "estimated")
+
+
+def test_skeleton__0038_non_cranial_family_ignores_cranial_pair() -> None:
+    """B1 isolation: hip/chest family must not consume cranial_front/back pair Y."""
+    # Front XZ hips with null Y; only cranial pair present (no hip_mid / hip band).
+    lms = {
+        "hip_l": _lm("hip_l", x_m=-0.12, y_m=None, z_m=0.90),
+        "hip_r": _lm("hip_r", x_m=0.12, y_m=None, z_m=0.90),
+        "cranial_front": _lm("cranial_front", x_m=0.0, y_m=-0.02, z_m=1.60),
+        "cranial_back": _lm("cranial_back", x_m=0.0, y_m=0.12, z_m=1.60),
+    }
+    pkg = build_blockout_skeleton(_report(lms, height_m=1.72))
+    j = _by_id(pkg)
+    assert j["hip_l"].source == "estimated"
+    assert j["hip_r"].source == "estimated"
+    # Must not claim hip Y from cranial pair
+    assert not any("cranial_front+cranial_back" in m and "hip" in m for m in pkg.messages)
+    assert not any("joint hip" in m and "cranial" in m and "(depth)" in m for m in pkg.messages)
