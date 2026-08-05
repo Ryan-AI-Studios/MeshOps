@@ -16,6 +16,7 @@ from meshops.proportion.blockout_recipe import (
     RECIPE_SCHEMA_VERSION,
     BlockoutRecipePackage,
     RecipePart,
+    _align_glute_outer_to_hip_bridge,
     _sync_calf_distal_to_ankle,
     build_blockout_recipe,
     emit_bpy_script,
@@ -1536,6 +1537,105 @@ def test_recipe__axial_soft_breast_glute_not_mid_forced() -> None:
     for g in glutes:
         assert g.center is not None
         assert g.center[1] > 0.0
+
+
+# ---------------------------------------------------------------------------
+# 0036 — glute outer X = hip_bridge outer at recipe emit
+# ---------------------------------------------------------------------------
+
+
+def test_recipe__two_spheres_glute_outer_pass_without_optimize() -> None:
+    """0036 T2: base two_spheres → C_glute_outer pass; RECIPE_glute_sphere_* exist (B3)."""
+    from meshops.proportion.constraints import validate_constraints
+
+    report = _report_with_soft_cs()
+    pkg = build_blockout_recipe(report, limbs=False, glute="two_spheres")
+    spheres = [p for p in pkg.parts if p.name.startswith("RECIPE_glute_sphere_")]
+    assert len(spheres) == 2
+    assert all(p.role == "glute_soft" for p in spheres)
+    assert any("glute_l: outer X aligned to hip_bridge" in m for m in pkg.messages)
+    assert any("glute_r: outer X aligned to hip_bridge" in m for m in pkg.messages)
+    result = validate_constraints(pkg, report=report)
+    by_id = {r.id: r for r in result.rules}
+    assert by_id["C_glute_outer"].status == "pass", by_id["C_glute_outer"].message
+
+
+def test_recipe__profile_glute_outer_pass_without_optimize() -> None:
+    """0036 T3: profile dual glute path → C_glute_outer pass pre-optimize."""
+    from meshops.proportion.anatomy_profile import load_anatomy_profile
+    from meshops.proportion.constraints import validate_constraints
+
+    report = _report_with_soft_cs()
+    profile = load_anatomy_profile("torso_limb_f_athletic_v1")
+    pkg = build_blockout_recipe(report, limbs=False, profile=profile)
+    glutes = [p for p in pkg.parts if p.role == "glute_soft"]
+    assert len(glutes) >= 2
+    # Profile owns glutes (skip base); names RECIPE_glute_soft_* not sphere
+    assert any(p.name.startswith("RECIPE_glute_soft_") for p in glutes)
+    assert any("glute_l: outer X aligned to hip_bridge" in m for m in pkg.messages)
+    assert any("glute_r: outer X aligned to hip_bridge" in m for m in pkg.messages)
+    result = validate_constraints(pkg, report=report)
+    by_id = {r.id: r for r in result.rules}
+    assert by_id["C_glute_outer"].status == "pass", by_id["C_glute_outer"].message
+
+
+def test_align_glute_outer__no_hip_bridge_skip_message() -> None:
+    """0036 T5: glutes only, no hip_bridge → skip message; X unchanged; no crash."""
+    gl_l = RecipePart(
+        name="RECIPE_glute_soft_l",
+        role="glute_soft",
+        kind="ellipsoid",
+        center=[-0.05, 0.05, 0.9],
+        rx_m=0.04,
+        ry_m=0.04,
+        rz_m=0.04,
+    )
+    gl_r = RecipePart(
+        name="RECIPE_glute_soft_r",
+        role="glute_soft",
+        kind="ellipsoid",
+        center=[0.05, 0.05, 0.9],
+        rx_m=0.04,
+        ry_m=0.04,
+        rz_m=0.04,
+    )
+    parts = [gl_l, gl_r]
+    x_before = [float(p.center[0]) for p in parts if p.center is not None]
+    messages: list[str] = []
+    _align_glute_outer_to_hip_bridge(parts, messages)
+    assert any("glute_l: outer X align skipped (no hip_bridge outer)" in m for m in messages)
+    assert any("glute_r: outer X align skipped (no hip_bridge outer)" in m for m in messages)
+    x_after = [float(p.center[0]) for p in parts if p.center is not None]
+    assert x_after == x_before
+
+
+def test_recipe__glute_y_pos_after_outer_align() -> None:
+    """0036 T6: after two_spheres or oval emit, glute center Y still > 0."""
+    report = _report_with_soft_cs()
+    for mode in ("two_spheres", "oval"):
+        pkg = build_blockout_recipe(report, limbs=False, glute=mode)  # type: ignore[arg-type]
+        glutes = [p for p in pkg.parts if p.role == "glute_soft"]
+        assert glutes, f"no glutes for mode={mode}"
+        for g in glutes:
+            assert g.center is not None
+            assert g.center[1] > 0.0, f"mode={mode} glute y={g.center[1]}"
+
+
+def test_recipe__oval_glute_outer_pass_without_optimize() -> None:
+    """0036 R3: base oval glute path → C_glute_outer pass pre-optimize (rx half-extent)."""
+    from meshops.proportion.constraints import validate_constraints
+
+    report = _report_with_soft_cs()
+    pkg = build_blockout_recipe(report, limbs=False, glute="oval")
+    ovals = [p for p in pkg.parts if p.role == "glute_soft"]
+    assert len(ovals) >= 2
+    assert all(p.name.startswith("RECIPE_glute_soft_") for p in ovals)
+    assert any(p.rx_m is not None for p in ovals)
+    assert any("glute_l: outer X aligned to hip_bridge" in m for m in pkg.messages)
+    assert any("glute_r: outer X aligned to hip_bridge" in m for m in pkg.messages)
+    result = validate_constraints(pkg, report=report)
+    by_id = {r.id: r for r in result.rules}
+    assert by_id["C_glute_outer"].status == "pass", by_id["C_glute_outer"].message
 
 
 def test_recipe__hip_y_prefers_hip_mid() -> None:

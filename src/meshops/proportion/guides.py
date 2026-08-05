@@ -625,7 +625,10 @@ def emit_bpy_script(package: GuidePackage) -> str:
         "        return None",
         "    midpoint = (p0 + p1) / 2.0",
         "    radius = radius_m / scale_len",
-        "    rot = Vector((0.0, 0.0, 1.0)).rotation_difference(v.normalized()).to_4x4()",
+        (
+            "    rot = Vector((0.0, 0.0, 1.0)).rotation_difference(v.normalized())"
+            ".to_matrix().to_4x4()"
+        ),
         "    mat = (",
         "        Matrix.Translation(midpoint)",
         "        @ rot",

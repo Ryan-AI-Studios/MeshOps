@@ -348,6 +348,7 @@ def test_thigh_outer_far_from_hip_bridge_fails() -> None:
 
 
 def test_glute_outer_far_from_hip_bridge_fails() -> None:
+    """Hand-built package without recipe post-pass still fails C_glute_outer."""
     pkg = _pkg(
         [
             _part(
@@ -373,6 +374,169 @@ def test_glute_outer_far_from_hip_bridge_fails() -> None:
     report = validate_constraints(pkg)
     by_id = {r.id: r for r in report.rules}
     assert by_id["C_glute_outer"].status == "fail"
+
+
+def test_align_glute_outer_to_hip_bridge__under_reach_then_within_tol() -> None:
+    """0036 T1: synthetic under-reach glutes → after align outer within OUTER_X_TOL_M."""
+    from meshops.proportion.blockout_recipe import _align_glute_outer_to_hip_bridge
+
+    # hip_bridge_r: center x=0.18, radius 0.04 → outer = 0.22
+    # glute under-reach center 0.08, rx 0.05 → outer 0.13 before align
+    parts = [
+        _part(
+            "RECIPE_hip_bridge_r",
+            role="hip_bridge",
+            kind="cylinder",
+            center=None,
+            rx_m=None,
+            ry_m=None,
+            rz_m=None,
+            radius_m=0.04,
+            p0=[0.12, 0.0, 0.95],
+            p1=[0.24, 0.0, 0.95],
+        ),
+        _part(
+            "RECIPE_hip_bridge_l",
+            role="hip_bridge",
+            kind="cylinder",
+            center=None,
+            rx_m=None,
+            ry_m=None,
+            rz_m=None,
+            radius_m=0.04,
+            p0=[-0.12, 0.0, 0.95],
+            p1=[-0.24, 0.0, 0.95],
+        ),
+        _part(
+            "RECIPE_glute_soft_r",
+            role="glute_soft",
+            kind="ellipsoid",
+            center=[0.08, 0.05, 0.9],
+            rx_m=0.05,
+            ry_m=0.05,
+            rz_m=0.05,
+        ),
+        _part(
+            "RECIPE_glute_soft_l",
+            role="glute_soft",
+            kind="ellipsoid",
+            center=[-0.08, 0.05, 0.9],
+            rx_m=0.05,
+            ry_m=0.05,
+            rz_m=0.05,
+        ),
+        # B1 safety: second glute per side also aligned
+        _part(
+            "RECIPE_glute_sphere_r",
+            role="glute_soft",
+            kind="ellipsoid",
+            center=[0.07, 0.06, 0.88],
+            rx_m=0.04,
+            ry_m=0.04,
+            rz_m=0.04,
+        ),
+        _part(
+            "RECIPE_glute_sphere_l",
+            role="glute_soft",
+            kind="ellipsoid",
+            center=[-0.07, 0.06, 0.88],
+            rx_m=0.04,
+            ry_m=0.04,
+            rz_m=0.04,
+        ),
+    ]
+    messages: list[str] = []
+    _align_glute_outer_to_hip_bridge(parts, messages)
+    assert any("glute_r: outer X aligned to hip_bridge" in m for m in messages)
+    assert any("glute_l: outer X aligned to hip_bridge" in m for m in messages)
+
+    # mid(p0,p1) ± radius: r outer = 0.18+0.04=0.22; l outer = -0.18-0.04=-0.22
+    for p in parts:
+        if p.role != "glute_soft":
+            continue
+        assert p.center is not None and p.rx_m is not None
+        if p.name.endswith("_r"):
+            outer = float(p.center[0]) + float(p.rx_m)
+            assert abs(outer - 0.22) <= OUTER_X_TOL_M
+        elif p.name.endswith("_l"):
+            outer = float(p.center[0]) - float(p.rx_m)
+            assert abs(outer - (-0.22)) <= OUTER_X_TOL_M
+
+    pkg = _pkg(parts)
+    report = validate_constraints(pkg)
+    by_id = {r.id: r for r in report.rules}
+    assert by_id["C_glute_outer"].status == "pass", by_id["C_glute_outer"].message
+
+
+def test_align_glute_outer__cleft_still_pass_after_outward() -> None:
+    """0036 T4: min-gap dual glutes before align → C_glute_cleft still pass after outward."""
+    from meshops.proportion.blockout_recipe import _align_glute_outer_to_hip_bridge
+
+    # gap before = 0.10 - 0.05*2 wait: centers ±0.06, rx=0.04 → gap = 0.12-0.08=0.04
+    # template min glute_cleft_m = 0.03 → pass before; outward increases gap.
+    parts = [
+        _part(
+            "RECIPE_hip_bridge_r",
+            role="hip_bridge",
+            kind="cylinder",
+            center=None,
+            rx_m=None,
+            ry_m=None,
+            rz_m=None,
+            radius_m=0.04,
+            p0=[0.12, 0.0, 0.95],
+            p1=[0.24, 0.0, 0.95],
+        ),
+        _part(
+            "RECIPE_hip_bridge_l",
+            role="hip_bridge",
+            kind="cylinder",
+            center=None,
+            rx_m=None,
+            ry_m=None,
+            rz_m=None,
+            radius_m=0.04,
+            p0=[-0.12, 0.0, 0.95],
+            p1=[-0.24, 0.0, 0.95],
+        ),
+        _part(
+            "RECIPE_glute_soft_r",
+            role="glute_soft",
+            kind="ellipsoid",
+            center=[0.06, 0.05, 0.9],
+            rx_m=0.04,
+            ry_m=0.04,
+            rz_m=0.04,
+        ),
+        _part(
+            "RECIPE_glute_soft_l",
+            role="glute_soft",
+            kind="ellipsoid",
+            center=[-0.06, 0.05, 0.9],
+            rx_m=0.04,
+            ry_m=0.04,
+            rz_m=0.04,
+        ),
+    ]
+
+    class _C:
+        intermammary_gap_m = None
+        glute_cleft_m = 0.03
+
+    class _T:
+        constants = _C()
+
+    messages: list[str] = []
+    _align_glute_outer_to_hip_bridge(parts, messages)
+    pkg = _pkg(parts)
+    report = validate_constraints(pkg, template_applied=_T())
+    by_id = {r.id: r for r in report.rules}
+    assert by_id["C_glute_cleft"].status == "pass", by_id["C_glute_cleft"].message
+    assert by_id["C_glute_outer"].status == "pass", by_id["C_glute_outer"].message
+    # Gap grew outward (centers farther from midline)
+    assert parts[2].center is not None and parts[3].center is not None
+    assert abs(parts[2].center[0]) > 0.06
+    assert abs(parts[3].center[0]) > 0.06
 
 
 def test_role_classified_unknown_critical_ankle_name_fails() -> None:
