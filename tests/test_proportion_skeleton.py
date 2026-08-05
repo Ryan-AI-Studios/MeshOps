@@ -788,3 +788,156 @@ def test_skeleton__pair_mean_one_side_only_stays_estimated() -> None:
     }
     pkg_mix = build_blockout_skeleton(_report(lms_mix))
     assert _by_id(pkg_mix)["pelvis"].source == "estimated"
+
+
+# ---------------------------------------------------------------------------
+# 0037 — Skeleton arm depth policy (inherit honesty; no chest-band steal)
+# ---------------------------------------------------------------------------
+
+
+def test_skeleton__0037_t1_depth_family_arm_joints_none() -> None:
+    """T1: elbow/wrist/hand stay family None (0035 freeze; no chest-band steal)."""
+    for jid in (
+        "elbow_l",
+        "elbow_r",
+        "wrist_l",
+        "wrist_r",
+        "hand_l",
+        "hand_r",
+    ):
+        assert _depth_family_for_joint(jid) is None, jid
+
+
+def test_skeleton__0037_t2_real_shoulder_depth_elbow_wrist_inherit() -> None:
+    """T2: real shoulder depth (chest_mid) → elbow/wrist Y inherit + inherited msgs."""
+    h = 1.72
+    chest_y = 0.08
+    lms = {
+        "shoulder_l": _lm("shoulder_l", x_m=-0.20, y_m=None, z_m=1.40),
+        "shoulder_r": _lm("shoulder_r", x_m=0.20, y_m=None, z_m=1.40),
+        "elbow_l": _lm("elbow_l", x_m=-0.28, y_m=None, z_m=1.10),
+        "elbow_r": _lm("elbow_r", x_m=0.28, y_m=None, z_m=1.10),
+        "wrist_l": _lm("wrist_l", x_m=-0.32, y_m=None, z_m=0.85),
+        "wrist_r": _lm("wrist_r", x_m=0.32, y_m=None, z_m=0.85),
+        # Real depth evidence for shoulder ladder (not invent default_arm_y)
+        "chest_mid": _lm("chest_mid", x_m=0.0, y_m=chest_y, z_m=1.25),
+    }
+    pkg = build_blockout_skeleton(_report(lms, height_m=h))
+    j = _by_id(pkg)
+    sh_y = j["shoulder_l"].y_m
+    assert sh_y == pytest.approx(chest_y)
+    # Elbow/wrist partial inherit: Y matches shoulder
+    assert j["elbow_l"].y_m == pytest.approx(sh_y)
+    assert j["wrist_l"].y_m == pytest.approx(sh_y)
+    assert j["elbow_r"].y_m == pytest.approx(j["shoulder_r"].y_m)
+    assert j["wrist_r"].y_m == pytest.approx(j["shoulder_r"].y_m)
+    # Provenance messages — inherited (depth), not front-plane-only for those joints
+    inherit_el = [m for m in pkg.messages if "elbow_l" in m and "inherited" in m]
+    inherit_wr = [m for m in pkg.messages if "wrist_l" in m and "inherited" in m]
+    inherit_el_r = [m for m in pkg.messages if "elbow_r" in m and "inherited" in m]
+    inherit_wr_r = [m for m in pkg.messages if "wrist_r" in m and "inherited" in m]
+    assert inherit_el, f"expected inherited msg for elbow_l; msgs={pkg.messages}"
+    assert inherit_wr, f"expected inherited msg for wrist_l; msgs={pkg.messages}"
+    assert inherit_el_r, f"expected inherited msg for elbow_r; msgs={pkg.messages}"
+    assert inherit_wr_r, f"expected inherited msg for wrist_r; msgs={pkg.messages}"
+    assert any("(depth)" in m for m in inherit_el)
+    assert any("(depth)" in m for m in inherit_wr)
+    assert any("(depth)" in m for m in inherit_el_r)
+    assert any("(depth)" in m for m in inherit_wr_r)
+    # Must not be front-plane-only for those joints
+    assert not any("elbow_l" in m and "front-plane" in m for m in pkg.messages), (
+        "elbow_l must not use front-plane when shoulder depth is real"
+    )
+    assert not any("wrist_l" in m and "front-plane" in m for m in pkg.messages), (
+        "wrist_l must not use front-plane when shoulder depth is real"
+    )
+    assert not any("elbow_r" in m and "front-plane" in m for m in pkg.messages)
+    assert not any("wrist_r" in m and "front-plane" in m for m in pkg.messages)
+    # Pure inherit is estimated, never measured
+    assert j["elbow_l"].source == "estimated"
+    assert j["wrist_l"].source == "estimated"
+    assert j["elbow_r"].source == "estimated"
+    assert j["wrist_r"].source == "estimated"
+
+
+def test_skeleton__0037_t2b_invent_shoulder_keeps_front_plane_msgs() -> None:
+    """T2b: invent-only shoulder Y → wrist/elbow may copy Y but never 'inherited (depth)'."""
+    h = 1.72
+    lms = {
+        "shoulder_l": _lm("shoulder_l", x_m=-0.20, y_m=None, z_m=1.40),
+        "shoulder_r": _lm("shoulder_r", x_m=0.20, y_m=None, z_m=1.40),
+        "elbow_l": _lm("elbow_l", x_m=-0.28, y_m=None, z_m=1.10),
+        "wrist_l": _lm("wrist_l", x_m=-0.32, y_m=None, z_m=0.85),
+        # No chest_mid / no depth bands → shoulder invents default_arm_y
+    }
+    pkg = build_blockout_skeleton(_report(lms, height_m=h, depth_bands=[]))
+    j = _by_id(pkg)
+    assert j["shoulder_l"].y_m is not None
+    # Numeric chain continuity allowed
+    assert j["elbow_l"].y_m == pytest.approx(j["shoulder_l"].y_m)
+    assert j["wrist_l"].y_m == pytest.approx(j["shoulder_l"].y_m)
+    # Must keep front-plane language — never claim inherited depth
+    assert not any("inherited" in m and "(depth)" in m for m in pkg.messages), pkg.messages
+    assert any("elbow_l" in m and "front-plane" in m for m in pkg.messages)
+    assert any("wrist_l" in m and "front-plane" in m for m in pkg.messages)
+    assert j["elbow_l"].source == "estimated"
+    assert j["wrist_l"].source == "estimated"
+
+
+def test_skeleton__0037_t3_elbow_no_chest_band_ladder() -> None:
+    """T3: elbow must not receive Y solely from chest band via ladder (family None)."""
+    assert _depth_family_for_joint("elbow_l") is None
+    assert _depth_family_for_joint("elbow_r") is None
+    h = 1.72
+    # Chest band present with non-zero y_mid; elbow has no own Y; no shoulder Y evidence
+    # beyond invent path (no chest_mid landmark for shoulder ladder to use mid path
+    # that would be "real" if band alone — shoulder family uses band "chest" after mid).
+    # With shoulder x,z + chest band → shoulder can get real depth from band.
+    # Elbow family is None so ladder never maps chest onto elbow directly.
+    lms = {
+        "shoulder_l": _lm("shoulder_l", x_m=-0.20, y_m=None, z_m=1.40),
+        "elbow_l": _lm("elbow_l", x_m=-0.28, y_m=None, z_m=1.10),
+        "wrist_l": _lm("wrist_l", x_m=-0.32, y_m=None, z_m=0.85),
+    }
+    bands = [_band("chest", y_mid=0.08)]
+    pkg = build_blockout_skeleton(_report(lms, height_m=h, depth_bands=bands))
+    j = _by_id(pkg)
+    # No ladder message claiming elbow y from chest band (family is None)
+    assert not any(
+        "elbow_l" in m and ("depth band" in m or "from chest" in m) and "inherited" not in m
+        for m in pkg.messages
+    ), pkg.messages
+    # Elbow Y may match shoulder (chain inherit) but family remains None
+    assert _depth_family_for_joint("elbow_l") is None
+    assert j["elbow_l"].y_m is not None
+    # If shoulder got band depth, elbow inherits via chain — still estimated
+    assert j["elbow_l"].source == "estimated"
+    # Must not claim measured for ladder steal (steal path does not exist)
+    assert j["elbow_l"].source != "measured"
+
+
+def test_skeleton__0037_t6_inherited_elbow_not_measured() -> None:
+    """T6: pure inherit elbow is estimated; measured count excludes pure inherit."""
+    h = 1.72
+    lms = {
+        "shoulder_l": _lm("shoulder_l", x_m=-0.20, y_m=None, z_m=1.40),
+        "shoulder_r": _lm("shoulder_r", x_m=0.20, y_m=None, z_m=1.40),
+        "elbow_l": _lm("elbow_l", x_m=-0.28, y_m=None, z_m=1.10),
+        "elbow_r": _lm("elbow_r", x_m=0.28, y_m=None, z_m=1.10),
+        "wrist_l": _lm("wrist_l", x_m=-0.32, y_m=None, z_m=0.85),
+        "wrist_r": _lm("wrist_r", x_m=0.32, y_m=None, z_m=0.85),
+        "chest_mid": _lm("chest_mid", x_m=0.0, y_m=0.08, z_m=1.25),
+    }
+    pkg = build_blockout_skeleton(_report(lms, height_m=h))
+    j = _by_id(pkg)
+    assert j["elbow_l"].source == "estimated"
+    assert j["elbow_r"].source == "estimated"
+    assert j["wrist_l"].source == "estimated"
+    assert j["wrist_r"].source == "estimated"
+    # Measured count equals joints with source measured — pure inherit not included
+    measured_ids = {jj.id for jj in pkg.joints if jj.source == "measured"}
+    assert "elbow_l" not in measured_ids
+    assert "elbow_r" not in measured_ids
+    assert "wrist_l" not in measured_ids
+    assert "wrist_r" not in measured_ids
+    assert pkg.counts.measured == len(measured_ids)

@@ -1658,43 +1658,71 @@ def _sync_calf_distal_to_ankle(
 def _build_limbs(
     report: ProportionReport,
     messages: list[str],
+    skeleton: BlockoutSkeleton | None = None,
 ) -> list[RecipePart]:
-    """Limb capsules on SEED_SEGMENT_MAP; calf → a/cyl/b split (0034)."""
+    """Limb capsules on SEED_SEGMENT_MAP; calf → a/cyl/b split (0034).
+
+    0037 R2: upper_arm/forearm prefer skeleton joint endpoints when both finite XYZ.
+    Thigh/calf stay report-only for DoD (arm-only free ride).
+    """
     parts: list[RecipePart] = []
     lms = report.landmarks_xyz
     skip_count = 0
+    joints = _joints_map(skeleton)
+    # Arm segments only — not thigh/calf (0037 AI2 B4).
+    _ARM_SKELETON_BANDS = frozenset({"upper_arm_l", "upper_arm_r", "forearm_l", "forearm_r"})
 
     for band_id, (p0_id, p1_id) in SEED_SEGMENT_MAP.items():
-        if p0_id not in lms or p1_id not in lms:
-            messages.append(f"{band_id}: missing joint — limb skipped")
-            skip_count += 1
-            continue
-        lm0 = lms[p0_id]
-        lm1 = lms[p1_id]
-        if lm0.x_m is None or lm0.z_m is None or lm1.x_m is None or lm1.z_m is None:
-            messages.append(f"{band_id}: joint missing meters — limb skipped")
-            skip_count += 1
-            continue
         diam = _resolve_diameter(report.diameters, band_id)
         radius = _half_width_from_diameter(diam) if diam else None
         if radius is None:
             messages.append(f"{band_id}: no usable radius — limb skipped")
             skip_count += 1
             continue
-        y0_null = lm0.y_m is None
-        y1_null = lm1.y_m is None
-        if y0_null or y1_null:
-            ys = [y for y in (lm0.y_m, lm1.y_m) if y is not None]
-            y_plane = (sum(ys) / len(ys)) if ys else 0.0
-            p0 = [float(lm0.x_m), y_plane, float(lm0.z_m)]
-            p1 = [float(lm1.x_m), y_plane, float(lm1.z_m)]
-            placement: Literal["full3d", "front_plane"] = "front_plane"
-            if band_id not in ("calf_l", "calf_r"):
-                messages.append(f"{band_id}: y_m null — front_plane limb capsule")
-        else:
-            p0 = [float(lm0.x_m), float(lm0.y_m), float(lm0.z_m)]  # type: ignore[arg-type]
-            p1 = [float(lm1.x_m), float(lm1.y_m), float(lm1.z_m)]  # type: ignore[arg-type]
-            placement = "full3d"
+
+        p0: list[float] | None = None
+        p1: list[float] | None = None
+        placement: Literal["full3d", "front_plane"] = "front_plane"
+        used_skeleton = False
+
+        if band_id in _ARM_SKELETON_BANDS:
+            sk0 = _joint_xyz(joints.get(p0_id))
+            sk1 = _joint_xyz(joints.get(p1_id))
+            if sk0 is not None and sk1 is not None:
+                # _joint_xyz requires finite XYZ → both Y finite → full3d
+                p0 = list(sk0)
+                p1 = list(sk1)
+                placement = "full3d"
+                used_skeleton = True
+                messages.append(f"{band_id}: endpoints from skeleton joints")
+
+        if not used_skeleton:
+            if p0_id not in lms or p1_id not in lms:
+                messages.append(f"{band_id}: missing joint — limb skipped")
+                skip_count += 1
+                continue
+            lm0 = lms[p0_id]
+            lm1 = lms[p1_id]
+            if lm0.x_m is None or lm0.z_m is None or lm1.x_m is None or lm1.z_m is None:
+                messages.append(f"{band_id}: joint missing meters — limb skipped")
+                skip_count += 1
+                continue
+            y0_null = lm0.y_m is None
+            y1_null = lm1.y_m is None
+            if y0_null or y1_null:
+                ys = [y for y in (lm0.y_m, lm1.y_m) if y is not None]
+                y_plane = (sum(ys) / len(ys)) if ys else 0.0
+                p0 = [float(lm0.x_m), y_plane, float(lm0.z_m)]
+                p1 = [float(lm1.x_m), y_plane, float(lm1.z_m)]
+                placement = "front_plane"
+                if band_id not in ("calf_l", "calf_r"):
+                    messages.append(f"{band_id}: y_m null — front_plane limb capsule")
+            else:
+                p0 = [float(lm0.x_m), float(lm0.y_m), float(lm0.z_m)]  # type: ignore[arg-type]
+                p1 = [float(lm1.x_m), float(lm1.y_m), float(lm1.z_m)]  # type: ignore[arg-type]
+                placement = "full3d"
+
+        assert p0 is not None and p1 is not None
         if _segment_length((p0[0], p0[1], p0[2]), (p1[0], p1[1], p1[2])) <= _NEAR_ZERO_LEN:
             messages.append(f"{band_id}: zero-length segment — limb skipped")
             skip_count += 1
@@ -2445,7 +2473,7 @@ def build_blockout_recipe(
 
     # 13+ limbs
     if limbs:
-        for p in _build_limbs(report, messages):
+        for p in _build_limbs(report, messages, skeleton=skeleton):
             _append_part(parts, p)
     else:
         messages.append("--no-limbs: limb_segment parts omitted")
