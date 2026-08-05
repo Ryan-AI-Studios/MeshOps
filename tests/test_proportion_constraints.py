@@ -588,6 +588,55 @@ def test_calf_slant_split_distal_toward_ankle_pass() -> None:
     assert part_y(pkg.parts[1]) == pytest.approx(0.05)
 
 
+def test_calf_slant_split_with_shaft_pass() -> None:
+    """0034: a + cyl (role=calf) + b + ank_foot → C_calf_slant pass (not skip)."""
+    pkg = _pkg(
+        [
+            _part(
+                "RECIPE_calf_a_l",
+                kind="ellipsoid",
+                center=[0.1, 0.0, 0.45],
+                rx_m=0.04,
+                ry_m=0.04,
+                rz_m=0.04,
+            ),
+            _part(
+                "RECIPE_calf_cyl_l",
+                kind="capsule",
+                center=None,
+                rx_m=None,
+                ry_m=None,
+                rz_m=None,
+                radius_m=0.04,
+                p0=[0.1, 0.0, 0.45],
+                p1=[0.1, 0.05, 0.15],
+            ),
+            _part(
+                "RECIPE_calf_b_l",
+                kind="ellipsoid",
+                center=[0.1, 0.05, 0.15],
+                rx_m=0.038,
+                ry_m=0.038,
+                rz_m=0.038,
+            ),
+            _part(
+                "RECIPE_ank_foot_l",
+                kind="ellipsoid",
+                center=[0.1, 0.05, 0.08],
+                rx_m=0.03,
+                ry_m=0.03,
+                rz_m=0.03,
+            ),
+        ]
+    )
+    assert classify_part_name("RECIPE_calf_cyl_l") == ("calf", "l")
+    report = validate_constraints(pkg)
+    by_id = {r.id: r for r in report.rules}
+    assert by_id["C_calf_slant"].status == "pass"
+    # Shaft present must not force whole-calf skip when prox+dist exist
+    assert "whole calf only" not in by_id["C_calf_slant"].message.lower()
+
+
 def test_duplicate_limb_dot001_fails() -> None:
     pkg = _pkg(
         [
@@ -751,6 +800,87 @@ def test_freeze_feet_ankle_and_foot_y_unchanged(tmp_path: Path) -> None:
     assert part_y(wnames["RECIPE_foot_plate_l"]) == pytest.approx(foot_y0)
     assert part_y(wnames["RECIPE_heel_l"]) == pytest.approx(heel_y0)
     assert part_y(wnames["RECIPE_calf_b_l"]) == pytest.approx(calf_distal_y0)
+
+
+def test_freeze_feet_product_calf_split_distal_y_unchanged() -> None:
+    """0034 P3-1: product a/cyl/b + ank_foot under freeze-feet keeps distal Y.
+
+    Distinct from the L629 dual fixture (calf_b + legacy limb_calf). Shaft
+    (calf_cyl) may move with free set — do not require p0/p1 fixed.
+    """
+    pkg = _pkg(
+        [
+            _part(
+                "RECIPE_calf_a_l",
+                kind="ellipsoid",
+                center=[0.1, 0.0, 0.45],
+                rx_m=0.04,
+                ry_m=0.04,
+                rz_m=0.04,
+            ),
+            _part(
+                "RECIPE_calf_cyl_l",
+                kind="capsule",
+                center=None,
+                rx_m=None,
+                ry_m=None,
+                rz_m=None,
+                radius_m=0.04,
+                p0=[0.1, 0.0, 0.45],
+                p1=[0.1, 0.04, 0.15],
+            ),
+            _part(
+                "RECIPE_calf_b_l",
+                kind="ellipsoid",
+                center=[0.1, 0.04, 0.15],
+                rx_m=0.038,
+                ry_m=0.038,
+                rz_m=0.038,
+            ),
+            _part(
+                "RECIPE_ank_foot_l",
+                kind="ellipsoid",
+                center=[0.1, 0.04, 0.08],
+                rx_m=0.03,
+                ry_m=0.03,
+                rz_m=0.03,
+            ),
+            _part(
+                "RECIPE_limb_thigh_l",
+                kind="capsule",
+                center=None,
+                rx_m=None,
+                ry_m=None,
+                rz_m=None,
+                radius_m=0.05,
+                p0=[0.1, 0.0, 0.5],
+                p1=[0.1, 0.0, 0.9],
+            ),
+            _part(
+                "RECIPE_hip_bridge",
+                role="hip_bridge",
+                kind="ellipsoid",
+                center=[0.0, 0.0, 0.95],
+                rx_m=0.15,
+                ry_m=0.06,
+                rz_m=0.05,
+            ),
+        ]
+    )
+    by0 = {p.name: p for p in pkg.parts}
+    distal_y0 = part_y(by0["RECIPE_calf_b_l"])
+    ankle_y0 = part_y(by0["RECIPE_ank_foot_l"])
+    assert distal_y0 is not None and ankle_y0 is not None
+    assert classify_part_name("RECIPE_calf_a_l") == ("calf_proximal", "l")
+    assert classify_part_name("RECIPE_calf_cyl_l") == ("calf", "l")
+    assert classify_part_name("RECIPE_calf_b_l") == ("calf_distal", "l")
+
+    optimized, result = optimize_package(pkg, mode="fast", freeze_feet=True)
+    assert result.freeze_feet is True
+    by_name = {p.name: p for p in optimized.parts}
+    assert part_y(by_name["RECIPE_calf_b_l"]) == pytest.approx(distal_y0)
+    assert part_y(by_name["RECIPE_ank_foot_l"]) == pytest.approx(ankle_y0)
+    # Shaft may move with free set (B8); only require distal frozen.
 
 
 def test_band_weighted_free_dof_score_ranks_glute_y() -> None:

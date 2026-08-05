@@ -13,6 +13,8 @@ breast_lower* used for rz in 0030; lateral fuse/diameter still 0027.
 0029: hands/feet RECIPE kit (opt-in); schema write 1.3.0; load 1.0|1.1|1.2|1.3.
 0033: breast hang tilt on breast_soft (rotation_euler_deg + bpy TRS); schema write 1.4.0;
 load 1.0|1.1|1.2|1.3|1.4.
+0034: product split calf RECIPE_calf_{a,cyl,b}_{side} (not limb_calf) so C_calf_slant
+can pass; B6 distal/cyl p1 Y sync to ank_foot after feet emit.
 """
 
 from __future__ import annotations
@@ -53,6 +55,9 @@ BPY_BASENAME: Final[str] = "setup_blockout_recipe.py"
 MIDLINE_X_TOL_M: Final[float] = 0.05
 CROTCH_Z_FRAC_FALLBACK: Final[float] = 0.5
 _NEAR_ZERO_LEN: Final[float] = 1e-9
+# 0034 B4: calf end ellipsoids only (shaft uses raw limb radius).
+_CALF_END_SCALE: Final[float] = 0.95
+_CALF_END_R_FLOOR: Final[float] = 1e-4
 _GIRAFFE_FRAC: Final[float] = 0.20
 _GIRAFFE_ABS_NO_H: Final[float] = 0.35
 _MICHELIN_FRAC: Final[float] = 0.45
@@ -1554,11 +1559,106 @@ def _build_torso_ovals(
     return parts
 
 
+def _build_calf_split(
+    *,
+    side: str,
+    p0: list[float],
+    p1: list[float],
+    radius: float,
+    placement: Literal["full3d", "front_plane"],
+    messages: list[str],
+) -> list[RecipePart]:
+    """0034 B1-B5: emit calf_a / calf_cyl / calf_b (not RECIPE_limb_calf_*).
+
+    Proximal ellipsoid @ knee (p0), distal ellipsoid @ ankle (p1), shaft capsule
+    knee→ankle with raw radius. End radii scaled by _CALF_END_SCALE with floor.
+    """
+    end_r = max(float(radius) * _CALF_END_SCALE, _CALF_END_R_FLOOR)
+    name_a = f"RECIPE_calf_a_{side}"
+    name_cyl = f"RECIPE_calf_cyl_{side}"
+    name_b = f"RECIPE_calf_b_{side}"
+    parts = [
+        RecipePart(
+            name=name_a,
+            role="limb_segment",
+            kind="ellipsoid",
+            center=[float(p0[0]), float(p0[1]), float(p0[2])],
+            rx_m=end_r,
+            ry_m=end_r,
+            rz_m=end_r,
+            placement=placement,
+            label=name_a,
+        ),
+        RecipePart(
+            name=name_cyl,
+            role="limb_segment",
+            kind="capsule",
+            p0=[float(p0[0]), float(p0[1]), float(p0[2])],
+            p1=[float(p1[0]), float(p1[1]), float(p1[2])],
+            radius_m=float(radius),
+            placement=placement,
+            label=name_cyl,
+        ),
+        RecipePart(
+            name=name_b,
+            role="limb_segment",
+            kind="ellipsoid",
+            center=[float(p1[0]), float(p1[1]), float(p1[2])],
+            rx_m=end_r,
+            ry_m=end_r,
+            rz_m=end_r,
+            placement=placement,
+            label=name_b,
+        ),
+    ]
+    note = f"calf_{side}: split a/cyl/b"
+    if placement == "front_plane":
+        note += " (front_plane)"
+    messages.append(note)
+    return parts
+
+
+def _sync_calf_distal_to_ankle(
+    parts: list[RecipePart],
+    messages: list[str],
+) -> None:
+    """0034 B6: set calf_distal center Y and cyl p1[1] to ank_foot Y when present.
+
+    Idempotent absolute set. No ankle → leave landmark Y. Name-matched to avoid
+    import cycle with constraints.classify_part_name.
+
+    When Y is rewritten from ank_foot, also set placement=full3d so front_plane
+    calves (null joint y_m at emit) do not keep stale plane metadata after sync.
+    """
+    by_name = {p.name: p for p in parts}
+    for side in ("l", "r"):
+        ank = by_name.get(f"RECIPE_ank_foot_{side}")
+        if ank is None or ank.center is None or len(ank.center) < 3:
+            continue
+        ay = float(ank.center[1])
+        updated = False
+        dist = by_name.get(f"RECIPE_calf_b_{side}")
+        if dist is not None and dist.center is not None and len(dist.center) >= 3:
+            dist.center = [float(dist.center[0]), ay, float(dist.center[2])]
+            dist.placement = "full3d"
+            updated = True
+        cyl = by_name.get(f"RECIPE_calf_cyl_{side}")
+        if cyl is not None and cyl.p1 is not None and len(cyl.p1) >= 3:
+            # Keep p0[1] = proximal Y; only p1 Y tracks ankle.
+            cyl.p1 = [float(cyl.p1[0]), ay, float(cyl.p1[2])]
+            cyl.placement = "full3d"
+            updated = True
+        # Honesty: only claim sync when distal and/or cyl were actually written
+        # (feet without limbs leave ank_foot present but no calf parts).
+        if updated:
+            messages.append(f"calf_{side}: distal/cyl p1 Y synced to ank_foot ({ay:.4f})")
+
+
 def _build_limbs(
     report: ProportionReport,
     messages: list[str],
 ) -> list[RecipePart]:
-    """Limb capsules only on SEED_SEGMENT_MAP bands (C2)."""
+    """Limb capsules on SEED_SEGMENT_MAP; calf → a/cyl/b split (0034)."""
     parts: list[RecipePart] = []
     lms = report.landmarks_xyz
     skip_count = 0
@@ -1588,7 +1688,8 @@ def _build_limbs(
             p0 = [float(lm0.x_m), y_plane, float(lm0.z_m)]
             p1 = [float(lm1.x_m), y_plane, float(lm1.z_m)]
             placement: Literal["full3d", "front_plane"] = "front_plane"
-            messages.append(f"{band_id}: y_m null — front_plane limb capsule")
+            if band_id not in ("calf_l", "calf_r"):
+                messages.append(f"{band_id}: y_m null — front_plane limb capsule")
         else:
             p0 = [float(lm0.x_m), float(lm0.y_m), float(lm0.z_m)]  # type: ignore[arg-type]
             p1 = [float(lm1.x_m), float(lm1.y_m), float(lm1.z_m)]  # type: ignore[arg-type]
@@ -1596,6 +1697,19 @@ def _build_limbs(
         if _segment_length((p0[0], p0[1], p0[2]), (p1[0], p1[1], p1[2])) <= _NEAR_ZERO_LEN:
             messages.append(f"{band_id}: zero-length segment — limb skipped")
             skip_count += 1
+            continue
+        if band_id in ("calf_l", "calf_r"):
+            side = "l" if band_id.endswith("_l") else "r"
+            parts.extend(
+                _build_calf_split(
+                    side=side,
+                    p0=p0,
+                    p1=p1,
+                    radius=float(radius),
+                    placement=placement,
+                    messages=messages,
+                )
+            )
             continue
         name = f"RECIPE_limb_{band_id}"
         parts.append(
@@ -2359,6 +2473,9 @@ def build_blockout_recipe(
             messages=messages,
         ):
             _append_part(parts, p)
+
+    # 0034 B6: distal/cyl p1 Y ← ank_foot after feet, before profile/breast tilt
+    _sync_calf_distal_to_ankle(parts, messages)
 
     # 0027 profile emit after base (skip_roles already applied)
     if profile is not None:

@@ -15,6 +15,8 @@ from meshops.proportion.blockout_recipe import (
     MIDLINE_X_TOL_M,
     RECIPE_SCHEMA_VERSION,
     BlockoutRecipePackage,
+    RecipePart,
+    _sync_calf_distal_to_ankle,
     build_blockout_recipe,
     emit_bpy_script,
     load_blockout_recipe,
@@ -406,6 +408,206 @@ def test_recipe__limbs_y_null_front_plane() -> None:
     limbs = [p for p in pkg.parts if p.role == "limb_segment"]
     assert len(limbs) >= 1
     assert all(p.placement == "front_plane" for p in limbs)
+
+
+def test_recipe__limbs_emit_split_calf() -> None:
+    """0034 B1/B2/B4: calf → a/cyl/b per side; no RECIPE_limb_calf_*."""
+    from meshops.proportion.constraints import classify_part_name
+
+    knee_y, ankle_y = 0.04, 0.01
+    half_w = 0.05
+    report = _full_torso_report(
+        extra_lms={
+            "elbow_l": _lm("elbow_l", x_m=-0.25, y_m=0.0, z_m=1.10),
+            "elbow_r": _lm("elbow_r", x_m=0.25, y_m=0.0, z_m=1.10),
+            "wrist_l": _lm("wrist_l", x_m=-0.30, y_m=0.0, z_m=0.90),
+            "wrist_r": _lm("wrist_r", x_m=0.30, y_m=0.0, z_m=0.90),
+            "knee_l": _lm("knee_l", x_m=-0.12, y_m=knee_y, z_m=0.50),
+            "knee_r": _lm("knee_r", x_m=0.12, y_m=knee_y, z_m=0.50),
+            "ankle_l": _lm("ankle_l", x_m=-0.10, y_m=ankle_y, z_m=0.08),
+            "ankle_r": _lm("ankle_r", x_m=0.10, y_m=ankle_y, z_m=0.08),
+        }
+    )
+    pkg = build_blockout_recipe(report, limbs=True)
+    by_name = {p.name: p for p in pkg.parts}
+
+    for side in ("l", "r"):
+        a = by_name[f"RECIPE_calf_a_{side}"]
+        cyl = by_name[f"RECIPE_calf_cyl_{side}"]
+        b = by_name[f"RECIPE_calf_b_{side}"]
+        assert a.role == "limb_segment" and a.kind == "ellipsoid"
+        assert cyl.role == "limb_segment" and cyl.kind == "capsule"
+        assert b.role == "limb_segment" and b.kind == "ellipsoid"
+        assert classify_part_name(a.name) == ("calf_proximal", side)
+        assert classify_part_name(cyl.name) == ("calf", side)
+        assert classify_part_name(b.name) == ("calf_distal", side)
+        end_r = max(half_w * 0.95, 1e-4)
+        assert a.rx_m == pytest.approx(end_r)
+        assert a.ry_m == pytest.approx(end_r)
+        assert a.rz_m == pytest.approx(end_r)
+        assert b.rx_m == pytest.approx(end_r)
+        assert cyl.radius_m == pytest.approx(half_w)
+        assert a.center is not None and b.center is not None
+        assert float(a.center[1]) == pytest.approx(knee_y)
+        assert float(b.center[1]) == pytest.approx(ankle_y)
+        assert cyl.p0 is not None and cyl.p1 is not None
+        assert float(cyl.p0[1]) == pytest.approx(knee_y)
+        assert float(cyl.p1[1]) == pytest.approx(ankle_y)
+        assert a.placement == "full3d"
+        assert any(f"calf_{side}: split a/cyl/b" in m for m in pkg.messages)
+
+    assert not any("limb_calf" in p.name.lower() for p in pkg.parts)
+    # Non-calf bands remain single RECIPE_limb_{band}
+    assert "RECIPE_limb_thigh_l" in by_name
+    assert "RECIPE_limb_calf_l" not in by_name
+
+
+def test_recipe__calf_distal_syncs_to_ank_foot() -> None:
+    """0034 B6: after feet, calf_b Y and cyl p1 Y match RECIPE_ank_foot Y."""
+    report = _full_torso_report(
+        extra_lms={
+            "elbow_l": _lm("elbow_l", x_m=-0.25, y_m=0.0, z_m=1.10),
+            "elbow_r": _lm("elbow_r", x_m=0.25, y_m=0.0, z_m=1.10),
+            "wrist_l": _lm("wrist_l", x_m=-0.30, y_m=0.0, z_m=0.90),
+            "wrist_r": _lm("wrist_r", x_m=0.30, y_m=0.0, z_m=0.90),
+            "knee_l": _lm("knee_l", x_m=-0.12, y_m=0.0, z_m=0.50),
+            "knee_r": _lm("knee_r", x_m=0.12, y_m=0.0, z_m=0.50),
+            "ankle_l": _lm("ankle_l", x_m=-0.10, y_m=0.02, z_m=0.08),
+            "ankle_r": _lm("ankle_r", x_m=0.10, y_m=0.02, z_m=0.08),
+            "heel_l": _lm("heel_l", x_m=-0.10, y_m=0.06, z_m=0.02),
+            "heel_r": _lm("heel_r", x_m=0.10, y_m=0.06, z_m=0.02),
+            "toe_l": _lm("toe_l", x_m=-0.10, y_m=-0.12, z_m=0.02),
+            "toe_r": _lm("toe_r", x_m=0.10, y_m=-0.12, z_m=0.02),
+        },
+        diameters=[
+            _diam("bust", half_width_m=0.16),
+            _diam("waist", half_width_m=0.13),
+            _diam("neck", half_width_m=0.05),
+            *(
+                _diam(b, half_width_m=0.05)
+                for b in (
+                    "upper_arm_l",
+                    "upper_arm_r",
+                    "forearm_l",
+                    "forearm_r",
+                    "thigh_l",
+                    "thigh_r",
+                    "calf_l",
+                    "calf_r",
+                )
+            ),
+            _diam("ank_foot_l", half_width_m=0.035),
+            _diam("ank_foot_r", half_width_m=0.035),
+        ],
+    )
+    pkg = build_blockout_recipe(report, limbs=True, feet=True)
+    by_name = {p.name: p for p in pkg.parts}
+    for side in ("l", "r"):
+        ank = by_name[f"RECIPE_ank_foot_{side}"]
+        dist = by_name[f"RECIPE_calf_b_{side}"]
+        cyl = by_name[f"RECIPE_calf_cyl_{side}"]
+        assert ank.center is not None and dist.center is not None
+        assert cyl.p0 is not None and cyl.p1 is not None
+        ay = float(ank.center[1])
+        assert float(dist.center[1]) == pytest.approx(ay)
+        assert float(cyl.p1[1]) == pytest.approx(ay)
+        # Proximal Y stays at knee (0.0 in this fixture)
+        assert float(cyl.p0[1]) == pytest.approx(0.0)
+        # B6 Y rewrite from ank_foot → placement is full3d (even if emit was front_plane)
+        assert dist.placement == "full3d"
+        assert cyl.placement == "full3d"
+        assert any(f"calf_{side}: distal/cyl p1 Y synced to ank_foot" in m for m in pkg.messages)
+
+
+def test_recipe__sync_calf_distal_upgrades_front_plane_placement() -> None:
+    """0034 P3-2: ankle-sourced Y rewrite marks distal/cyl placement full3d."""
+    parts = [
+        RecipePart(
+            name="RECIPE_calf_b_l",
+            role="limb_segment",
+            kind="ellipsoid",
+            center=[0.1, 0.0, 0.15],
+            rx_m=0.038,
+            ry_m=0.038,
+            rz_m=0.038,
+            placement="front_plane",
+        ),
+        RecipePart(
+            name="RECIPE_calf_cyl_l",
+            role="limb_segment",
+            kind="capsule",
+            p0=[0.1, 0.0, 0.45],
+            p1=[0.1, 0.0, 0.15],
+            radius_m=0.04,
+            placement="front_plane",
+        ),
+        RecipePart(
+            name="RECIPE_ank_foot_l",
+            role="ankle_bridge",
+            kind="ellipsoid",
+            center=[0.1, 0.07, 0.08],
+            rx_m=0.03,
+            ry_m=0.03,
+            rz_m=0.03,
+            placement="full3d",
+        ),
+    ]
+    messages: list[str] = []
+    _sync_calf_distal_to_ankle(parts, messages)
+    by_name = {p.name: p for p in parts}
+    assert float(by_name["RECIPE_calf_b_l"].center[1]) == pytest.approx(0.07)  # type: ignore[index]
+    assert float(by_name["RECIPE_calf_cyl_l"].p1[1]) == pytest.approx(0.07)  # type: ignore[index]
+    assert by_name["RECIPE_calf_b_l"].placement == "full3d"
+    assert by_name["RECIPE_calf_cyl_l"].placement == "full3d"
+    assert any("distal/cyl p1 Y synced to ank_foot" in m for m in messages)
+
+
+def test_recipe__calf_split_feet_slant_pass() -> None:
+    """0034 product path: limbs+feet recipe → C_calf_slant pass (not whole-calf skip)."""
+    from meshops.proportion.constraints import validate_constraints
+
+    report = _full_torso_report(
+        extra_lms={
+            "elbow_l": _lm("elbow_l", x_m=-0.25, y_m=0.0, z_m=1.10),
+            "elbow_r": _lm("elbow_r", x_m=0.25, y_m=0.0, z_m=1.10),
+            "wrist_l": _lm("wrist_l", x_m=-0.30, y_m=0.0, z_m=0.90),
+            "wrist_r": _lm("wrist_r", x_m=0.30, y_m=0.0, z_m=0.90),
+            "knee_l": _lm("knee_l", x_m=-0.12, y_m=0.0, z_m=0.50),
+            "knee_r": _lm("knee_r", x_m=0.12, y_m=0.0, z_m=0.50),
+            "ankle_l": _lm("ankle_l", x_m=-0.10, y_m=0.02, z_m=0.08),
+            "ankle_r": _lm("ankle_r", x_m=0.10, y_m=0.02, z_m=0.08),
+            "heel_l": _lm("heel_l", x_m=-0.10, y_m=0.06, z_m=0.02),
+            "heel_r": _lm("heel_r", x_m=0.10, y_m=0.06, z_m=0.02),
+            "toe_l": _lm("toe_l", x_m=-0.10, y_m=-0.12, z_m=0.02),
+            "toe_r": _lm("toe_r", x_m=0.10, y_m=-0.12, z_m=0.02),
+        },
+        diameters=[
+            _diam("bust", half_width_m=0.16),
+            _diam("waist", half_width_m=0.13),
+            _diam("neck", half_width_m=0.05),
+            *(
+                _diam(b, half_width_m=0.05)
+                for b in (
+                    "upper_arm_l",
+                    "upper_arm_r",
+                    "forearm_l",
+                    "forearm_r",
+                    "thigh_l",
+                    "thigh_r",
+                    "calf_l",
+                    "calf_r",
+                )
+            ),
+            _diam("ank_foot_l", half_width_m=0.035),
+            _diam("ank_foot_r", half_width_m=0.035),
+        ],
+    )
+    pkg = build_blockout_recipe(report, limbs=True, feet=True)
+    result = validate_constraints(pkg, report=report)
+    by_id = {r.id: r for r in result.rules}
+    calf = by_id["C_calf_slant"]
+    assert calf.status == "pass", calf.message
+    assert "whole calf only" not in calf.message.lower()
 
 
 def test_recipe__depth_at_landmarks_override(tmp_path: Path) -> None:
@@ -1203,6 +1405,18 @@ def test_recipe__axial_depth_plane_pass_after_emit() -> None:
 
     report = _axial_pin_report(chest_front_y=-0.13, chest_mid_y=0.0, shoulder_y=None)
     pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
+    result = validate_constraints(pkg, report=report)
+    by_id = {r.id: r for r in result.rules}
+    axial = by_id["C_axial_depth_plane"]
+    assert axial.status == "pass", axial.message
+
+
+def test_recipe__axial_depth_plane_pass_with_limbs() -> None:
+    """0034 smoke: limbs=True emit must not fail C_axial_depth_plane via calves."""
+    from meshops.proportion.constraints import validate_constraints
+
+    report = _axial_pin_report(chest_front_y=-0.13, chest_mid_y=0.0, shoulder_y=None)
+    pkg = build_blockout_recipe(report, limbs=True, torso="ovals")
     result = validate_constraints(pkg, report=report)
     by_id = {r.id: r for r in result.rules}
     axial = by_id["C_axial_depth_plane"]
