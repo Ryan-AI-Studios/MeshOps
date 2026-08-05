@@ -1748,3 +1748,10 @@ def test_recipe__0037_t4_limbs_skeleton_arm_full3d() -> None:
     assert ua_l.p0 is not None and ua_l.p1 is not None
     assert ua_l.p0[1] == pytest.approx(0.08, abs=1e-6)
     assert ua_l.p1[1] == pytest.approx(0.08, abs=1e-6)
+    # Arm-only DoD (AI2 B4): thigh/calf must NOT claim skeleton endpoints
+    assert not any("thigh" in m and "endpoints from skeleton" in m for m in pkg.messages)
+    assert not any("calf" in m and "endpoints from skeleton" in m for m in pkg.messages)
+    thigh_l = next((p for p in pkg.parts if p.name == "RECIPE_limb_thigh_l"), None)
+    if thigh_l is not None:
+        # Report knee/hip Y null → front_plane (not skeleton free ride)
+        assert thigh_l.placement == "front_plane"

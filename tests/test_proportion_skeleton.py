@@ -892,9 +892,9 @@ def test_skeleton__0037_t3_elbow_no_chest_band_ladder() -> None:
     bands = [_band("chest", y_mid=0.08)]
     pkg = build_blockout_skeleton(_report(lms, height_m=h, depth_bands=bands))
     j = _by_id(pkg)
-    # No ladder message claiming elbow y from chest band
+    # No ladder message claiming elbow y from chest band (family is None)
     assert not any(
-        "elbow_l" in m and "from chest" in m and "(depth)" in m and "inherited" not in m
+        "elbow_l" in m and ("depth band" in m or "from chest" in m) and "inherited" not in m
         for m in pkg.messages
     ), pkg.messages
     # Elbow Y may match shoulder (chain inherit) but family remains None
@@ -902,6 +902,8 @@ def test_skeleton__0037_t3_elbow_no_chest_band_ladder() -> None:
     assert j["elbow_l"].y_m is not None
     # If shoulder got band depth, elbow inherits via chain — still estimated
     assert j["elbow_l"].source == "estimated"
+    # Must not claim measured for ladder steal (steal path does not exist)
+    assert j["elbow_l"].source != "measured"
 
 
 def test_skeleton__0037_t6_inherited_elbow_not_measured() -> None:
