@@ -644,3 +644,42 @@ def test_face__head_chin_y_not_forced_to_mid() -> None:
     assert bounds is not None
     assert bounds.y == pytest.approx(-0.04, abs=1e-6)
     assert bounds.has_y is True
+
+
+# ---------------------------------------------------------------------------
+# 0038 — Recipe head ry prefer cranial depth (P3-003 soft)
+# ---------------------------------------------------------------------------
+
+
+def test_face__0038_t7_head_ry_from_cranial_depth_m() -> None:
+    """T7: cranial band depth_m=0.20 → HeadBounds.ry ≈ 0.10 (not 0.9*rx)."""
+    report = _full_torso_report()
+    bands = list(report.depth_bands)
+    bands.append(_depth_band("cranial", depth_m=0.20))
+    report = report.model_copy(update={"depth_bands": bands})
+    msgs: list[str] = []
+    bounds = resolve_head_bounds(
+        report,
+        head_unit_m=1.72 / 7.5,
+        height_m=1.72,
+        messages=msgs,
+    )
+    assert bounds is not None
+    assert bounds.ry == pytest.approx(0.10, abs=1e-6)
+    assert bounds.ry != pytest.approx(0.9 * bounds.rx, abs=1e-6)
+    assert any("cranial depth_m" in m for m in msgs), msgs
+
+
+def test_face__0038_t8_head_ry_fallback_no_cranial() -> None:
+    """T8: no cranial depth → ry stays 0.9*rx (regression)."""
+    report = _full_torso_report()
+    assert not any(b.band_id == "cranial" for b in report.depth_bands)
+    msgs: list[str] = []
+    bounds = resolve_head_bounds(
+        report,
+        head_unit_m=1.72 / 7.5,
+        height_m=1.72,
+        messages=msgs,
+    )
+    assert bounds is not None
+    assert bounds.ry == pytest.approx(0.9 * bounds.rx, abs=1e-6)
