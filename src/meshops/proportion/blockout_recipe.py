@@ -16,6 +16,8 @@ load 1.0|1.1|1.2|1.3|1.4.
 0034: product split calf RECIPE_calf_{a,cyl,b}_{side} (not limb_calf) so C_calf_slant
 can pass; B6 distal/cyl p1 Y sync to ank_foot after feet emit.
 0036: post-pass aligns glute_soft outer X to hip_bridge outer (pre-optimize C_glute_outer).
+0039: opt-in --join-ready socket overlaps (shoulder/hip/neck/ankle); mutually exclusive with
+--nofuse; setup re-emit via run_blockout_emit_setup; schema stay 1.4.0 + join_ready bool.
 """
 
 from __future__ import annotations
@@ -208,6 +210,8 @@ class BlockoutRecipePackage(BaseModel):
     messages: list[str] = Field(default_factory=list)
     counts: dict[str, Any] = Field(default_factory=dict)
     metrics: RecipeMetrics = Field(default_factory=RecipeMetrics)
+    # 0039 additive optional (schema stay 1.4.0); old JSON → False
+    join_ready: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -2285,6 +2289,7 @@ def build_blockout_recipe(
     torso: TorsoMode = "trap",
     glute: GluteMode = "oval",
     nofuse: bool = False,
+    join_ready: bool = False,
     breast_tilt_deg: float | None = None,
     template_applied: TemplateAppliedPackage | None = None,
     profile: AnatomyProfileDocument | None = None,
@@ -2304,7 +2309,14 @@ def build_blockout_recipe(
     When *profile* set: skip_roles merge (R6.1) + profile dual softs / new roles.
     Opt-in face/hair/neckline (0028): default flags preserve pre-0028 role set (B6).
     Opt-in hands/feet (0029): default flags preserve pre-0029 role set (B6).
+    Opt-in join_ready (0039): socket overlaps after glute align; mutually exclusive with nofuse.
     """
+    if nofuse and join_ready:
+        raise ProportionError(
+            "nofuse and join-ready are mutually exclusive",
+            code="recipe_failed",
+        )
+
     messages: list[str] = []
 
     if report.quality.needs_user_input:
@@ -2538,6 +2550,11 @@ def build_blockout_recipe(
     # 0036: glute outer tip X = hip_bridge outer X (same formula as constraints opt clamp)
     _align_glute_outer_to_hip_bridge(parts, messages)
 
+    # 0039: join-ready socket overlaps AFTER breast tilt, calf sync, glute outer (B10)
+    if join_ready:
+        _apply_join_ready_overlaps(parts, messages)
+        messages.append("join_ready=true")
+
     if not parts:
         raise ProportionError(
             "nothing to emit: zero recipe parts after resolution",
@@ -2569,6 +2586,7 @@ def build_blockout_recipe(
         messages=messages,
         counts={"parts": len(parts), "by_role": by_role},
         metrics=metrics,
+        join_ready=bool(join_ready),
     )
 
 
@@ -2656,6 +2674,173 @@ def _set_part_x_local(part: RecipePart, x: float) -> None:
         dx = float(x) - mid
         part.p0 = [float(part.p0[0]) + dx, float(part.p0[1]), float(part.p0[2])]
         part.p1 = [float(part.p1[0]) + dx, float(part.p1[1]), float(part.p1[2])]
+
+
+# ---------------------------------------------------------------------------
+# 0039 — join-ready socket overlaps (local center-pull + radius grow ≤1.08)
+# ---------------------------------------------------------------------------
+
+_JOIN_READY_MAX_SCALE: Final[float] = 1.08
+_JOIN_READY_EPS: Final[float] = 1e-6
+
+
+def _shift_part_along_axis(part: RecipePart, axis: int, delta: float) -> None:
+    """Translate part center / p0 / p1 by *delta* along axis 0|1|2."""
+    if abs(delta) <= 1e-15:
+        return
+    if part.center is not None and len(part.center) >= 3:
+        c = [float(part.center[0]), float(part.center[1]), float(part.center[2])]
+        c[axis] += float(delta)
+        part.center = c
+    if part.p0 is not None and len(part.p0) >= 3:
+        p0 = [float(part.p0[0]), float(part.p0[1]), float(part.p0[2])]
+        p0[axis] += float(delta)
+        part.p0 = p0
+    if part.p1 is not None and len(part.p1) >= 3:
+        p1 = [float(part.p1[0]), float(part.p1[1]), float(part.p1[2])]
+        p1[axis] += float(delta)
+        part.p1 = p1
+
+
+def _scale_part_radii(part: RecipePart, factor: float) -> None:
+    """Uniform linear scale of radius / half-extents (B2 max 1.08 from original)."""
+    if factor <= 1.0 + 1e-15:
+        return
+    f = float(factor)
+    if part.rx_m is not None:
+        part.rx_m = float(part.rx_m) * f
+    if part.ry_m is not None:
+        part.ry_m = float(part.ry_m) * f
+    if part.rz_m is not None:
+        part.rz_m = float(part.rz_m) * f
+    if part.radius_m is not None:
+        part.radius_m = float(part.radius_m) * f
+    if part.top_half_width_m is not None:
+        part.top_half_width_m = float(part.top_half_width_m) * f
+    if part.bottom_half_width_m is not None:
+        part.bottom_half_width_m = float(part.bottom_half_width_m) * f
+    if part.half_depth_m is not None:
+        part.half_depth_m = float(part.half_depth_m) * f
+
+
+def _nudge_connection(
+    child: RecipePart,
+    parent: RecipePart,
+    axis: int,
+    *,
+    original_scale_cap: dict[str, float],
+) -> str:
+    """Apply B2 algorithm to one child↔parent pair. Returns status token."""
+    from meshops.proportion.connection_metrics import (
+        gap_along_axis,
+        is_toe_part,
+        socket_overlap_m,
+        sphere_proxy,
+    )
+
+    if is_toe_part(child.name):
+        return "skipped"
+
+    pc = sphere_proxy(child)
+    pp = sphere_proxy(parent)
+    if pc is None or pp is None:
+        return "skipped"
+    _c0, r_child = pc
+    _c1, r_parent = pp
+    if r_child <= 0.0 or r_parent <= 0.0:
+        return "skipped"
+
+    overlap = socket_overlap_m(r_child, r_parent)
+    max_pull = 0.5 * (r_child + r_parent)
+
+    gap = gap_along_axis(child, parent, axis)  # type: ignore[arg-type]
+    if gap is None:
+        return "skipped"
+    if gap <= _JOIN_READY_EPS:
+        return "overlapped"
+
+    # 1) center-pull child along attach axis toward parent
+    cc = sphere_proxy(child)
+    cp = sphere_proxy(parent)
+    if cc is None or cp is None:
+        return "skipped"
+    child_c, _ = cc
+    parent_c, _ = cp
+    direction = float(parent_c[axis]) - float(child_c[axis])
+    if abs(direction) < 1e-15:
+        # Same coord on axis but still gap from radii math — skip pull, try grow
+        pull = 0.0
+    else:
+        sign = 1.0 if direction > 0.0 else -1.0
+        pull = min(float(gap) + overlap / 2.0, max_pull) * sign
+        _shift_part_along_axis(child, axis, pull)
+
+    gap2 = gap_along_axis(child, parent, axis)  # type: ignore[arg-type]
+    if gap2 is not None and gap2 <= _JOIN_READY_EPS:
+        return "overlapped"
+
+    # 2) grow child radius up to 1.08x original
+    used = original_scale_cap.get(child.name, 1.0)
+    remaining = _JOIN_READY_MAX_SCALE / used
+    if remaining <= 1.0 + 1e-12:
+        return "partial"
+
+    gap_now = gap_along_axis(child, parent, axis)  # type: ignore[arg-type]
+    pc2 = sphere_proxy(child)
+    if gap_now is None or pc2 is None:
+        return "partial"
+    _, r_now = pc2
+    # want dist - r_now*s - r_parent <= 0 → s >= (dist - r_parent) / r_now
+    # dist = gap_now + r_now + r_parent
+    dist = float(gap_now) + r_now + r_parent
+    if r_now <= 1e-15:
+        return "partial"
+    needed = (dist - r_parent + overlap / 2.0) / r_now
+    if needed <= 1.0:
+        return "overlapped"
+    scale = min(float(needed), float(remaining))
+    if scale > 1.0 + 1e-12:
+        _scale_part_radii(child, scale)
+        original_scale_cap[child.name] = used * scale
+
+    gap3 = gap_along_axis(child, parent, axis)  # type: ignore[arg-type]
+    if gap3 is not None and gap3 <= _JOIN_READY_EPS:
+        return "overlapped"
+    return "partial"
+
+
+def _apply_join_ready_overlaps(
+    parts: list[RecipePart],
+    messages: list[str],
+) -> None:
+    """0039 B2: nudge RECIPE_* centers/radii for connection classes (no SOCKET_* parts)."""
+    from meshops.proportion.connection_metrics import resolve_join_connections
+
+    scale_cap: dict[str, float] = {}
+    class_status: dict[str, str] = {}
+
+    for class_id, child, parent, axis in resolve_join_connections(parts):
+        status = _nudge_connection(child, parent, int(axis), original_scale_cap=scale_cap)
+        # Keep worst status per class: partial > overlapped > skipped
+        prev = class_status.get(class_id)
+        if prev == "partial" or status == "partial":
+            class_status[class_id] = "partial"
+        elif prev == "overlapped" or status == "overlapped":
+            class_status[class_id] = "overlapped"
+        else:
+            class_status[class_id] = status
+
+    for class_id in (
+        "shoulder_l",
+        "shoulder_r",
+        "hip_l",
+        "hip_r",
+        "neck",
+        "ankle_l",
+        "ankle_r",
+    ):
+        st = class_status.get(class_id, "skipped")
+        messages.append(f"join_ready.{class_id}: {st}")
 
 
 def _align_glute_outer_to_hip_bridge(
@@ -2839,6 +3024,7 @@ def emit_bpy_script(package: BlockoutRecipePackage) -> str:
             entry["rotation_euler_deg"] = list(p.rotation_euler_deg)
         parts_data.append(entry)
 
+    join_ready_flag = bool(getattr(package, "join_ready", False))
     lines: list[str] = [
         "# setup_blockout_recipe.py — MeshOps track 0019",
         f"# honesty: {RECIPE_HONESTY}",
@@ -2847,6 +3033,7 @@ def emit_bpy_script(package: BlockoutRecipePackage) -> str:
         f"# axis_notes: {AXIS_NOTES}",
         f"# recipe schema_version: {RECIPE_SCHEMA_VERSION}",
         f"# recipe_id: {package.recipe_id}",
+        f"# join_ready: {join_ready_flag}",
         "# MeshOps face -Y: toes -Y, heels +Y. RECIPE only — not final mesh.",
         "# N1: do not whole-model voxel remesh from this script.",
         "",
@@ -3212,6 +3399,7 @@ def run_blockout_recipe(
     torso: TorsoMode = "trap",
     glute: GluteMode = "oval",
     nofuse: bool = False,
+    join_ready: bool = False,
     breast_tilt_deg: float | None = None,
     template_applied: Path | str | None = None,
     profiles: str | None = None,
@@ -3225,6 +3413,12 @@ def run_blockout_recipe(
     toes: ToeTier = "wedge",
 ) -> dict[str, Any]:
     """CLI helper: load report → build → write; return success payload."""
+    if nofuse and join_ready:
+        raise ProportionError(
+            "nofuse and join-ready are mutually exclusive",
+            code="recipe_failed",
+        )
+
     report = load_report(report_path)
     depth_pkg: DepthSamplesPackage | None = None
     if depth_at_landmarks is not None:
@@ -3271,6 +3465,7 @@ def run_blockout_recipe(
         torso=torso,
         glute=glute,
         nofuse=nofuse,
+        join_ready=join_ready,
         breast_tilt_deg=breast_tilt_deg,
         template_applied=tpl,
         profile=profile_doc,
@@ -3293,6 +3488,31 @@ def run_blockout_recipe(
         "counts": dict(package.counts),
         "messages": list(package.messages),
         "neck_len_m": package.metrics.neck_len_m,
+        "join_ready": bool(package.join_ready),
+    }
+
+
+def run_blockout_emit_setup(
+    recipe_path: Path | str,
+    out: Path | str,
+    *,
+    force: bool = False,
+) -> dict[str, Any]:
+    """0039: re-emit setup_blockout_recipe.py from existing recipe JSON (load→write only).
+
+    Uses write_blockout_recipe(format=\"bpy\") — never bare emit_bpy_script from CLI.
+    Does not re-run optimize or join-ready post-pass.
+    """
+    package = load_blockout_recipe(recipe_path)
+    paths = write_blockout_recipe(out, package, format="bpy", force=force)
+    return {
+        "ok": True,
+        "format": "bpy",
+        "paths": [str(p) for p in paths],
+        "counts": dict(package.counts),
+        "messages": list(package.messages),
+        "join_ready": bool(package.join_ready),
+        "honesty": RECIPE_HONESTY,
     }
 
 
@@ -3310,10 +3530,12 @@ __all__ = [
     "BlockoutRecipePackage",
     "RecipeMetrics",
     "RecipePart",
+    "_apply_join_ready_overlaps",
     "_midpoint_of_joints",
     "build_blockout_recipe",
     "emit_bpy_script",
     "load_blockout_recipe",
+    "run_blockout_emit_setup",
     "run_blockout_recipe",
     "write_blockout_recipe",
 ]

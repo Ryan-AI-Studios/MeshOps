@@ -90,7 +90,8 @@ proportion_app = typer.Typer(
         "Verbs: template | templates | apply-template | analyze | show | scaffold | guides | "
         "capture | depth-samples | blockout-recipe | anatomy-profiles | "
         "blockout-validate-constraints | "
-        "blockout-optimize | skeleton-build | depth-heatmap | depth-hint | silhouette-compare. "
+        "blockout-optimize | blockout-emit-setup | blockout-fuse-plan | "
+        "skeleton-build | depth-heatmap | depth-hint | silhouette-compare. "
         "Assist-first landmarks + head-unit checks + blockout-grade XYZ; "
         "schema 1.1.0 diameters (edge pairs) + left depth bands + cross-sections; "
         "scaffold creates package layout + package_checklist.json only (not mesh/print success); "
@@ -99,12 +100,14 @@ proportion_app = typer.Typer(
         "depth-samples exports depth_at_landmarks.json + optional mesh ray deltas (N6); "
         "templates / apply-template: sex/archetype body priors (authoring only — N6); "
         "blockout-recipe emits trap/ovals RECIPE primitives + topology flags "
-        "(--torso/--glute/--nofuse/--breast-tilt-deg/--template-applied/"
+        "(--torso/--glute/--nofuse/--join-ready/--breast-tilt-deg/--template-applied/"
         "--profiles/--skeleton; authoring only — N6); "
         "anatomy-profiles lists torso/limb shape packs (0027; authoring only — N6); "
         "blockout-validate-constraints named-role hard rules (CONSTRAINT_HONESTY — N6); "
         "blockout-optimize constrained free-DOF adjust, --freeze-feet default "
         "(OPTIMIZE_HONESTY — N6; free-name optimizers are NOT product); "
+        "blockout-emit-setup re-emits setup_*.py from recipe JSON (N6); "
+        "blockout-fuse-plan writes fuse_plan.json procedure (FUSE_HONESTY — N6); "
         "skeleton-build emits joint/bone blockout_skeleton.json + optional SKEL_* bpy "
         "(SKELETON_HONESTY — authoring scaffold only, not animation rig — N6); "
         "depth-heatmap glance PNG from samples/deltas (numbers SoT — N6); "
@@ -2371,6 +2374,14 @@ def proportion_blockout_recipe_cmd(
         "--nofuse",
         help="No join/boolean policy message (layout-only emit)",
     ),
+    join_ready: bool = typer.Option(
+        False,
+        "--join-ready",
+        help=(
+            "Socket-overlap post-pass for fuse readiness (mutually exclusive with --nofuse; "
+            "authoring only — N6)"
+        ),
+    ),
     template_applied: Path | None = typer.Option(
         None,
         "--template-applied",
@@ -2467,6 +2478,7 @@ def proportion_blockout_recipe_cmd(
             torso=torso_mode,  # type: ignore[arg-type]
             glute=glute_mode,  # type: ignore[arg-type]
             nofuse=nofuse,
+            join_ready=join_ready,
             breast_tilt_deg=breast_tilt_deg,
             template_applied=template_applied,
             profiles=profiles,
@@ -2495,7 +2507,8 @@ def proportion_blockout_recipe_cmd(
             f"blockout-recipe format={payload.get('format')} "
             f"parts={counts.get('parts', 0)} "
             f"by_role={by_role} "
-            f"neck_len_m={neck_s}"
+            f"neck_len_m={neck_s} "
+            f"join_ready={payload.get('join_ready')}"
         )
         for p in payload.get("paths") or []:
             typer.echo(f"  {p}")
@@ -2503,6 +2516,104 @@ def proportion_blockout_recipe_cmd(
             typer.echo(f"  note: {msg}")
         typer.echo(f"honesty: {RECIPE_HONESTY}")
         typer.echo("blockout-recipe only — not mesh or print success")
+    raise typer.Exit(0)
+
+
+@proportion_app.command("blockout-emit-setup")
+def proportion_blockout_emit_setup_cmd(
+    recipe: Path = typer.Option(
+        ...,
+        "--recipe",
+        help="Path to blockout_recipe.json",
+    ),
+    out: str = typer.Option(
+        ...,
+        "--out",
+        help="Output setup_blockout_recipe.py file or directory "
+        "(trailing sep marks a directory even if not yet created)",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite existing setup script",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
+) -> None:
+    """Re-emit setup_blockout_recipe.py from existing recipe JSON (authoring only)."""
+    from meshops.proportion.blockout_recipe import run_blockout_emit_setup
+    from meshops.proportion.errors import ProportionError
+    from meshops.proportion.honesty import RECIPE_HONESTY
+
+    try:
+        payload = run_blockout_emit_setup(recipe, out, force=force)
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    if json_out:
+        _emit_json(payload)
+    else:
+        typer.echo(
+            f"blockout-emit-setup join_ready={payload.get('join_ready')} "
+            f"format={payload.get('format')}"
+        )
+        for p in payload.get("paths") or []:
+            typer.echo(f"  {p}")
+        for msg in payload.get("messages") or []:
+            typer.echo(f"  note: {msg}")
+        typer.echo(f"honesty: {RECIPE_HONESTY}")
+        typer.echo("emit-setup only — not mesh or print success")
+    raise typer.Exit(0)
+
+
+@proportion_app.command("blockout-fuse-plan")
+def proportion_blockout_fuse_plan_cmd(
+    recipe: Path = typer.Option(
+        ...,
+        "--recipe",
+        help="Path to blockout_recipe.json",
+    ),
+    out: str = typer.Option(
+        ...,
+        "--out",
+        help="Output fuse_plan.json file or directory "
+        "(trailing sep marks a directory even if not yet created)",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite existing fuse plan",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
+) -> None:
+    """Write fuse_plan.json procedure (authoring weld assist only — not mesh/print)."""
+    from meshops.proportion.errors import ProportionError
+    from meshops.proportion.fuse_plan import run_blockout_fuse_plan
+    from meshops.proportion.honesty import FUSE_HONESTY
+
+    try:
+        payload = run_blockout_fuse_plan(recipe, out, force=force)
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    if json_out:
+        _emit_json(payload)
+    else:
+        voxel = payload.get("voxel_m") or {}
+        typer.echo(
+            f"blockout-fuse-plan voxel_coarse={voxel.get('coarse')} "
+            f"voxel_fine={voxel.get('fine')} "
+            f"max_local_grow={payload.get('max_local_grow')}"
+        )
+        for p in payload.get("paths") or []:
+            typer.echo(f"  {p}")
+        for msg in payload.get("messages") or []:
+            typer.echo(f"  note: {msg}")
+        typer.echo(f"honesty: {FUSE_HONESTY}")
+        typer.echo("fuse-plan authoring only — not mesh or print success")
     raise typer.Exit(0)
 
 

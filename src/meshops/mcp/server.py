@@ -63,6 +63,8 @@ TOOL_NAMES: frozenset[str] = frozenset(
         "mesh_proportion_anatomy_profiles",
         "mesh_proportion_blockout_validate_constraints",
         "mesh_proportion_blockout_optimize",
+        "mesh_proportion_blockout_emit_setup",
+        "mesh_proportion_blockout_fuse_plan",
         "mesh_proportion_skeleton_build",
         "mesh_proportion_depth_heatmap",
         "mesh_proportion_depth_hint",
@@ -649,6 +651,7 @@ def build_server(work_root: Path | None = None) -> Any:
         torso: str = "trap",
         glute: str = "oval",
         nofuse: bool = False,
+        join_ready: bool = False,
         breast_tilt_deg: float | None = None,
         template_applied: str | None = None,
         profiles: str | None = None,
@@ -666,7 +669,8 @@ def build_server(work_root: Path | None = None) -> Any:
         Authoring layout only — proportion_blockout_recipe_not_mesh_or_print_success (N6).
         Topology: torso trap|ovals, glute oval|two_spheres, optional template-applied.
         Optional profiles + skeleton (0027). Opt-in face/hair/neckline (0028).
-        Opt-in hands/feet (0029). Raises ProportionError on failure.
+        Opt-in hands/feet (0029). Opt-in join_ready (0039; mutually exclusive with nofuse).
+        Raises ProportionError on failure.
         """
         return T.mesh_proportion_blockout_recipe(
             wr,
@@ -679,6 +683,7 @@ def build_server(work_root: Path | None = None) -> Any:
             torso=torso,
             glute=glute,
             nofuse=nofuse,
+            join_ready=join_ready,
             breast_tilt_deg=breast_tilt_deg,
             template_applied=template_applied,
             profiles=profiles,
@@ -690,6 +695,42 @@ def build_server(work_root: Path | None = None) -> Any:
             feet=feet,
             fingers=fingers,
             toes=toes,
+        )
+
+    @mcp.tool()
+    def mesh_proportion_blockout_emit_setup(
+        recipe: str,
+        out: str,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Re-emit setup_blockout_recipe.py from existing blockout_recipe.json.
+
+        Authoring layout only — proportion_blockout_recipe_not_mesh_or_print_success (N6).
+        Load + write bpy only — does not re-run optimize or join-ready. Raises on failure.
+        """
+        return T.mesh_proportion_blockout_emit_setup(
+            wr,
+            recipe=recipe,
+            out=out,
+            force=force,
+        )
+
+    @mcp.tool()
+    def mesh_proportion_blockout_fuse_plan(
+        recipe: str,
+        out: str,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Write fuse_plan.json (two-pass voxel procedure + caps + FUSE_HONESTY).
+
+        Authoring weld assist only — proportion_blockout_fuse_not_mesh_or_print_success (N6).
+        Does not execute Blender. Raises on failure.
+        """
+        return T.mesh_proportion_blockout_fuse_plan(
+            wr,
+            recipe=recipe,
+            out=out,
+            force=force,
         )
 
     @mcp.tool()

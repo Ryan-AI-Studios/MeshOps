@@ -66,17 +66,19 @@ def test_tool_catalog_complete_and_no_forbidden() -> None:
             assert "mesh_proportion_anatomy_profiles" in names
             assert "mesh_proportion_blockout_validate_constraints" in names
             assert "mesh_proportion_blockout_optimize" in names
+            assert "mesh_proportion_blockout_emit_setup" in names
+            assert "mesh_proportion_blockout_fuse_plan" in names
             assert "mesh_proportion_skeleton_build" in names
             assert "mesh_proportion_depth_heatmap" in names
             assert "mesh_proportion_depth_hint" in names
             assert "mesh_proportion_silhouette_compare" in names
-            assert len(names) >= 43
+            assert len(names) == 45
 
     _run(_body())
 
 
 def test_mcp__proportion_tools_in_catalog() -> None:
-    """Explicit 0027 catalog freeze: seventeen proportion tools; len >= 43."""
+    """Explicit 0039 catalog freeze: proportion tools + emit-setup/fuse-plan; len == 45."""
 
     async def _body() -> None:
         server = build_server()
@@ -97,14 +99,40 @@ def test_mcp__proportion_tools_in_catalog() -> None:
                 "mesh_proportion_anatomy_profiles",
                 "mesh_proportion_blockout_validate_constraints",
                 "mesh_proportion_blockout_optimize",
+                "mesh_proportion_blockout_emit_setup",
+                "mesh_proportion_blockout_fuse_plan",
                 "mesh_proportion_skeleton_build",
                 "mesh_proportion_depth_heatmap",
                 "mesh_proportion_depth_hint",
                 "mesh_proportion_silhouette_compare",
             ):
                 assert n in names
-            assert len(names) >= 43
+            assert len(names) == 45
             assert names >= TOOL_NAMES
+            assert len(TOOL_NAMES) == 45
+
+    _run(_body())
+
+
+def test_mcp__t10_t11_join_ready_and_catalog_45() -> None:
+    """T10/T11: catalog 45; both new tools; recipe join_ready in inputSchema."""
+
+    async def _body() -> None:
+        server = build_server()
+        async with Client(server) as client:
+            listed = await client.list_tools()
+            by_name = {t.name: t for t in listed.tools}
+            assert len(by_name) == 45
+            assert "mesh_proportion_blockout_emit_setup" in by_name
+            assert "mesh_proportion_blockout_fuse_plan" in by_name
+            recipe_tool = by_name["mesh_proportion_blockout_recipe"]
+            schema = (
+                getattr(recipe_tool, "input_schema", None)
+                or getattr(recipe_tool, "inputSchema", None)
+                or {}
+            )
+            props = schema.get("properties") or {}
+            assert "join_ready" in props
 
     _run(_body())
 

@@ -965,6 +965,7 @@ def mesh_proportion_blockout_recipe(
     torso: str = "trap",
     glute: str = "oval",
     nofuse: bool = False,
+    join_ready: bool = False,
     breast_tilt_deg: float | None = None,
     template_applied: str | None = None,
     profiles: str | None = None,
@@ -1020,6 +1021,7 @@ def mesh_proportion_blockout_recipe(
         torso=torso_mode,  # type: ignore[arg-type]
         glute=glute_mode,  # type: ignore[arg-type]
         nofuse=nofuse,
+        join_ready=bool(join_ready),
         breast_tilt_deg=breast_tilt_deg,
         template_applied=(
             _resolve_tool_path(template_applied, work_root) if template_applied else None
@@ -1033,6 +1035,52 @@ def mesh_proportion_blockout_recipe(
         feet=bool(feet),
         fingers=fingers_tier,  # type: ignore[arg-type]
         toes=toes_tier,  # type: ignore[arg-type]
+    )
+
+
+def mesh_proportion_blockout_emit_setup(
+    work_root: Path,
+    *,
+    recipe: str,
+    out: str,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Re-emit setup_blockout_recipe.py from recipe JSON. Authoring only — RECIPE_HONESTY / N6."""
+    from meshops.proportion.blockout_recipe import run_blockout_emit_setup
+
+    ends_sep = out.endswith(("/", "\\"))
+    out_base = out.rstrip("/\\") if ends_sep else out
+    out_resolved = _resolve_tool_path(out_base, work_root)
+    out_arg: str | Path = (
+        str(out_resolved) + ("\\" if ends_sep else "") if ends_sep else out_resolved
+    )
+    return run_blockout_emit_setup(
+        _resolve_tool_path(recipe, work_root),
+        out_arg,
+        force=force,
+    )
+
+
+def mesh_proportion_blockout_fuse_plan(
+    work_root: Path,
+    *,
+    recipe: str,
+    out: str,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Write fuse_plan.json procedure. Authoring weld only — FUSE_HONESTY / N6."""
+    from meshops.proportion.fuse_plan import run_blockout_fuse_plan
+
+    ends_sep = out.endswith(("/", "\\"))
+    out_base = out.rstrip("/\\") if ends_sep else out
+    out_resolved = _resolve_tool_path(out_base, work_root)
+    out_arg: str | Path = (
+        str(out_resolved) + ("\\" if ends_sep else "") if ends_sep else out_resolved
+    )
+    return run_blockout_fuse_plan(
+        _resolve_tool_path(recipe, work_root),
+        out_arg,
+        force=force,
     )
 
 
