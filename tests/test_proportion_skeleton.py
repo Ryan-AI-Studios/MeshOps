@@ -649,11 +649,11 @@ def test_skeleton__depth_family_arm_joints_no_band() -> None:
 
 
 def test_skeleton__cli_depth_at_landmarks_file(tmp_path: Path) -> None:
-    """T7: CLI + MCP optional depth file path smoke (catalog stays 43)."""
+    """T7: CLI + MCP optional depth file path smoke (catalog 45 after 0039)."""
     from meshops.mcp import TOOL_NAMES
     from meshops.mcp.tools import mesh_proportion_skeleton_build
 
-    assert len(TOOL_NAMES) == 43
+    assert len(TOOL_NAMES) == 45
     assert "mesh_proportion_skeleton_build" in TOOL_NAMES
 
     lms = {
