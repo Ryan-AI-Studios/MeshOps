@@ -988,6 +988,70 @@ def test_recipe__torso_ovals_d6_names_no_trap() -> None:
     assert "nofuse" not in pkg.counts
 
 
+def _torso_oval_span_from_report(report: ProportionReport) -> float:
+    """Match _build_torso_ovals span: z_top=max(shoulder_z, chest_z), z_bottom=hip_z."""
+    lms = report.landmarks_xyz
+    sh_zs = [
+        float(lms[k].z_m)
+        for k in ("shoulder_l", "shoulder_r")
+        if k in lms and lms[k].z_m is not None
+    ]
+    hip_zs = [float(lms[k].z_m) for k in ("hip_l", "hip_r") if k in lms and lms[k].z_m is not None]
+    assert sh_zs and hip_zs
+    shoulder_z = sum(sh_zs) / len(sh_zs)
+    hip_z = sum(hip_zs) / len(hip_zs)
+    chest_z: float | None = None
+    for band in report.depth_bands:
+        if band.band_id == "chest" and band.z_frac is not None and report.height_m is not None:
+            chest_z = float(band.z_frac) * float(report.height_m)
+            break
+    if chest_z is None and "chest_front" in lms and lms["chest_front"].z_m is not None:
+        chest_z = float(lms["chest_front"].z_m)
+    if chest_z is None:
+        chest_z = shoulder_z
+    z_top = max(shoulder_z, chest_z)
+    return z_top - hip_z
+
+
+def test_recipe__torso_oval_rz_span_022() -> None:
+    """T7 / B6: each torso oval rz >= span*0.20 and == max(0.025, span*0.22)."""
+    report = _full_torso_report()
+    pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
+    span = _torso_oval_span_from_report(report)
+    expected_rz = max(0.025, span * 0.22)
+    for name in (
+        "RECIPE_torso_oval_chest",
+        "RECIPE_torso_oval_waist",
+        "RECIPE_torso_oval_hip",
+    ):
+        part = next(p for p in pkg.parts if p.name == name)
+        assert part.rz_m is not None
+        assert float(part.rz_m) >= span * 0.20
+        assert float(part.rz_m) == pytest.approx(expected_rz, abs=1e-9)
+
+
+def test_recipe__torso_oval_layer_overlap() -> None:
+    """T8 / B6: adjacent chest/waist/hip layers overlap or touch on Z."""
+    report = _full_torso_report()
+    pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
+    by_name = {p.name: p for p in pkg.parts}
+    layers = (
+        "RECIPE_torso_oval_chest",
+        "RECIPE_torso_oval_waist",
+        "RECIPE_torso_oval_hip",
+    )
+    for i in range(len(layers) - 1):
+        a = by_name[layers[i]]
+        b = by_name[layers[i + 1]]
+        assert a.center is not None and b.center is not None
+        assert a.rz_m is not None and b.rz_m is not None
+        z_i = float(a.center[2])
+        z_j = float(b.center[2])
+        rz_i = float(a.rz_m)
+        rz_j = float(b.rz_m)
+        assert abs(z_i - z_j) <= rz_i + rz_j
+
+
 def test_recipe__modes_in_messages_not_counts() -> None:
     report = _full_torso_report()
     pkg = build_blockout_recipe(report, limbs=False, torso="trap", glute="oval", nofuse=True)

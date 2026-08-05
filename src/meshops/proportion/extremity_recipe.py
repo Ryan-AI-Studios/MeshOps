@@ -31,16 +31,21 @@ _FOOT_LEN_NO_TEMPLATE_FRAC: Final[float] = 0.15
 _FOOT_WIDTH_FALLBACK_FRAC_H: Final[float] = 0.02
 _PLATE_THICKNESS_FRAC_H: Final[float] = 0.02
 _HAND_LEN_FALLBACK_FRAC_H: Final[float] = 0.11
-_PALM_WIDTH_FRAC_HAND: Final[float] = 0.45
-_PALM_THICKNESS_FRAC_HAND: Final[float] = 0.12
-_MITTEN_LEN_FRAC_HAND: Final[float] = 0.55
+_PALM_WIDTH_FRAC_HAND: Final[float] = 0.55
+_PALM_THICKNESS_FRAC_HAND: Final[float] = 0.22
+_PALM_LEN_FRAC_HAND: Final[float] = 0.48
+_MITTEN_LEN_FRAC_HAND: Final[float] = 0.50
+_MITTEN_R_FRAC_PALM: Final[float] = 0.72  # fat mitt, not thin stick
 _FINGER_SEG_FRAC_HAND: Final[float] = 1.0 / 5.0
 _FINGER_R_FRAC_PALM: Final[float] = 0.08
 _THUMB_SEG_FRAC_HAND: Final[float] = 1.0 / 6.0
-_TOE_WEDGE_LEN_FRAC: Final[float] = 0.25
+_TOE_WEDGE_LEN_FRAC: Final[float] = 0.38  # elongated front mass (not a ball on plate)
 _TOE_FULL_LEN_FRAC: Final[float] = 0.20
 _BALL_SOFT_R_FRAC_FOOT: Final[float] = 0.12
-_HEEL_R_FRAC_FOOT: Final[float] = 0.12
+# Heel bridge min-floor inside max(...) — not the primary heel size (0040 B3 / AI1 P3-3).
+# Primary size comes from (heel_z_hi - heel_z_lo)*0.5 and half_width*1.1.
+_HEEL_R_FRAC_FOOT: Final[float] = 0.18
+_HEEL_BRIDGE_OVERLAP_FRAC: Final[float] = 0.35  # overlap into ank_foot vertical extent
 _FINGER_Y_BIAS_FRAC: Final[float] = 0.10  # secondary only when no tip
 _NEAR_ZERO: Final[float] = 1e-9
 _FINGER_NAMES: Final[tuple[str, ...]] = ("index", "middle", "ring", "pinky")
@@ -460,23 +465,39 @@ def _build_foot_side(
     ank_y = stack_y
     toe_y = plate_y - (2.0 / 3.0) * half_depth  # front third for toe wedge
 
-    # Ankle / heel Z
+    # Ankle Z: use joint when clearly above the plate (real ankle height).
     if ankle is not None and ankle[2] == ankle[2] and float(ankle[2]) > z_top:
         ank_z = float(ankle[2])
     else:
-        ank_z = z_top + half_width  # rest above plate top
+        ank_z = z_top + half_width * 2.2  # rest above plate top
 
-    heel_r = max(_HEEL_R_FRAC_FOOT * foot_len, half_width * 0.8)
-    if heel is not None and heel[2] == heel[2] and float(heel[2]) >= 0:
-        heel_z = max(float(heel[2]), heel_r)
-    else:
-        heel_z = z_top + heel_r * 0.5
+    # Ankle mass: keep rx = half_width for C_foot_width; grow ry/rz so it reads as a
+    # joint and meets the heel bridge + calf distal (not a pea on the plate).
+    ank_rx = half_width
+    ank_ry = max(half_width * 1.05, 0.028)
+    ank_rz = max(half_width * 1.35, 0.034)
 
-    toe_r = max(0.08 * foot_len, half_width * 0.6)
-    if toe is not None and toe[2] == toe[2] and float(toe[2]) >= 0:
-        toe_z = max(float(toe[2]), toe_r * 0.5)
-    else:
-        toe_z = z_top + toe_r * 0.4
+    # Tall heel bridge: rear mass from plate up into ank_foot so leg↔foot connect.
+    # (Decorative sole-ball heels left a ~cm gap under the ankle joint.)
+    heel_z_lo = z_top * 0.25
+    heel_z_hi = ank_z + ank_rz * _HEEL_BRIDGE_OVERLAP_FRAC
+    heel_rz = max(_HEEL_R_FRAC_FOOT * foot_len, (heel_z_hi - heel_z_lo) * 0.5, half_width * 1.1)
+    heel_z = 0.5 * (heel_z_lo + heel_z_hi)
+    # Keep bridge below pure ankle-clone mid-shin: center must stay under ank_z.
+    if heel_z >= ank_z:
+        heel_z = ank_z * 0.55
+        heel_rz = max(heel_rz, ank_z * 0.45)
+    heel_rx = max(half_width * 1.05, ank_rx * 0.95)
+    heel_ry = max(half_depth * 0.38, heel_rz * 0.55)
+
+    # Toe wedge: front of plate (-Y), elongated in depth, flat on sole — not a ball on top.
+    # Skeleton heel/toe often inherit ankle Z (estimated) — never use that for sole masses.
+    toe_ry = max(_TOE_WEDGE_LEN_FRAC * foot_len * 0.5, half_depth * 0.42)
+    toe_rx = half_width * 0.95
+    toe_rz = max(thickness * 0.9, half_width * 0.45, 0.012)
+    toe_z = z_top + toe_rz * 0.35
+    # Push toe mass to the front third/edge of the plate (clearly forward of heel).
+    toe_y = plate_y - half_depth * 0.82
 
     # parent_joint
     pj_plate = _parent_joint(
@@ -529,16 +550,16 @@ def _build_foot_side(
         )
     )
 
-    # heel mass at rear stack Y (+Y of plate mid) — same Y as ank_foot (0023)
+    # Heel bridge at rear stack Y (+Y of plate mid) — same Y as ank_foot (0023)
     heel_name = f"RECIPE_heel_{side}"
     out.append(
         _ellipsoid(
             heel_name,
             "heel",
             [plate_x, heel_y, heel_z],
-            half_width * 0.95,
-            heel_r,
-            heel_r * 0.85,
+            heel_rx,
+            heel_ry,
+            heel_rz,
             parent_joint=pj_heel,
         )
     )
@@ -551,9 +572,9 @@ def _build_foot_side(
             ank_name,
             "ankle_bridge",
             [plate_x, ank_y, ank_z],
-            half_width,  # rx = ankle half-width (same as plate half-width)
-            half_width * 0.9,
-            half_width,
+            ank_rx,
+            ank_ry,
+            ank_rz,
             parent_joint=pj_ank,
         )
     )
@@ -562,16 +583,15 @@ def _build_foot_side(
         return out
 
     if toes == "wedge":
-        # Single toe wedge at front third (-Y)
-        wedge_len = _TOE_WEDGE_LEN_FRAC * foot_len
+        # Elongated toe mass at front of plate (-Y), flat on sole
         out.append(
             _ellipsoid(
                 f"RECIPE_toe_soft_{side}",
                 "toe_soft",
                 [plate_x, toe_y, toe_z],
-                half_width * 0.85,
-                wedge_len / 2.0,
-                toe_r,
+                toe_rx,
+                toe_ry,
+                toe_rz,
                 parent_joint=pj_toe,
             )
         )
@@ -714,7 +734,7 @@ def _build_hand_side(
 
     palm_w = _PALM_WIDTH_FRAC_HAND * hand_len
     palm_th = _PALM_THICKNESS_FRAC_HAND * hand_len
-    palm_len = 0.40 * hand_len  # along finger axis half-extent as box depth proxy
+    palm_len = _PALM_LEN_FRAC_HAND * hand_len  # along finger axis (full extent)
 
     pj_palm = _parent_joint(
         f"hand_{side}",
@@ -735,56 +755,52 @@ def _build_hand_side(
 
     out: list[RecipePart] = []
 
-    # Palm as flat box: width X, thickness along Y-ish, length along axis approximated
-    # Use box with half_depth ≈ palm_len/2 in Y for A-pose readability when axis is -Z
-    # Prefer ellipsoid flat in palm plane when hanging (-Z primary)
+    # Ellipsoid palm (never world-axis box — that read as "cube with a stick").
+    # Width on X; thickness on Y; length along hang Z when axis is primarily -Z.
     palm_name = f"RECIPE_palm_{side}"
-    # Box oriented world axes (authoring): half_width = palm_w/2, half_depth small in Y,
-    # z span = palm_len (hand hangs in Z when no tip)
     half_w = palm_w / 2.0
     if abs(axis[2]) >= abs(axis[1]):
-        # Primary -Z hang: palm extent mainly in Z
-        z_half = palm_len / 2.0
-        out.append(
-            _box(
-                palm_name,
-                "palm",
-                palm_c,
-                half_width=half_w,
-                half_depth=max(palm_th, 0.01),
-                z_bottom=palm_c[2] - z_half,
-                z_top=palm_c[2] + z_half,
-                parent_joint=pj_palm,
-            )
-        )
+        # A-pose hang: flattened hand pad
+        palm_rx = max(half_w, 0.02)
+        palm_ry = max(palm_th * 0.55, 0.012)
+        palm_rz = max(palm_len * 0.5, 0.025)
     else:
-        # Tip-directed (often -Y-ish): use ellipsoid
-        out.append(
-            _ellipsoid(
-                palm_name,
-                "palm",
-                palm_c,
-                half_w,
-                palm_len / 2.0,
-                palm_th,
-                parent_joint=pj_palm,
-            )
+        # Tip-directed (often -Y): length along Y
+        palm_rx = max(half_w, 0.02)
+        palm_ry = max(palm_len * 0.5, 0.025)
+        palm_rz = max(palm_th * 0.55, 0.012)
+    out.append(
+        _ellipsoid(
+            palm_name,
+            "palm",
+            palm_c,
+            palm_rx,
+            palm_ry,
+            palm_rz,
+            parent_joint=pj_palm,
         )
+    )
 
     if fingers == "none":
         return out
 
     if fingers == "mitten":
+        # Fat mitten ellipsoid overlapping palm (not a thin stick capsule)
         mitten_len = _MITTEN_LEN_FRAC_HAND * hand_len
-        p0 = _add(palm_c, axis, 0.15 * hand_len)
-        p1 = _add(palm_c, axis, 0.15 * hand_len + mitten_len)
+        mitt_c = _add(palm_c, axis, 0.28 * hand_len)
+        mitt_r = max(half_w * _MITTEN_R_FRAC_PALM, 0.014)
+        if abs(axis[2]) >= abs(axis[1]):
+            mitt_rx, mitt_ry, mitt_rz = mitt_r, mitt_r * 0.75, mitten_len * 0.5
+        else:
+            mitt_rx, mitt_ry, mitt_rz = mitt_r, mitten_len * 0.5, mitt_r * 0.75
         out.append(
-            _capsule(
+            _ellipsoid(
                 f"RECIPE_finger_mitten_{side}",
                 "finger_soft",
-                p0,
-                p1,
-                max(half_w * 0.55, 0.008),
+                mitt_c,
+                mitt_rx,
+                mitt_ry,
+                mitt_rz,
                 parent_joint=pj_digit,
             )
         )
