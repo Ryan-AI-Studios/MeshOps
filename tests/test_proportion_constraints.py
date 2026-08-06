@@ -22,11 +22,16 @@ from meshops.proportion.constraints import (
     CONSTRAINTS_SCHEMA_VERSION,
     FOOT_WIDTH_TOL_M,
     FREEZE_FEET_ROLES,
+    HEEL_REACH_GAP_TOL_M,
     OPTIMIZE_FAST_SEED,
     OPTIMIZE_SCHEMA_VERSION,
     OPTIMIZE_SLOW_SEED,
     OUTER_X_TOL_M,
     SOFT_GAP_FRAC,
+    TOE_FORWARD_EPS_M,
+    TOE_SOLE_ABS_M,
+    TOE_SOLE_CEIL_M,
+    TOE_SOLE_RZ_FRAC,
     _band_weighted_free_dof_score,
     _role_target_y,
     classify_part_name,
@@ -51,6 +56,8 @@ def _part(
     rz_m: float | None = 0.04,
     radius_m: float | None = None,
     half_depth_m: float | None = None,
+    z_top_m: float | None = None,
+    z_bottom_m: float | None = None,
     p0: list[float] | None = None,
     p1: list[float] | None = None,
 ) -> RecipePart:
@@ -68,6 +75,9 @@ def _part(
         "glute_soft",
         "iliac_soft",
         "limb_segment",
+        "foot_plate",
+        "palm",
+        "toe_soft",
     ):
         recipe_role = "limb_segment"
     kwargs: dict[str, Any] = {
@@ -80,6 +90,8 @@ def _part(
         "rz_m": rz_m,
         "radius_m": radius_m,
         "half_depth_m": half_depth_m,
+        "z_top_m": z_top_m,
+        "z_bottom_m": z_bottom_m,
         "p0": p0,
         "p1": p1,
     }
@@ -166,6 +178,12 @@ def test_constants_and_honesty_tokens() -> None:
     assert OPTIMIZE_FAST_SEED == 11
     assert OPTIMIZE_SLOW_SEED == 13
     assert frozenset({"foot_plate", "heel", "ankle_bridge", "calf_distal"}) == FREEZE_FEET_ROLES
+    # 0042 foot-stack freezes
+    assert TOE_FORWARD_EPS_M == 0.005
+    assert HEEL_REACH_GAP_TOL_M == 0.015
+    assert TOE_SOLE_ABS_M == 0.04
+    assert TOE_SOLE_RZ_FRAC == 1.5
+    assert TOE_SOLE_CEIL_M == 0.06
 
 
 # ---------------------------------------------------------------------------
@@ -832,6 +850,313 @@ def test_duplicate_limb_dot001_fails() -> None:
     by_id = {r.id: r for r in report.rules}
     assert by_id["C_no_dup_limb"].status == "fail"
     assert report.ok is False
+
+
+# ---------------------------------------------------------------------------
+# 0042 foot-stack connectivity (T1-T8)
+# ---------------------------------------------------------------------------
+
+_FOOT_STACK_RULES = (
+    "C_toe_forward_of_heel",
+    "C_heel_reaches_ank_foot",
+    "C_toe_sole_z",
+    "C_palm_ellipsoid",
+)
+
+
+def _good_foot_stack_l() -> list[RecipePart]:
+    """Synthetic L foot stack that mirrors post-0040 pass geometry."""
+    # plate center y=0.0, half_depth→ry, z_top=0.04
+    # heel rear +Y, tall enough to reach ankle; toe forward -Y, sole Z
+    return [
+        _part(
+            "RECIPE_foot_plate_l",
+            kind="ellipsoid",
+            center=[0.10, 0.0, 0.02],
+            rx_m=0.04,
+            ry_m=0.10,
+            rz_m=0.02,
+            z_top_m=0.04,
+            z_bottom_m=0.0,
+        ),
+        _part(
+            "RECIPE_heel_l",
+            kind="ellipsoid",
+            center=[0.10, 0.06, 0.05],
+            rx_m=0.03,
+            ry_m=0.03,
+            rz_m=0.05,
+        ),
+        _part(
+            "RECIPE_ank_foot_l",
+            kind="ellipsoid",
+            center=[0.10, 0.06, 0.10],
+            rx_m=0.03,
+            ry_m=0.03,
+            rz_m=0.03,
+        ),
+        _part(
+            "RECIPE_toe_soft_l",
+            kind="ellipsoid",
+            center=[0.10, -0.08, 0.03],
+            rx_m=0.03,
+            ry_m=0.03,
+            rz_m=0.015,
+        ),
+    ]
+
+
+def test_foot_stack_synthetic_pass() -> None:
+    """T1: well-constructed synthetic foot stack → three foot rules pass."""
+    pkg = _pkg(_good_foot_stack_l())
+    report = validate_constraints(pkg)
+    by_id = {r.id: r for r in report.rules}
+    for rid in (
+        "C_toe_forward_of_heel",
+        "C_heel_reaches_ank_foot",
+        "C_toe_sole_z",
+    ):
+        assert by_id[rid].status == "pass", f"{rid}: {by_id[rid].status} {by_id[rid].message}"
+
+
+def test_toe_behind_heel_fails_forward() -> None:
+    """T2: toe.y behind heel.y → C_toe_forward_of_heel fail."""
+    parts = _good_foot_stack_l()
+    # Move toe behind heel (+Y of heel)
+    for i, p in enumerate(parts):
+        if "toe_soft" in p.name:
+            parts[i] = _part(
+                p.name,
+                kind="ellipsoid",
+                center=[0.10, 0.10, 0.03],  # behind heel y=0.06
+                rx_m=0.03,
+                ry_m=0.03,
+                rz_m=0.015,
+            )
+    pkg = _pkg(parts)
+    report = validate_constraints(pkg)
+    by_id = {r.id: r for r in report.rules}
+    assert by_id["C_toe_forward_of_heel"].status == "fail"
+    assert "toe_l" in by_id["C_toe_forward_of_heel"].message
+    assert report.ok is False
+
+
+def test_heel_does_not_reach_ankle_fails() -> None:
+    """T3: heel.z >= ank.z OR heel top below ank_bottom - tol -> fail."""
+    # Equality centers (clone class)
+    pkg_eq = _pkg(
+        [
+            _part(
+                "RECIPE_heel_l",
+                kind="ellipsoid",
+                center=[0.10, 0.06, 0.10],
+                rx_m=0.03,
+                ry_m=0.03,
+                rz_m=0.03,
+            ),
+            _part(
+                "RECIPE_ank_foot_l",
+                kind="ellipsoid",
+                center=[0.10, 0.06, 0.10],
+                rx_m=0.03,
+                ry_m=0.03,
+                rz_m=0.03,
+            ),
+        ]
+    )
+    r_eq = validate_constraints(pkg_eq)
+    by_eq = {r.id: r for r in r_eq.rules}
+    assert by_eq["C_heel_reaches_ank_foot"].status == "fail"
+
+    # Gap too large: heel top far below ankle bottom
+    pkg_gap = _pkg(
+        [
+            _part(
+                "RECIPE_heel_l",
+                kind="ellipsoid",
+                center=[0.10, 0.06, 0.02],
+                rx_m=0.03,
+                ry_m=0.03,
+                rz_m=0.02,  # top=0.04
+            ),
+            _part(
+                "RECIPE_ank_foot_l",
+                kind="ellipsoid",
+                center=[0.10, 0.06, 0.15],
+                rx_m=0.03,
+                ry_m=0.03,
+                rz_m=0.03,  # bottom=0.12; gap = 0.04-0.12 = -0.08 < -tol
+            ),
+        ]
+    )
+    r_gap = validate_constraints(pkg_gap)
+    by_gap = {r.id: r for r in r_gap.rules}
+    assert by_gap["C_heel_reaches_ank_foot"].status == "fail"
+    assert "heel_l" in by_gap["C_heel_reaches_ank_foot"].message
+
+
+def test_toe_mid_shin_fails_sole_z() -> None:
+    """T4: toe.z mid-shin / fat rz high z fails C_toe_sole_z under ceil."""
+    parts = _good_foot_stack_l()
+    # Mid-shin: toe.z = ank.z
+    for i, p in enumerate(parts):
+        if "toe_soft" in p.name:
+            parts[i] = _part(
+                p.name,
+                kind="ellipsoid",
+                center=[0.10, -0.08, 0.10],  # mid-shin vs plate_top=0.04
+                rx_m=0.03,
+                ry_m=0.03,
+                rz_m=0.015,
+            )
+    pkg = _pkg(parts)
+    report = validate_constraints(pkg)
+    by_id = {r.id: r for r in report.rules}
+    assert by_id["C_toe_sole_z"].status == "fail"
+
+    # Fat rz cannot bypass ceil: rz=0.10 → raw slack 0.15 but ceil 0.06
+    parts2 = _good_foot_stack_l()
+    for i, p in enumerate(parts2):
+        if "toe_soft" in p.name:
+            parts2[i] = _part(
+                p.name,
+                kind="ellipsoid",
+                center=[0.10, -0.08, 0.12],
+                rx_m=0.03,
+                ry_m=0.03,
+                rz_m=0.10,
+            )
+    pkg2 = _pkg(parts2)
+    r2 = validate_constraints(pkg2)
+    by2 = {r.id: r for r in r2.rules}
+    assert by2["C_toe_sole_z"].status == "fail"
+    assert TOE_SOLE_CEIL_M == 0.06
+
+
+def test_body_only_foot_stack_rules_skip() -> None:
+    """T5: torso-only package → three foot rules skip."""
+    pkg = _pkg(
+        [
+            _part(
+                "RECIPE_torso_trap",
+                role="torso",
+                kind="ellipsoid",
+                center=[0.0, 0.0, 1.0],
+                rx_m=0.15,
+                ry_m=0.10,
+                rz_m=0.25,
+            ),
+        ]
+    )
+    report = validate_constraints(pkg)
+    by_id = {r.id: r for r in report.rules}
+    for rid in (
+        "C_toe_forward_of_heel",
+        "C_heel_reaches_ank_foot",
+        "C_toe_sole_z",
+    ):
+        assert by_id[rid].status == "skip", f"{rid}: {by_id[rid].status}"
+
+
+def test_palm_ellipsoid_pass_fail_skip() -> None:
+    """T6: palm ellipsoid pass; box fail; no palm skip."""
+    # skip — no palm
+    pkg_skip = _pkg(
+        [
+            _part(
+                "RECIPE_torso_trap",
+                role="torso",
+                kind="ellipsoid",
+                center=[0.0, 0.0, 1.0],
+                rx_m=0.15,
+                ry_m=0.10,
+                rz_m=0.25,
+            ),
+        ]
+    )
+    r_skip = validate_constraints(pkg_skip)
+    assert {r.id: r for r in r_skip.rules}["C_palm_ellipsoid"].status == "skip"
+
+    # pass — ellipsoid palm
+    pkg_pass = _pkg(
+        [
+            _part(
+                "RECIPE_palm_l",
+                role="palm",
+                kind="ellipsoid",
+                center=[-0.3, -0.1, 0.9],
+                rx_m=0.04,
+                ry_m=0.02,
+                rz_m=0.05,
+            ),
+        ]
+    )
+    r_pass = validate_constraints(pkg_pass)
+    assert {r.id: r for r in r_pass.rules}["C_palm_ellipsoid"].status == "pass"
+
+    # fail — box palm
+    pkg_fail = _pkg(
+        [
+            _part(
+                "RECIPE_palm_r",
+                role="palm",
+                kind="box",
+                center=[0.3, -0.1, 0.9],
+                rx_m=None,
+                ry_m=None,
+                rz_m=None,
+                half_depth_m=0.03,
+                z_top_m=0.95,
+                z_bottom_m=0.85,
+            ),
+        ]
+    )
+    # box may need top/bottom half width for schema
+    # RecipePart validation for box — use model_validate carefully
+    r_fail = validate_constraints(pkg_fail)
+    by_fail = {r.id: r for r in r_fail.rules}
+    assert by_fail["C_palm_ellipsoid"].status == "fail"
+    assert "ellipsoid" in by_fail["C_palm_ellipsoid"].message
+    assert r_fail.ok is False
+
+
+def test_rule_count_fourteen_schema_100() -> None:
+    """T7: +4 rules (was 10, now 14); schema stays 1.0.0."""
+    pkg = _pkg(
+        [
+            _part(
+                "RECIPE_torso_trap",
+                role="torso",
+                kind="ellipsoid",
+                center=[0.0, 0.0, 1.0],
+                rx_m=0.15,
+                ry_m=0.10,
+                rz_m=0.25,
+            ),
+        ]
+    )
+    report = validate_constraints(pkg)
+    assert report.schema_version == "1.0.0"
+    assert CONSTRAINTS_SCHEMA_VERSION == "1.0.0"
+    assert len(report.rules) == 14
+    by_id = {r.id: r for r in report.rules}
+    for rid in _FOOT_STACK_RULES:
+        assert rid in by_id
+
+
+def test_one_side_only_does_not_fail_missing_r() -> None:
+    """T8: L-only foot stack evaluates L; missing R does not force fail."""
+    pkg = _pkg(_good_foot_stack_l())
+    report = validate_constraints(pkg)
+    by_id = {r.id: r for r in report.rules}
+    for rid in (
+        "C_toe_forward_of_heel",
+        "C_heel_reaches_ank_foot",
+        "C_toe_sole_z",
+    ):
+        assert by_id[rid].status == "pass", f"{rid}: {by_id[rid].status} {by_id[rid].message}"
+    # palm absent → skip, not fail
+    assert by_id["C_palm_ellipsoid"].status == "skip"
 
 
 # ---------------------------------------------------------------------------
