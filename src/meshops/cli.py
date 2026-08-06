@@ -91,7 +91,8 @@ proportion_app = typer.Typer(
         "capture | depth-samples | blockout-recipe | anatomy-profiles | "
         "blockout-validate-constraints | "
         "blockout-optimize | blockout-emit-setup | blockout-fuse-plan | "
-        "skeleton-build | depth-heatmap | depth-hint | silhouette-compare. "
+        "skeleton-build | depth-heatmap | depth-hint | silhouette-compare | "
+        "blockout-feedback. "
         "Assist-first landmarks + head-unit checks + blockout-grade XYZ; "
         "schema 1.1.0 diameters (edge pairs) + left depth bands + cross-sections; "
         "scaffold creates package layout + package_checklist.json only (not mesh/print success); "
@@ -112,7 +113,8 @@ proportion_app = typer.Typer(
         "(SKELETON_HONESTY — authoring scaffold only, not animation rig — N6); "
         "depth-heatmap glance PNG from samples/deltas (numbers SoT — N6); "
         "depth-hint external depth-channel assist hints + optional merge-into (conf floor — N6); "
-        "silhouette-compare front-only binary IoU/Dice QA score (authoring only — N6). "
+        "silhouette-compare front|left same-role binary IoU/Dice QA score (authoring only — N6); "
+        "blockout-feedback sticky post-export checklist (depth+heatmap+silhouettes — N6). "
         "Optional: meshops[proportion] (Pillow)."
     ),
     add_completion=False,
@@ -3019,7 +3021,7 @@ def proportion_silhouette_compare_cmd(
     ref: Path = typer.Option(
         ...,
         "--ref",
-        help="Package A front RGB/PNG reference (required)",
+        help="Package A RGB/PNG reference for the declared view_role (required)",
     ),
     out: str = typer.Option(
         ...,
@@ -3030,17 +3032,17 @@ def proportion_silhouette_compare_cmd(
     mesh: Path | None = typer.Option(
         None,
         "--mesh",
-        help="STL/PLY/OBJ → F3D front render (runtime may fail)",
+        help="STL/PLY/OBJ → F3D render for view_role (runtime may fail)",
     ),
     mesh_view: Path | None = typer.Option(
         None,
         "--mesh-view",
-        help="Pre-rendered mesh front image (CI / offline path)",
+        help="Pre-rendered mesh image for view_role (CI / offline path)",
     ),
     view_role: str = typer.Option(
         "front",
         "--view-role",
-        help="Must be front (case-insensitive); front-only law",
+        help="front|left (case-insensitive); same-role pairing law (default front)",
     ),
     overlay: bool = typer.Option(
         True,
@@ -3059,7 +3061,7 @@ def proportion_silhouette_compare_cmd(
     ),
     json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
 ) -> None:
-    """Front-only binary silhouette IoU/Dice between Package A front and mesh front.
+    """Same-role binary silhouette IoU/Dice (Package A vs mesh; front|left).
 
     Authoring QA score only — not mesh or print success (N6 / SILHOUETTE_HONESTY).
     Untrusted scores write package by default (exit 0); use --require-trusted to hard-fail.
@@ -3115,6 +3117,103 @@ def proportion_silhouette_compare_cmd(
         typer.echo("silhouette-compare authoring QA only — not mesh or print success")
         if not trusted:
             typer.echo("Do not thrash mesh geometry to chase an untrusted silhouette score")
+    raise typer.Exit(0)
+
+
+@proportion_app.command("blockout-feedback")
+def proportion_blockout_feedback_cmd(
+    report: Path = typer.Option(
+        ...,
+        "--report",
+        help="Path to proportion_report.json (required)",
+    ),
+    out: Path = typer.Option(
+        ...,
+        "--out",
+        help="Output directory for checklist artifacts (required)",
+    ),
+    mesh: Path | None = typer.Option(
+        None,
+        "--mesh",
+        help="Optional blockout mesh for depth deltas (+ F3D if no mesh-view)",
+    ),
+    ref_front: Path | None = typer.Option(
+        None,
+        "--ref-front",
+        help="Package A front reference PNG for silhouette front",
+    ),
+    ref_left: Path | None = typer.Option(
+        None,
+        "--ref-left",
+        help="Package A left reference PNG for silhouette left",
+    ),
+    mesh_view_front: Path | None = typer.Option(
+        None,
+        "--mesh-view-front",
+        help="Pre-rendered mesh front PNG (CI / offline; skips F3D front)",
+    ),
+    mesh_view_left: Path | None = typer.Option(
+        None,
+        "--mesh-view-left",
+        help="Pre-rendered mesh left PNG (CI / offline; skips F3D left)",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite existing feedback artifacts",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
+) -> None:
+    """Sticky post-export checklist: depth → heatmap → silhouettes + soft summary.
+
+    Authoring QA only — not mesh or print success (N6 / FEEDBACK_HONESTY).
+    Never mutates mesh/recipe; never calls optimize.
+    """
+    from meshops.proportion.blockout_feedback import run_blockout_feedback
+    from meshops.proportion.errors import ProportionError
+    from meshops.proportion.honesty import FEEDBACK_HONESTY
+
+    try:
+        payload = run_blockout_feedback(
+            report,
+            out,
+            mesh=mesh,
+            ref_front=ref_front,
+            ref_left=ref_left,
+            mesh_view_front=mesh_view_front,
+            mesh_view_left=mesh_view_left,
+            force=force,
+        )
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    if json_out:
+        _emit_json(payload)
+    else:
+        typer.echo(f"blockout-feedback ok={payload.get('ok')} ")
+        soft = payload.get("soft_depth_summary") or {}
+        score = soft.get("score_m")
+        typer.echo(
+            f"  soft_depth score_m={score if score is not None else 'null'} "
+            f"method={soft.get('method', '—')}"
+        )
+        steps = payload.get("steps") or {}
+        for name, step in steps.items():
+            if step.get("skipped_reason"):
+                typer.echo(f"  {name}: skipped ({step['skipped_reason']})")
+            else:
+                extra = ""
+                if step.get("iou") is not None:
+                    extra = f" iou={step['iou']:.4f}"
+                typer.echo(f"  {name}: ok={step.get('ok')}{extra}")
+        for p in payload.get("paths") or []:
+            typer.echo(f"  {p}")
+        for msg in payload.get("messages") or []:
+            typer.echo(f"  note: {msg}")
+        typer.echo(f"honesty: {FEEDBACK_HONESTY}")
+        typer.echo("blockout-feedback authoring QA only — not mesh or print success")
     raise typer.Exit(0)
 
 

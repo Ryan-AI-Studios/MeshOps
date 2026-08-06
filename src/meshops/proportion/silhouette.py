@@ -1,9 +1,11 @@
-"""Front-only binary silhouette IoU/Dice compare (track 0021 + 0025 trust).
+"""Binary silhouette IoU/Dice compare (track 0021 + 0025 + 0043 left).
 
-Authoring QA score between Package A front ref and mesh front view.
-Not mesh or print success (Difficulty §12 / N6). Front-vs-front only.
+Authoring QA score between Package A ref and mesh view under the same
+``view_role`` (front|left). Not mesh or print success (Difficulty §12 / N6).
+Same-role pairing only — never cross-view (left ref vs front mesh, etc.).
 
 0025: studio-gray recovery cascade + silhouette_trusted / trust_reasons.
+0043: left role + schema 1.2.0 + role-aware basename advisory.
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ from meshops.proportion.frame import (
 )
 from meshops.proportion.honesty import SILHOUETTE_HONESTY
 
-SILHOUETTE_SCHEMA_VERSION: Final[Literal["1.1.0"]] = "1.1.0"
+SILHOUETTE_SCHEMA_VERSION: Final[Literal["1.2.0"]] = "1.2.0"
 SILHOUETTE_JSON_BASENAME: Final[str] = "silhouette_compare.json"
 SILHOUETTE_OVERLAY_BASENAME: Final[str] = "silhouette_overlay.png"
 GRID_PX: Final[int] = 256
@@ -36,6 +38,7 @@ LUMA_THR: Final[int] = 18
 METHOD: Final[Literal["binary_mask_iou_dice"]] = "binary_mask_iou_dice"
 ALIGNMENT_MODE: Final[Literal["content_bbox"]] = "content_bbox"
 RESIZE_LABEL: Final[Literal["nearest_256"]] = "nearest_256"
+ViewRole = Literal["front", "left"]
 
 # Trust band for final post-recovery coverage (inclusive).
 _COV_LO: Final[float] = 0.02
@@ -64,21 +67,35 @@ TRUST_REASON_CODES: Final[frozenset[str]] = frozenset(
     }
 )
 
-_NON_FRONT_STEM_TOKENS: Final[tuple[str, ...]] = (
-    "left",
-    "right",
-    "side",
-    "profile",
-    "back",
-    "rear",
-    "camera_left",
-    "camera_right",
-    "camera_back",
-)
+# Basename tokens that conflict with a declared view_role (soft advisory only).
+_CONFLICT_STEM_TOKENS_BY_ROLE: Final[dict[str, tuple[str, ...]]] = {
+    "front": (
+        "left",
+        "right",
+        "side",
+        "profile",
+        "back",
+        "rear",
+        "camera_left",
+        "camera_right",
+        "camera_back",
+    ),
+    "left": (
+        "front",
+        "right",
+        "side",
+        "profile",
+        "back",
+        "rear",
+        "camera_front",
+        "camera_right",
+        "camera_back",
+    ),
+}
 
 _BASENAME_ADVISORY: Final[str] = (
-    "Advisory: --{side} filename appears non-front; ensure comparison is "
-    "front-vs-front per MeshOps QA law."
+    "Advisory: --{side} filename appears to conflict with view_role={view_role}; "
+    "ensure comparison is same-role (ref vs mesh) per MeshOps QA law."
 )
 
 _IDENTICAL_MSG: Final[str] = "ref and mesh-view are identical — score is trivially 1.0"
@@ -119,13 +136,13 @@ class SilhouetteAlignment(BaseModel):
 
 
 class SilhouetteComparePackage(BaseModel):
-    """silhouette_compare.json package (schema 1.1.0 — write-only)."""
+    """silhouette_compare.json package (schema 1.2.0 — write-only)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["1.1.0"] = SILHOUETTE_SCHEMA_VERSION
+    schema_version: Literal["1.2.0"] = SILHOUETTE_SCHEMA_VERSION
     honesty: str = SILHOUETTE_HONESTY
-    view_role: Literal["front"] = "front"
+    view_role: Literal["front", "left"] = "front"
     ref_path: str
     mesh_path: str | None = None
     mesh_view_path: str | None = None
@@ -185,9 +202,15 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def _stem_looks_non_front(path: Path) -> bool:
+def _stem_conflicts_with_role(path: Path, view_role: ViewRole) -> bool:
+    """True when basename tokens imply a different role than declared view_role.
+
+    Soft advisory only — CLI flag is SoT. Matching role stems do not conflict
+    (left.png + view_role=left → no advisory).
+    """
     stem = path.stem.lower()
-    return any(tok in stem for tok in _NON_FRONT_STEM_TOKENS)
+    tokens = _CONFLICT_STEM_TOKENS_BY_ROLE.get(view_role, ())
+    return any(tok in stem for tok in tokens)
 
 
 def _resolve_out_paths(out: Path | str) -> tuple[Path, Path]:
@@ -709,8 +732,8 @@ def _build_overlay(ref_grid: np.ndarray, mesh_grid: np.ndarray) -> Any:
     return Image.fromarray(canvas, mode="RGBA")
 
 
-def _render_mesh_front(mesh_path: Path) -> Path:
-    """Render mesh front view via F3D; return path to front.png (R5 / B2).
+def _render_mesh_view(mesh_path: Path, view_role: ViewRole) -> Path:
+    """Render mesh view via F3D for ``view_role`` (front|left); return staged PNG.
 
     Forces white background so ``frame.silhouette_mask`` (near-white >= 250)
     classifies the backdrop as background, not full-frame foreground.
@@ -726,61 +749,75 @@ def _render_mesh_front(mesh_path: Path) -> Path:
             result = renderer.render_mesh_to_dir(
                 mesh_path,
                 tmp,
-                camera_names=("front",),
+                camera_names=(view_role,),
                 include_depth_for=(),
                 background_color=(1.0, 1.0, 1.0),
             )
         except RenderUnavailableError as exc:
             raise ProportionError(
-                f"mesh front render unavailable: {exc}",
+                f"mesh {view_role} render unavailable: {exc}",
                 code="silhouette_failed",
                 details={
                     "code": "render_unavailable",
                     "mesh": str(mesh_path),
+                    "view_role": view_role,
                     "cause": str(exc),
                 },
             ) from exc
 
-        front: Path | None = None
+        rendered: Path | None = None
         for p in result.view_paths:
             cand = Path(p)
-            if cand.stem.lower() == "front" and cand.is_file():
-                front = cand
+            if cand.stem.lower() == view_role and cand.is_file():
+                rendered = cand
                 break
-        if front is None:
-            cand = tmp / "front.png"
+        if rendered is None:
+            cand = tmp / f"{view_role}.png"
             if cand.is_file():
-                front = cand
-        if front is None or not front.is_file():
+                rendered = cand
+        if rendered is None or not rendered.is_file():
             raise ProportionError(
-                "mesh front render produced no front.png",
+                f"mesh {view_role} render produced no {view_role}.png",
                 code="silhouette_failed",
-                details={"code": "render_unavailable", "mesh": str(mesh_path)},
+                details={
+                    "code": "render_unavailable",
+                    "mesh": str(mesh_path),
+                    "view_role": view_role,
+                },
             )
         # Copy out of TemporaryDirectory before it is removed.
-        out_fd, out_name = tempfile.mkstemp(prefix="meshops_sil_front_", suffix=".png")
+        out_fd, out_name = tempfile.mkstemp(
+            prefix=f"meshops_sil_{view_role}_",
+            suffix=".png",
+        )
         os.close(out_fd)
         out_path = Path(out_name)
         try:
-            shutil.copy2(front, out_path)
+            shutil.copy2(rendered, out_path)
         except OSError as exc:
             out_path.unlink(missing_ok=True)
             raise ProportionError(
-                f"failed to stage mesh front render: {exc}",
+                f"failed to stage mesh {view_role} render: {exc}",
                 code="silhouette_failed",
-                details={"code": "render_unavailable", "mesh": str(mesh_path)},
+                details={
+                    "code": "render_unavailable",
+                    "mesh": str(mesh_path),
+                    "view_role": view_role,
+                },
             ) from exc
         return out_path
 
 
-def _normalize_view_role(view_role: str) -> None:
-    """Accept only case-insensitive 'front' (C5)."""
-    if view_role.strip().lower() != "front":
+def _normalize_view_role(view_role: str) -> ViewRole:
+    """Normalize case-insensitive front|left; raise silhouette_failed on illegal."""
+    role = view_role.strip().lower()
+    if role not in ("front", "left"):
         raise ProportionError(
-            f"--view-role must be 'front' (front-only silhouette law); got {view_role!r}",
+            f"--view-role must be 'front' or 'left' (same-role silhouette law); got {view_role!r}",
             code="silhouette_failed",
             details={"view_role": view_role},
         )
+    return role  # type: ignore[return-value]
 
 
 def _aggregate_trust(
@@ -827,7 +864,10 @@ def run_silhouette_compare(
     force: bool = False,
     require_trusted: bool = False,
 ) -> dict[str, Any]:
-    """Compare front silhouettes: Package A ref vs mesh front view.
+    """Compare silhouettes: Package A ref vs mesh view under same ``view_role``.
+
+    ``view_role`` is front|left (default front). Same-role only — illegal roles
+    raise ``silhouette_failed``.
 
     Returns CLI/MCP success payload with ok/paths/counts/score_iou/score_dice/
     silhouette_trusted/trust_reasons/messages.
@@ -836,7 +876,7 @@ def run_silhouette_compare(
     ``ProportionError(code="silhouette_untrusted")``.
     """
     _require_pillow()
-    _normalize_view_role(view_role)
+    role = _normalize_view_role(view_role)
 
     mesh_p = Path(mesh) if mesh is not None else None
     mesh_view_p = Path(mesh_view) if mesh_view is not None else None
@@ -864,11 +904,11 @@ def run_silhouette_compare(
 
     messages: list[str] = []
 
-    # Basename advisories (A3 / D3) — soft
-    if _stem_looks_non_front(ref_p):
-        messages.append(_BASENAME_ADVISORY.format(side="ref"))
-    if mesh_view_p is not None and _stem_looks_non_front(mesh_view_p):
-        messages.append(_BASENAME_ADVISORY.format(side="mesh-view"))
+    # Basename advisories — soft; role-aware conflict only (0043 B2)
+    if _stem_conflicts_with_role(ref_p, role):
+        messages.append(_BASENAME_ADVISORY.format(side="ref", view_role=role))
+    if mesh_view_p is not None and _stem_conflicts_with_role(mesh_view_p, role):
+        messages.append(_BASENAME_ADVISORY.format(side="mesh-view", view_role=role))
 
     # Resolve mesh-view path (render if needed)
     rendered_mesh_view: Path | None = None
@@ -879,7 +919,7 @@ def run_silhouette_compare(
                 code="silhouette_failed",
                 details={"mesh": str(mesh_p)},
             )
-        rendered_mesh_view = _render_mesh_front(mesh_p)
+        rendered_mesh_view = _render_mesh_view(mesh_p, role)
         mesh_view_for_mask = rendered_mesh_view
     else:
         assert mesh_view_p is not None
@@ -973,7 +1013,7 @@ def run_silhouette_compare(
     package = SilhouetteComparePackage(
         schema_version=SILHOUETTE_SCHEMA_VERSION,
         honesty=SILHOUETTE_HONESTY,
-        view_role="front",
+        view_role=role,
         ref_path=str(ref_p),
         mesh_path=str(mesh_p) if mesh_p is not None else None,
         mesh_view_path=str(mesh_view_p) if mesh_view_p is not None else None,

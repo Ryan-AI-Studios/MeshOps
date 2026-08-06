@@ -1260,10 +1260,10 @@ def mesh_proportion_silhouette_compare(
     force: bool = False,
     require_trusted: bool = False,
 ) -> dict[str, Any]:
-    """Front-only silhouette IoU/Dice. Authoring only — SILHOUETTE_HONESTY / N6.
+    """Same-role silhouette IoU/Dice (front|left). Authoring only — SILHOUETTE_HONESTY / N6.
 
     Payload includes silhouette_trusted, trust_reasons, coverage fracs, mask methods
-    (schema 1.1.0). require_trusted raises silhouette_untrusted when untrusted.
+    (schema 1.2.0). require_trusted raises silhouette_untrusted when untrusted.
     """
     from meshops.proportion.silhouette import run_silhouette_compare
 
@@ -1283,4 +1283,39 @@ def mesh_proportion_silhouette_compare(
         overlay=overlay,
         force=force,
         require_trusted=require_trusted,
+    )
+
+
+def mesh_proportion_blockout_feedback(
+    work_root: Path,
+    *,
+    report: str,
+    out: str,
+    mesh: str | None = None,
+    ref_front: str | None = None,
+    ref_left: str | None = None,
+    mesh_view_front: str | None = None,
+    mesh_view_left: str | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Sticky post-export checklist. Authoring only — FEEDBACK_HONESTY / N6."""
+    from meshops.proportion.blockout_feedback import run_blockout_feedback
+
+    ends_sep = out.endswith(("/", "\\"))
+    out_base = out.rstrip("/\\") if ends_sep else out
+    out_resolved = _resolve_tool_path(out_base, work_root)
+    out_arg: str | Path = (
+        str(out_resolved) + ("\\" if ends_sep else "") if ends_sep else out_resolved
+    )
+    return run_blockout_feedback(
+        _resolve_tool_path(report, work_root),
+        out_arg,
+        mesh=_resolve_tool_path(mesh, work_root) if mesh else None,
+        ref_front=_resolve_tool_path(ref_front, work_root) if ref_front else None,
+        ref_left=_resolve_tool_path(ref_left, work_root) if ref_left else None,
+        mesh_view_front=(
+            _resolve_tool_path(mesh_view_front, work_root) if mesh_view_front else None
+        ),
+        mesh_view_left=(_resolve_tool_path(mesh_view_left, work_root) if mesh_view_left else None),
+        force=force,
     )

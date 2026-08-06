@@ -1,4 +1,4 @@
-"""Track 0021 — front silhouette compare (offline; no Blender/network)."""
+"""Track 0021/0025/0043 — silhouette compare front|left (offline; no Blender/network)."""
 
 from __future__ import annotations
 
@@ -154,10 +154,11 @@ def test_silhouette__both_mesh_and_mesh_view_fail(tmp_path: Path) -> None:
 
 
 def test_silhouette__view_role_front_only(tmp_path: Path) -> None:
+    """T0a: illegal roles refuse; left/Left and front variants pass (0043)."""
     pytest.importorskip("PIL")
     ref = _write_rgba_png(tmp_path / "front.png", _rect_silhouette())
     mesh_view = _write_rgba_png(tmp_path / "mesh_front.png", _rect_silhouette())
-    for bad in ("left", "Left", "side", "back"):
+    for bad in ("side", "back", "top", "right", "three_quarter"):
         with pytest.raises(ProportionError) as ei:
             run_silhouette_compare(
                 ref,
@@ -167,9 +168,8 @@ def test_silhouette__view_role_front_only(tmp_path: Path) -> None:
                 force=True,
             )
         assert ei.value.code == "silhouette_failed"
-        assert "front" in str(ei.value).lower()
 
-    for ok_role in ("front", "Front", "FRONT"):
+    for ok_role in ("front", "Front", "FRONT", "left", "Left", "LEFT"):
         payload = run_silhouette_compare(
             ref,
             tmp_path / f"out_{ok_role}",
@@ -178,17 +178,120 @@ def test_silhouette__view_role_front_only(tmp_path: Path) -> None:
             force=True,
         )
         assert payload["ok"] is True
+        raw = json.loads(
+            (tmp_path / f"out_{ok_role}" / "silhouette_compare.json").read_text(encoding="utf-8")
+        )
+        assert raw["schema_version"] == "1.2.0"
+        assert raw["view_role"] == ok_role.strip().lower()
 
 
 def test_silhouette__basename_left_advisory(tmp_path: Path) -> None:
+    """T0b(a): front role + left.png → conflict advisory still fires."""
     pytest.importorskip("PIL")
     ref = _write_rgba_png(tmp_path / "left.png", _rect_silhouette())
     mesh_view = _write_rgba_png(tmp_path / "mesh_front.png", _rect_silhouette())
     payload = run_silhouette_compare(ref, tmp_path / "out", mesh_view=mesh_view, force=True)
     assert payload["ok"] is True
     assert payload["score_iou"] == pytest.approx(1.0, abs=1e-6)
-    assert any("non-front" in m for m in payload["messages"])
     assert any("Advisory" in m for m in payload["messages"])
+    assert any("conflict" in m.lower() for m in payload["messages"])
+
+
+def test_silhouette__basename_left_role_no_conflict_advisory(tmp_path: Path) -> None:
+    """T0b(b): view_role=left + left.png → no conflict advisory."""
+    pytest.importorskip("PIL")
+    ref = _write_rgba_png(tmp_path / "left.png", _rect_silhouette())
+    mesh_view = _write_rgba_png(tmp_path / "mesh_left.png", _rect_silhouette())
+    payload = run_silhouette_compare(
+        ref,
+        tmp_path / "out",
+        mesh_view=mesh_view,
+        view_role="left",
+        force=True,
+    )
+    assert payload["ok"] is True
+    assert payload["score_iou"] == pytest.approx(1.0, abs=1e-6)
+    assert not any("Advisory" in m and "conflict" in m.lower() for m in payload["messages"])
+
+
+def test_silhouette__left_identical_iou_near_one(tmp_path: Path) -> None:
+    """T2: left synthetic identical → IoU≈1; schema 1.2.0 view_role=left."""
+    pytest.importorskip("PIL")
+    ref = _write_rgba_png(tmp_path / "left.png", _rect_silhouette())
+    mesh_view = _write_rgba_png(tmp_path / "mesh_left.png", _rect_silhouette())
+    out = tmp_path / "out_left"
+    payload = run_silhouette_compare(
+        ref,
+        out,
+        mesh_view=mesh_view,
+        view_role="left",
+        force=True,
+    )
+    assert payload["ok"] is True
+    assert payload["score_iou"] == pytest.approx(1.0, abs=1e-6)
+    assert payload["score_dice"] == pytest.approx(1.0, abs=1e-6)
+    raw = json.loads((out / "silhouette_compare.json").read_text(encoding="utf-8"))
+    assert raw["schema_version"] == "1.2.0"
+    assert raw["view_role"] == "left"
+
+
+def test_silhouette__illegal_view_role_raises(tmp_path: Path) -> None:
+    """T3: illegal view_role (side/back) raises silhouette_failed."""
+    pytest.importorskip("PIL")
+    ref = _write_rgba_png(tmp_path / "front.png", _rect_silhouette())
+    mesh_view = _write_rgba_png(tmp_path / "mesh_front.png", _rect_silhouette())
+    for bad in ("side", "back"):
+        with pytest.raises(ProportionError) as ei:
+            run_silhouette_compare(
+                ref,
+                tmp_path / f"out_{bad}",
+                mesh_view=mesh_view,
+                view_role=bad,
+                force=True,
+            )
+        assert ei.value.code == "silhouette_failed"
+        assert "front" in str(ei.value).lower() or "left" in str(ei.value).lower()
+
+
+def test_silhouette__left_role_front_basename_advisory(tmp_path: Path) -> None:
+    """T3b: view_role=left + front.png basename → soft conflict advisory; still scores."""
+    pytest.importorskip("PIL")
+    ref = _write_rgba_png(tmp_path / "front.png", _rect_silhouette())
+    mesh_view = _write_rgba_png(tmp_path / "mesh_left.png", _rect_silhouette())
+    payload = run_silhouette_compare(
+        ref,
+        tmp_path / "out",
+        mesh_view=mesh_view,
+        view_role="left",
+        force=True,
+    )
+    assert payload["ok"] is True
+    assert payload["score_iou"] == pytest.approx(1.0, abs=1e-6)
+    assert any("Advisory" in m for m in payload["messages"])
+    assert any("conflict" in m.lower() for m in payload["messages"])
+
+
+def test_silhouette__left_trust_fields_present(tmp_path: Path) -> None:
+    """T4: left path includes silhouette_trusted + trust_reasons."""
+    pytest.importorskip("PIL")
+    ref = _write_rgba_png(tmp_path / "left.png", _rect_silhouette())
+    mesh_view = _write_rgba_png(tmp_path / "mesh_left.png", _rect_silhouette())
+    payload = run_silhouette_compare(
+        ref,
+        tmp_path / "out",
+        mesh_view=mesh_view,
+        view_role="left",
+        force=True,
+    )
+    assert payload["ok"] is True
+    assert "silhouette_trusted" in payload
+    assert "trust_reasons" in payload
+    assert isinstance(payload["silhouette_trusted"], bool)
+    assert isinstance(payload["trust_reasons"], list)
+    raw = json.loads((tmp_path / "out" / "silhouette_compare.json").read_text(encoding="utf-8"))
+    assert raw["view_role"] == "left"
+    assert "silhouette_trusted" in raw
+    assert "trust_reasons" in raw
 
 
 def test_silhouette__identical_path_trivial_message(tmp_path: Path) -> None:
@@ -528,7 +631,8 @@ def test_silhouette__0025_studio_gray_c2_recovery_trusted(tmp_path: Path) -> Non
     assert 0.02 <= payload["ref_coverage_frac"] <= 0.90
 
     raw = json.loads((tmp_path / "out" / "silhouette_compare.json").read_text(encoding="utf-8"))
-    assert raw["schema_version"] == "1.1.0"
+    assert raw["schema_version"] == "1.2.0"
+    assert raw["view_role"] == "front"
     assert raw["mask_method_ref"] == payload["mask_method_ref"]
     assert raw["silhouette_trusted"] is True
 
@@ -587,7 +691,7 @@ def test_silhouette__0025_untrusted_high_cov_package_exit0(tmp_path: Path) -> No
     json_path = out / "silhouette_compare.json"
     assert json_path.is_file()
     raw = json.loads(json_path.read_text(encoding="utf-8"))
-    assert raw["schema_version"] == "1.1.0"
+    assert raw["schema_version"] == "1.2.0"
     assert raw["silhouette_trusted"] is False
 
     # CLI default: exit 0 + UNTRUSTED banner
@@ -655,16 +759,17 @@ def test_silhouette__0025_require_trusted_exit1(tmp_path: Path) -> None:
 
 
 def test_silhouette__0025_schema_1_1_0_fields(tmp_path: Path) -> None:
-    """Schema write 1.1.0 + all R1 fields; trust_reasons codes only."""
+    """Schema write 1.2.0 + all R1 trust fields; trust_reasons codes only (T1)."""
     pytest.importorskip("PIL")
     ref = _write_rgba_png(tmp_path / "front.png", _rect_silhouette())
     mesh_view = _write_rgba_png(tmp_path / "mesh_front.png", _rect_silhouette())
     out = tmp_path / "sil"
     payload = run_silhouette_compare(ref, out, mesh_view=mesh_view, force=True)
-    assert SILHOUETTE_SCHEMA_VERSION == "1.1.0"
+    assert SILHOUETTE_SCHEMA_VERSION == "1.2.0"
     raw = json.loads((out / "silhouette_compare.json").read_text(encoding="utf-8"))
     pkg = SilhouetteComparePackage.model_validate(raw)
-    assert pkg.schema_version == "1.1.0"
+    assert pkg.schema_version == "1.2.0"
+    assert pkg.view_role == "front"
     assert pkg.honesty == SILHOUETTE_HONESTY
     assert isinstance(pkg.silhouette_trusted, bool)
     assert isinstance(pkg.trust_reasons, list)

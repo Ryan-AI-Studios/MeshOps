@@ -69,6 +69,7 @@ TOOL_NAMES: frozenset[str] = frozenset(
         "mesh_proportion_depth_heatmap",
         "mesh_proportion_depth_hint",
         "mesh_proportion_silhouette_compare",
+        "mesh_proportion_blockout_feedback",
     }
 )
 
@@ -876,12 +877,12 @@ def build_server(work_root: Path | None = None) -> Any:
         force: bool = False,
         require_trusted: bool = False,
     ) -> dict[str, Any]:
-        """Front-only binary silhouette IoU/Dice (Package A front vs mesh front).
+        """Same-role binary silhouette IoU/Dice (Package A vs mesh; front|left).
 
         Authoring QA only — proportion_silhouette_compare_not_mesh_or_print_success (N6).
-        Not print success. Front-vs-front only. Raises ProportionError on failure
-        (never ok:false success). Payload includes silhouette_trusted / trust_reasons
-        (schema 1.1.0). require_trusted → silhouette_untrusted when untrusted.
+        Not print success. Same-role only (view_role front|left). Raises ProportionError
+        on failure (never ok:false success). Payload includes silhouette_trusted /
+        trust_reasons (schema 1.2.0). require_trusted → silhouette_untrusted when untrusted.
         """
         return T.mesh_proportion_silhouette_compare(
             wr,
@@ -893,6 +894,35 @@ def build_server(work_root: Path | None = None) -> Any:
             overlay=overlay,
             force=force,
             require_trusted=require_trusted,
+        )
+
+    @mcp.tool()
+    def mesh_proportion_blockout_feedback(
+        report: str,
+        out: str,
+        mesh: str | None = None,
+        ref_front: str | None = None,
+        ref_left: str | None = None,
+        mesh_view_front: str | None = None,
+        mesh_view_left: str | None = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Sticky post-export checklist: depth → heatmap → silhouettes + soft summary.
+
+        Authoring QA only — proportion_blockout_feedback_not_mesh_or_print_success (N6).
+        Never mutates mesh/recipe; never calls optimize. Raises ProportionError on
+        hard failures (missing report / write failures).
+        """
+        return T.mesh_proportion_blockout_feedback(
+            wr,
+            report=report,
+            out=out,
+            mesh=mesh,
+            ref_front=ref_front,
+            ref_left=ref_left,
+            mesh_view_front=mesh_view_front,
+            mesh_view_left=mesh_view_left,
+            force=force,
         )
 
     return mcp
