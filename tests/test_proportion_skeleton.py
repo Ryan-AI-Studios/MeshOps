@@ -1089,3 +1089,158 @@ def test_skeleton__0038_non_cranial_family_ignores_cranial_pair() -> None:
     # Must not claim hip Y from cranial pair
     assert not any("cranial_front+cranial_back" in m and "hip" in m for m in pkg.messages)
     assert not any("joint hip" in m and "cranial" in m and "(depth)" in m for m in pkg.messages)
+
+
+# ---------------------------------------------------------------------------
+# 0041 — Skeleton foot joint Z honesty (heel/toe sole-class prior; ADD only)
+# ---------------------------------------------------------------------------
+
+
+def _landmarks_ankles_only(
+    *, height_m: float = 1.72, ankle_z: float = 0.13
+) -> dict[str, LandmarkXYZ]:
+    """Ankles measured XZ; NO heel_*/toe_* keys. Include minimal body so skeleton builds."""
+    _ = height_m
+    return {
+        "hip_l": _lm("hip_l", x_m=-0.12, y_m=0.0, z_m=0.90),
+        "hip_r": _lm("hip_r", x_m=0.12, y_m=0.0, z_m=0.90),
+        "knee_l": _lm("knee_l", x_m=-0.12, y_m=0.0, z_m=0.48),
+        "knee_r": _lm("knee_r", x_m=0.12, y_m=0.0, z_m=0.48),
+        "ankle_l": _lm("ankle_l", x_m=-0.12, y_m=0.0, z_m=ankle_z),
+        "ankle_r": _lm("ankle_r", x_m=0.12, y_m=0.0, z_m=ankle_z),
+        "shoulder_l": _lm("shoulder_l", x_m=-0.20, y_m=0.0, z_m=1.40),
+        "shoulder_r": _lm("shoulder_r", x_m=0.20, y_m=0.0, z_m=1.40),
+    }
+
+
+def test_skeleton__0041_t1_estimated_heel_toe_sole_z_not_ankle_clone() -> None:
+    """T1: no heel/toe lm; height + ankle measured → heel/toe estimated; z≈0.02*H; z≠ankle.z."""
+    h = 1.72
+    ankle_z = 0.13
+    lms = _landmarks_ankles_only(height_m=h, ankle_z=ankle_z)
+    assert "heel_l" not in lms and "toe_l" not in lms
+    pkg = build_blockout_skeleton(_report(lms, height_m=h))
+    j = _by_id(pkg)
+    sole_prior = 0.02 * h
+    for jid in ("heel_l", "heel_r", "toe_l", "toe_r"):
+        assert j[jid].source == "estimated", f"{jid} source={j[jid].source}"
+        assert j[jid].z_m is not None
+        assert j[jid].z_m == pytest.approx(sole_prior, abs=1e-6), (
+            f"{jid} z={j[jid].z_m} expected sole prior {sole_prior}"
+        )
+        assert j[jid].z_m != pytest.approx(ankle_z, abs=1e-9)
+        assert j[jid].z_m != j[f"ankle_{jid[-1]}"].z_m
+
+
+def test_skeleton__0041_t2_both_margins_below_ankle() -> None:
+    """T2 (AI1 P3-1): BOTH z < ankle.z - 0.02 AND z <= ankle.z * 0.50 for heel and toe."""
+    h = 1.72
+    ankle_z = 0.13
+    lms = _landmarks_ankles_only(height_m=h, ankle_z=ankle_z)
+    pkg = build_blockout_skeleton(_report(lms, height_m=h))
+    j = _by_id(pkg)
+    for jid in ("heel_l", "heel_r", "toe_l", "toe_r"):
+        z = j[jid].z_m
+        assert z is not None
+        assert z < ankle_z - 0.02, f"{jid}: {z} not < ankle-0.02 ({ankle_z - 0.02})"
+        assert z <= ankle_z * 0.50, f"{jid}: {z} not <= ankle*0.50 ({ankle_z * 0.50})"
+
+
+def test_skeleton__0041_t3_full_xyz_heel_toe_measured() -> None:
+    """T3: full XYZ heel/toe landmarks → measured (R3); z from landmark."""
+    pkg = build_blockout_skeleton(_report(_full_landmarks()))
+    j = _by_id(pkg)
+    for jid, z_exp, y_exp in (
+        ("heel_l", 0.02, 0.04),
+        ("heel_r", 0.02, 0.04),
+        ("toe_l", 0.02, -0.08),
+        ("toe_r", 0.02, -0.08),
+    ):
+        assert j[jid].source == "measured", f"{jid} source={j[jid].source}"
+        assert j[jid].z_m == pytest.approx(z_exp)
+        assert j[jid].y_m == pytest.approx(y_exp)
+
+
+def test_skeleton__0041_t4_height_none_sole_fallback() -> None:
+    """T4: height_m=None → sole z = 0.02 fallback (estimated), not ankle clone."""
+    ankle_z = 0.13
+    lms = _landmarks_ankles_only(ankle_z=ankle_z)
+    pkg = build_blockout_skeleton(_report(lms, height_m=None, head_unit_frac=None))
+    j = _by_id(pkg)
+    for jid in ("heel_l", "heel_r", "toe_l", "toe_r"):
+        assert j[jid].source == "estimated", f"{jid} source={j[jid].source}"
+        assert j[jid].z_m == pytest.approx(0.02, abs=1e-9)
+        assert j[jid].z_m != pytest.approx(ankle_z)
+    assert any("z_m from sole fallback" in m for m in pkg.messages), pkg.messages
+
+
+def test_skeleton__0041_t5a_message_stature_sole_prior_y_invent() -> None:
+    """T5a: messages contain stature sole prior when Z invented (Y invent path OK)."""
+    h = 1.72
+    lms = _landmarks_ankles_only(height_m=h)
+    pkg = build_blockout_skeleton(_report(lms, height_m=h))
+    sole_msgs = [m for m in pkg.messages if "z_m from stature sole prior" in m]
+    assert len(sole_msgs) >= 4, f"expected sole-prior msgs for 4 joints; got {pkg.messages}"
+    for jid in ("heel_l", "heel_r", "toe_l", "toe_r"):
+        assert any(jid in m and "z_m from stature sole prior" in m for m in pkg.messages), (
+            f"missing sole prior msg for {jid}: {pkg.messages}"
+        )
+
+
+def test_skeleton__0041_t5b_sole_prior_when_foot_mid_depth_fills_y() -> None:
+    """T5b (AI1 P3-3): sole-prior Z msg when foot depth band fills Y (decoupled from Y invent)."""
+    h = 1.72
+    lms = _landmarks_ankles_only(height_m=h)
+    # foot band covers heel/toe family ("foot_mid",), ("foot",) - fills Y before invent
+    bands = [_band("foot", y_mid=0.02)]
+    pkg = build_blockout_skeleton(_report(lms, height_m=h, depth_bands=bands))
+    j = _by_id(pkg)
+    # Depth filled Y - no Y invent "foot depth default" for heel/toe
+    y_invent = [
+        m for m in pkg.messages if "foot depth default" in m or "front-plane placement" in m
+    ]
+    foot_y_invent = [m for m in y_invent if any(k in m for k in ("heel_", "toe_"))]
+    assert foot_y_invent == [], (
+        f"expected no heel/toe Y invent when foot band fills Y: {foot_y_invent}"
+    )
+    # Depth Y messages present
+    assert any("foot" in m and "(depth)" in m for m in pkg.messages), pkg.messages
+    # Z invent message still required (decoupled from Y)
+    for jid in ("heel_l", "heel_r", "toe_l", "toe_r"):
+        assert j[jid].source == "estimated"
+        assert j[jid].z_m == pytest.approx(0.02 * h, abs=1e-6)
+        assert any(jid in m and "z_m from stature sole prior" in m for m in pkg.messages), (
+            f"missing sole prior for {jid} under foot_mid depth-Y path: {pkg.messages}"
+        )
+
+
+def test_skeleton__0041_t6_invent_y_toe_ahead_of_heel() -> None:
+    """T6: when Y invent fires, toe.y < heel.y (frame: toes -Y, heels +Y)."""
+    h = 1.72
+    lms = _landmarks_ankles_only(height_m=h)
+    pkg = build_blockout_skeleton(_report(lms, height_m=h))
+    j = _by_id(pkg)
+    assert any("foot depth default" in m for m in pkg.messages), pkg.messages
+    for side in ("l", "r"):
+        heel_y = j[f"heel_{side}"].y_m
+        toe_y = j[f"toe_{side}"].y_m
+        assert heel_y is not None and toe_y is not None
+        assert toe_y < heel_y, f"side {side}: toe.y={toe_y} not < heel.y={heel_y}"
+        assert toe_y == pytest.approx(-0.05 * h, abs=1e-6)
+        assert heel_y == pytest.approx(0.03 * h, abs=1e-6)
+
+
+def test_skeleton__0041_t8_low_ankle_clamp_equality_no_raise() -> None:
+    """T8 optional: low ankle -> clamp equality sole==ankle*0.50; no raise."""
+    h = 1.72
+    # stature sole 0.02*H=0.0344; ankle 0.04 -> clamp = 0.02; sole = min(0.0344, 0.02) = 0.02
+    ankle_z = 0.04
+    lms = _landmarks_ankles_only(height_m=h, ankle_z=ankle_z)
+    pkg = build_blockout_skeleton(_report(lms, height_m=h))
+    j = _by_id(pkg)
+    expected = ankle_z * 0.50
+    for jid in ("heel_l", "heel_r", "toe_l", "toe_r"):
+        z = j[jid].z_m
+        assert z is not None
+        assert z == pytest.approx(expected, abs=1e-9)
+        assert z < ankle_z

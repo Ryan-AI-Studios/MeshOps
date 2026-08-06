@@ -54,6 +54,8 @@ JointSide = Literal["l", "r", "none"]
 
 # Stature Z fracs (soles=0). Cite Proportions.md / Grok-Human-Research; retune only with fixtures.
 # Spec section 7 freeze.
+# heel and toe fracs must stay equal (both 0.02) so estimated foot bone
+# heel→toe length remains primarily Y-driven. Do not retune one without the other. (0041 B10)
 STATURE_Z_FRAC: Final[dict[str, float]] = {
     "pelvis": 0.50,
     "spine_low": 0.55,
@@ -73,6 +75,10 @@ STATURE_Z_FRAC: Final[dict[str, float]] = {
     "elbow": 0.62,
     "wrist": 0.48,
 }
+
+# 0041 sole-class Z when inventing heel_*/toe_* (never clone ankle Z).
+_SOLE_Z_FALLBACK_M: Final[float] = 0.02
+_SOLE_BELOW_ANKLE_FRAC: Final[float] = 0.50
 
 
 # ---------------------------------------------------------------------------
@@ -1460,15 +1466,23 @@ def _resolve_limb_side(
         y, y_from, y_depth = _depth_y(jid, y, y_from)
         if not _all_finite_xyz(x, y, z):
             anj = joints[an_id]
+            # 0041 B1-B4: invent sole-class Z - never clone ankle Z.
+            # Y may already be filled by foot_mid depth band; Z invent msgs independent (B6/B7).
             if z is None:
-                z = anj.z_m if _finite(anj.z_m) else _stature_z(height_m, zkey)
-                # chain from ankle Z is not direct landmark on this joint
-                if z is not None and not (lm is not None and _finite(lm.z_m)):
-                    z_from = False
+                sole = _stature_z(height_m, zkey)  # B2 STATURE_Z_FRAC heel/toe = 0.02
+                if sole is None:
+                    sole = _SOLE_Z_FALLBACK_M  # B3
+                    messages.append(f"joint {jid}: z_m from sole fallback")
+                else:
+                    messages.append(f"joint {jid}: z_m from stature sole prior")
+                if _finite(anj.z_m):
+                    sole = min(sole, max(anj.z_m * _SOLE_BELOW_ANKLE_FRAC, 0.0))  # B4
+                z = sole
+                z_from = False  # B5 invent stays estimated
             if x is None:
                 x = anj.x_m if _finite(anj.x_m) else default_hip_x
                 x_from = False
-            # Foot: toes -Y, heels +Y per AXIS_NOTES when inventing depth
+            # Foot: toes -Y, heels +Y per AXIS_NOTES when inventing depth (B6 unchanged)
             if y is None and z is not None:
                 if jid.startswith("toe"):
                     y = -0.08 if height_m is None else -0.05 * height_m
