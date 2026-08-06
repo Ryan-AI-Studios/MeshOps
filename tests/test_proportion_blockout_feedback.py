@@ -18,6 +18,7 @@ from meshops.proportion.blockout_feedback import (
     compute_soft_depth_summary,
     run_blockout_feedback,
 )
+from meshops.proportion.errors import ProportionError
 from meshops.proportion.honesty import FEEDBACK_HONESTY
 from meshops.proportion.models import (
     DepthBand,
@@ -291,3 +292,35 @@ def test_feedback__cli_json_smoke(tmp_path: Path) -> None:
     assert payload["ok"] is True
     assert payload["honesty"] == FEEDBACK_HONESTY
     assert "hip" in INCLUDED_BANDS
+
+
+def test_feedback__missing_report_raises(tmp_path: Path) -> None:
+    """Missing --report hard-fails with feedback_failed (no package write)."""
+    missing = tmp_path / "no_report.json"
+    with pytest.raises(ProportionError) as ei:
+        run_blockout_feedback(missing, tmp_path / "out", force=True)
+    assert ei.value.code == "feedback_failed"
+    assert "report" in str(ei.value).lower()
+    assert not (tmp_path / "out" / "blockout_feedback.json").is_file()
+
+
+def test_feedback__ref_front_without_mesh_fails_step(tmp_path: Path) -> None:
+    """T: --ref-front without mesh/mesh-view → silhouette step ok=false; package ok=false."""
+    pytest.importorskip("PIL")
+    report = _write_report(tmp_path / "report.json", _synthetic_report())
+    ref_front = _write_rgba_png(tmp_path / "front.png", _rect_silhouette())
+    out = tmp_path / "feedback"
+    payload = run_blockout_feedback(
+        report,
+        out,
+        ref_front=ref_front,
+        force=True,
+    )
+    assert payload["ok"] is False
+    steps = payload["steps"]
+    assert steps["depth_samples"]["ok"] is True
+    assert steps["silhouette_front"]["ok"] is False
+    assert steps["silhouette_front"].get("skipped_reason") is None
+    assert any("mesh" in m.lower() for m in (steps["silhouette_front"].get("messages") or []))
+    pkg = json.loads((out / "blockout_feedback.json").read_text(encoding="utf-8"))
+    assert pkg["ok"] is False
