@@ -45,6 +45,13 @@ OUTER_X_TOL_M: Final[float] = 0.02
 SOFT_GAP_FRAC: Final[float] = 0.9
 AXIAL_DEPTH_MARGIN_M: Final[float] = 0.02
 
+# 0042 foot-stack connectivity (hard-when-present; RECIPE-only)
+TOE_FORWARD_EPS_M: Final[float] = 0.005
+HEEL_REACH_GAP_TOL_M: Final[float] = 0.015
+TOE_SOLE_ABS_M: Final[float] = 0.04
+TOE_SOLE_RZ_FRAC: Final[float] = 1.5
+TOE_SOLE_CEIL_M: Final[float] = 0.06
+
 BAND_W_BREAST: Final[float] = 1.5
 BAND_W_GLUTE: Final[float] = 1.5
 BAND_W_THIGH: Final[float] = 1.0
@@ -330,6 +337,19 @@ def part_x(part: RecipePart) -> float | None:
     return None if c is None else c[0]
 
 
+def part_z(part: RecipePart) -> float | None:
+    """World center Z from center or p0/p1 midpoint."""
+    c = part_center_xyz(part)
+    return None if c is None else c[2]
+
+
+def part_rz(part: RecipePart) -> float | None:
+    """Vertical half-extent from ``rz_m`` only (no invent from radius)."""
+    if part.rz_m is None:
+        return None
+    return float(part.rz_m)
+
+
 def set_part_y(part: RecipePart, y: float) -> None:
     """Move part primarily in world Y (center and/or p0/p1)."""
     if part.center is not None and len(part.center) >= 3:
@@ -430,6 +450,82 @@ def _find(
             continue
         found.append(part)
     return found
+
+
+def _find_name_contains(
+    indexed: list[tuple[RecipePart, ConstraintRole, Side]],
+    token: str,
+    side: Side | None = None,
+) -> list[RecipePart]:
+    """Parts whose stripped name contains ``token`` (case-insensitive).
+
+    ``side=None`` matches any side (used for palm global rule).
+    """
+    needle = token.lower()
+    found: list[RecipePart] = []
+    for part, _role, s in indexed:
+        if side is not None and s != side:
+            continue
+        base = strip_blender_suffix(part.name).lower()
+        if needle in base:
+            found.append(part)
+    return found
+
+
+def _find_toe_mass(
+    indexed: list[tuple[RecipePart, ConstraintRole, Side]],
+    side: Side,
+) -> RecipePart | None:
+    """Toe mass for side: ``toe_soft`` preferred, else min-Y ``recipe_toe_*``."""
+    softs = _find_name_contains(indexed, "toe_soft", side)
+    if softs:
+        best: RecipePart | None = None
+        best_y: float | None = None
+        for p in softs:
+            y = part_y(p)
+            if y is None:
+                if best is None:
+                    best = p
+                continue
+            if best_y is None or y < best_y:
+                best_y = y
+                best = p
+        return best
+
+    candidates: list[RecipePart] = []
+    for part, _role, s in indexed:
+        if s != side:
+            continue
+        lower = strip_blender_suffix(part.name).lower()
+        if "recipe_toe_" in lower:
+            candidates.append(part)
+    if not candidates:
+        return None
+    best_c: RecipePart | None = None
+    best_cy = float("inf")
+    for p in candidates:
+        y = part_y(p)
+        if y is None:
+            continue
+        if y < best_cy:
+            best_cy = y
+            best_c = p
+    return best_c
+
+
+def _plate_z_top(plate: RecipePart) -> float | None:
+    """Foot plate top Z from ``z_top_m`` only (no invent)."""
+    if plate.z_top_m is None:
+        return None
+    return float(plate.z_top_m)
+
+
+def _toe_sole_slack_m(toe_rz_eff: float) -> float:
+    """Sole-class slack above plate top: min(max(abs, rz*frac), ceil)."""
+    return min(
+        max(TOE_SOLE_ABS_M, float(toe_rz_eff) * TOE_SOLE_RZ_FRAC),
+        TOE_SOLE_CEIL_M,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1127,6 +1223,247 @@ def _check_role_classified(
     )
 
 
+def _check_toe_forward_of_heel(
+    indexed: list[tuple[RecipePart, ConstraintRole, Side]],
+) -> ConstraintRuleResult:
+    """B3: toe mass center Y strictly forward (-Y) of heel on same side."""
+    metrics: dict[str, Any] = {}
+    statuses: list[RuleStatus] = []
+    messages: list[str] = []
+
+    for side in ("l", "r"):
+        heels = _find(indexed, "heel", side)
+        toe = _find_toe_mass(indexed, side)  # type: ignore[arg-type]
+        if not heels or toe is None:
+            continue
+        heel_y = part_y(heels[0])
+        toe_y = part_y(toe)
+        if heel_y is None or toe_y is None:
+            statuses.append("skip")
+            messages.append(f"toe_{side}: missing Y (toe_y={toe_y}, heel_y={heel_y})")
+            continue
+        threshold = heel_y - TOE_FORWARD_EPS_M
+        delta = heel_y - toe_y
+        metrics[f"toe_y_{side}"] = toe_y
+        metrics[f"heel_y_{side}"] = heel_y
+        metrics[f"delta_{side}"] = delta
+        metrics[f"threshold_{side}"] = threshold
+        if toe_y <= threshold:
+            statuses.append("pass")
+            messages.append(
+                f"toe_{side}: y={toe_y:.4f} heel_y={heel_y:.4f} "
+                f"Δ={delta:.4f} ≥ eps={TOE_FORWARD_EPS_M}"
+            )
+        else:
+            statuses.append("fail")
+            messages.append(
+                f"toe_{side}: y={toe_y:.4f} not forward of heel_y={heel_y:.4f} "
+                f"(need ≤ {threshold:.4f}, eps={TOE_FORWARD_EPS_M})"
+            )
+
+    if not statuses:
+        return _rule(
+            "C_toe_forward_of_heel",
+            "skip",
+            "no heel+toe pairs",
+            metrics or None,
+        )
+    if any(s == "fail" for s in statuses):
+        return _rule(
+            "C_toe_forward_of_heel",
+            "fail",
+            "; ".join(messages),
+            metrics,
+        )
+    if all(s == "skip" for s in statuses):
+        return _rule(
+            "C_toe_forward_of_heel",
+            "skip",
+            "; ".join(messages),
+            metrics or None,
+        )
+    return _rule(
+        "C_toe_forward_of_heel",
+        "pass",
+        "; ".join(messages),
+        metrics,
+    )
+
+
+def _check_heel_reaches_ank_foot(
+    indexed: list[tuple[RecipePart, ConstraintRole, Side]],
+) -> ConstraintRuleResult:
+    """B4: heel top reaches ankle bottom; heel center strictly below ankle."""
+    metrics: dict[str, Any] = {}
+    statuses: list[RuleStatus] = []
+    messages: list[str] = []
+
+    for side in ("l", "r"):
+        heels = _find(indexed, "heel", side)
+        ankles = _find(indexed, "ankle_bridge", side)
+        if not heels or not ankles:
+            continue
+        heel = heels[0]
+        ank = ankles[0]
+        hz = part_z(heel)
+        az = part_z(ank)
+        heel_rz = part_rz(heel)
+        ank_rz = part_rz(ank)
+        if hz is None or az is None or heel_rz is None or ank_rz is None:
+            statuses.append("skip")
+            messages.append(
+                f"heel_{side}: missing center Z or rz_m "
+                f"(heel_z={hz}, ank_z={az}, heel_rz={heel_rz}, ank_rz={ank_rz})"
+            )
+            continue
+        heel_top = hz + heel_rz
+        ank_bottom = az - ank_rz
+        gap = heel_top - ank_bottom  # positive = overlap/reach
+        metrics[f"heel_z_{side}"] = hz
+        metrics[f"ank_z_{side}"] = az
+        metrics[f"heel_top_{side}"] = heel_top
+        metrics[f"ank_bottom_{side}"] = ank_bottom
+        metrics[f"reach_gap_{side}"] = gap
+        reach_ok = heel_top >= ank_bottom - HEEL_REACH_GAP_TOL_M
+        below_ok = hz < az  # strict — equality is fail (clone class)
+        if reach_ok and below_ok:
+            statuses.append("pass")
+            messages.append(
+                f"heel_{side}: top={heel_top:.4f} ank_bottom={ank_bottom:.4f} "
+                f"gap={gap:.4f} (tol={HEEL_REACH_GAP_TOL_M}); "
+                f"heel.z={hz:.4f} < ank.z={az:.4f}"
+            )
+        else:
+            statuses.append("fail")
+            reasons: list[str] = []
+            if not reach_ok:
+                reasons.append(
+                    f"top={heel_top:.4f} below ank_bottom={ank_bottom:.4f} "
+                    f"- tol={HEEL_REACH_GAP_TOL_M} (gap={gap:.4f})"
+                )
+            if not below_ok:
+                reasons.append(f"heel.z={hz:.4f} not < ank.z={az:.4f} (clone/equal class)")
+            messages.append(f"heel_{side}: " + "; ".join(reasons))
+
+    if not statuses:
+        return _rule(
+            "C_heel_reaches_ank_foot",
+            "skip",
+            "no heel+ankle_bridge pairs",
+            metrics or None,
+        )
+    if any(s == "fail" for s in statuses):
+        return _rule(
+            "C_heel_reaches_ank_foot",
+            "fail",
+            "; ".join(messages),
+            metrics,
+        )
+    if all(s == "skip" for s in statuses):
+        return _rule(
+            "C_heel_reaches_ank_foot",
+            "skip",
+            "; ".join(messages),
+            metrics or None,
+        )
+    return _rule(
+        "C_heel_reaches_ank_foot",
+        "pass",
+        "; ".join(messages),
+        metrics,
+    )
+
+
+def _check_toe_sole_z(
+    indexed: list[tuple[RecipePart, ConstraintRole, Side]],
+) -> ConstraintRuleResult:
+    """B5: toe center is sole-class relative to foot_plate z_top + slack."""
+    metrics: dict[str, Any] = {}
+    statuses: list[RuleStatus] = []
+    messages: list[str] = []
+
+    for side in ("l", "r"):
+        plates = _find(indexed, "foot_plate", side)
+        toe = _find_toe_mass(indexed, side)  # type: ignore[arg-type]
+        if not plates or toe is None:
+            continue
+        plate_top = _plate_z_top(plates[0])
+        tz = part_z(toe)
+        if plate_top is None or tz is None:
+            statuses.append("skip")
+            messages.append(
+                f"toe_{side}: missing plate z_top_m or toe Z (plate_top={plate_top}, toe_z={tz})"
+            )
+            continue
+        toe_rz_eff = float(toe.rz_m) if toe.rz_m is not None else 0.0
+        slack = _toe_sole_slack_m(toe_rz_eff)
+        bound = plate_top + slack
+        metrics[f"toe_z_{side}"] = tz
+        metrics[f"plate_z_top_{side}"] = plate_top
+        metrics[f"toe_rz_eff_{side}"] = toe_rz_eff
+        metrics[f"slack_{side}"] = slack
+        metrics[f"bound_{side}"] = bound
+        if tz <= bound:
+            statuses.append("pass")
+            messages.append(
+                f"toe_{side}: z={tz:.4f} ≤ plate_top={plate_top:.4f} "
+                f"+ slack={slack:.4f} (ceil={TOE_SOLE_CEIL_M})"
+            )
+        else:
+            statuses.append("fail")
+            messages.append(
+                f"toe_{side}: z={tz:.4f} plate_top={plate_top:.4f} "
+                f"slack={slack:.4f} → fail sole (bound={bound:.4f})"
+            )
+
+    if not statuses:
+        return _rule(
+            "C_toe_sole_z",
+            "skip",
+            "no foot_plate+toe pairs",
+            metrics or None,
+        )
+    if any(s == "fail" for s in statuses):
+        return _rule("C_toe_sole_z", "fail", "; ".join(messages), metrics)
+    if all(s == "skip" for s in statuses):
+        return _rule(
+            "C_toe_sole_z",
+            "skip",
+            "; ".join(messages),
+            metrics or None,
+        )
+    return _rule("C_toe_sole_z", "pass", "; ".join(messages), metrics)
+
+
+def _check_palm_ellipsoid(
+    indexed: list[tuple[RecipePart, ConstraintRole, Side]],
+) -> ConstraintRuleResult:
+    """B6: when palm parts exist, every palm kind must be ellipsoid."""
+    palms = _find_name_contains(indexed, "palm", side=None)
+    if not palms:
+        return _rule("C_palm_ellipsoid", "skip", "no palm parts", None)
+    metrics: dict[str, Any] = {
+        "palms": [p.name for p in palms],
+        "kinds": {p.name: p.kind for p in palms},
+    }
+    bad = [p for p in palms if p.kind != "ellipsoid"]
+    if bad:
+        msgs = [f"palm {p.name}: kind={p.kind} expected=ellipsoid" for p in bad]
+        return _rule(
+            "C_palm_ellipsoid",
+            "fail",
+            "; ".join(msgs),
+            metrics,
+        )
+    names = ", ".join(p.name for p in palms)
+    return _rule(
+        "C_palm_ellipsoid",
+        "pass",
+        f"all palms ellipsoid ({names})",
+        metrics,
+    )
+
+
 def validate_constraints(
     package: BlockoutRecipePackage,
     *,
@@ -1162,6 +1499,10 @@ def validate_constraints(
         ),
         _check_no_dup_limb(indexed),
         _check_role_classified(indexed),
+        _check_toe_forward_of_heel(indexed),
+        _check_heel_reaches_ank_foot(indexed),
+        _check_toe_sole_z(indexed),
+        _check_palm_ellipsoid(indexed),
     ]
     ok = not any(r.status == "fail" for r in rules)
     messages: list[str] = []
@@ -1866,12 +2207,17 @@ __all__ = [
     "CONSTRAINTS_SCHEMA_VERSION",
     "FOOT_WIDTH_TOL_M",
     "FREEZE_FEET_ROLES",
+    "HEEL_REACH_GAP_TOL_M",
     "OPTIMIZE_FAST_SEED",
     "OPTIMIZE_RESULT_BASENAME",
     "OPTIMIZE_SCHEMA_VERSION",
     "OPTIMIZE_SLOW_SEED",
     "OUTER_X_TOL_M",
     "SOFT_GAP_FRAC",
+    "TOE_FORWARD_EPS_M",
+    "TOE_SOLE_ABS_M",
+    "TOE_SOLE_CEIL_M",
+    "TOE_SOLE_RZ_FRAC",
     "ConstraintRole",
     "ConstraintRuleResult",
     "ConstraintsReport",
@@ -1882,6 +2228,7 @@ __all__ = [
     "optimize_package",
     "part_center_xyz",
     "part_y",
+    "part_z",
     "run_blockout_optimize",
     "run_blockout_validate_constraints",
     "side_from_name",

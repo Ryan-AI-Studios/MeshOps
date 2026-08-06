@@ -554,7 +554,7 @@ def test_ext__mcp_schema_and_tool_count() -> None:
 
 
 def test_ext__validate_constraints_complete_feet() -> None:
-    """R7 / B16: synthetic complete feet → C_ankle_over_heel + C_foot_width pass/skip."""
+    """R7 / B16 / 0042: complete feet wedge → ankle/width + foot-stack connectivity pass."""
     report = _report_with_extremities()
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="wedge")
     result = validate_constraints(pkg, report=report)
@@ -562,6 +562,12 @@ def test_ext__validate_constraints_complete_feet() -> None:
     for rid in ("C_ankle_over_heel", "C_foot_width"):
         rule = by_id[rid]
         assert rule.status in ("pass", "skip"), f"{rid}: {rule.status} {rule.message}"
+    for rid in (
+        "C_toe_forward_of_heel",
+        "C_heel_reaches_ank_foot",
+        "C_toe_sole_z",
+    ):
+        assert by_id[rid].status == "pass", f"{rid}: {by_id[rid].status} {by_id[rid].message}"
 
 
 def test_ext__template_foot_len() -> None:
