@@ -2513,6 +2513,7 @@ def build_blockout_recipe(
             height_m=resolved.height_m,
             toes=toes,
             messages=messages,
+            existing_parts=parts,
         ):
             _append_part(parts, p)
 
