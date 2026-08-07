@@ -58,9 +58,24 @@ BPY_BASENAME: Final[str] = "setup_blockout_recipe.py"
 MIDLINE_X_TOL_M: Final[float] = 0.05
 CROTCH_Z_FRAC_FALLBACK: Final[float] = 0.5
 _NEAR_ZERO_LEN: Final[float] = 1e-9
-# 0034 B4: calf end ellipsoids only (shaft uses raw limb radius).
-_CALF_END_SCALE: Final[float] = 0.95
+# 0045 B1: calf belly + asymmetric ends (replaces single _CALF_END_SCALE=0.95).
 _CALF_END_R_FLOOR: Final[float] = 1e-4
+CALF_BELLY_SCALE: Final[float] = 1.08
+CALF_PROX_END_SCALE: Final[float] = 0.88
+CALF_DIST_END_SCALE: Final[float] = 0.72
+# 0045 B3: arm distal soft beads only (not thigh — P2-1 / B13).
+LIMB_DISTAL_SOFT_SCALE: Final[float] = 0.78
+_LIMB_DIST_SOFT_BANDS: Final[frozenset[str]] = frozenset(
+    {
+        "upper_arm_l",
+        "upper_arm_r",
+        "forearm_l",
+        "forearm_r",
+    }
+)
+# 0045 B5: knee soft joint mass.
+KNEE_SOFT_FRAC: Final[float] = 0.55
+KNEE_SOFT_MIN_FRAC_H: Final[float] = 0.018
 _GIRAFFE_FRAC: Final[float] = 0.20
 _GIRAFFE_ABS_NO_H: Final[float] = 0.35
 _MICHELIN_FRAC: Final[float] = 0.45
@@ -1574,12 +1589,15 @@ def _build_calf_split(
     placement: Literal["full3d", "front_plane"],
     messages: list[str],
 ) -> list[RecipePart]:
-    """0034 B1-B5: emit calf_a / calf_cyl / calf_b (not RECIPE_limb_calf_*).
+    """0034 names + 0045 B1-B2 belly/taper: calf_a / calf_cyl / calf_b.
 
-    Proximal ellipsoid @ knee (p0), distal ellipsoid @ ankle (p1), shaft capsule
-    knee→ankle with raw radius. End radii scaled by _CALF_END_SCALE with floor.
+    Proximal ellipsoid @ knee (p0) with prox end scale, distal @ ankle (p1)
+    with dist end scale, shaft capsule with belly scale vs mid measured r.
     """
-    end_r = max(float(radius) * _CALF_END_SCALE, _CALF_END_R_FLOOR)
+    mid_r = float(radius)
+    cyl_r = max(mid_r * CALF_BELLY_SCALE, _CALF_END_R_FLOOR)
+    prox_r = max(mid_r * CALF_PROX_END_SCALE, _CALF_END_R_FLOOR)
+    dist_r = max(mid_r * CALF_DIST_END_SCALE, _CALF_END_R_FLOOR)
     name_a = f"RECIPE_calf_a_{side}"
     name_cyl = f"RECIPE_calf_cyl_{side}"
     name_b = f"RECIPE_calf_b_{side}"
@@ -1589,9 +1607,9 @@ def _build_calf_split(
             role="limb_segment",
             kind="ellipsoid",
             center=[float(p0[0]), float(p0[1]), float(p0[2])],
-            rx_m=end_r,
-            ry_m=end_r,
-            rz_m=end_r,
+            rx_m=prox_r,
+            ry_m=prox_r,
+            rz_m=prox_r,
             placement=placement,
             label=name_a,
         ),
@@ -1601,7 +1619,7 @@ def _build_calf_split(
             kind="capsule",
             p0=[float(p0[0]), float(p0[1]), float(p0[2])],
             p1=[float(p1[0]), float(p1[1]), float(p1[2])],
-            radius_m=float(radius),
+            radius_m=cyl_r,
             placement=placement,
             label=name_cyl,
         ),
@@ -1610,14 +1628,14 @@ def _build_calf_split(
             role="limb_segment",
             kind="ellipsoid",
             center=[float(p1[0]), float(p1[1]), float(p1[2])],
-            rx_m=end_r,
-            ry_m=end_r,
-            rz_m=end_r,
+            rx_m=dist_r,
+            ry_m=dist_r,
+            rz_m=dist_r,
             placement=placement,
             label=name_b,
         ),
     ]
-    note = f"calf_{side}: split a/cyl/b"
+    note = f"calf_{side}: belly/taper a={prox_r:.4f} cyl={cyl_r:.4f} b={dist_r:.4f}"
     if placement == "front_plane":
         note += " (front_plane)"
     messages.append(note)
@@ -1758,10 +1776,121 @@ def _build_limbs(
                 label=name,
             )
         )
+        # 0045 B3-B4: arm distal soft only (not thigh — P2-1 / B13).
+        if band_id in _LIMB_DIST_SOFT_BANDS:
+            soft_r = max(float(radius) * LIMB_DISTAL_SOFT_SCALE, 1e-4)
+            soft_name = f"RECIPE_dist_soft_{band_id}"
+            parts.append(
+                RecipePart(
+                    name=soft_name,
+                    role="limb_segment",
+                    kind="ellipsoid",
+                    center=[float(p1[0]), float(p1[1]), float(p1[2])],
+                    rx_m=soft_r,
+                    ry_m=soft_r,
+                    rz_m=soft_r,
+                    placement=placement,
+                    label=soft_name,
+                )
+            )
 
     # Cap skip flood: at most 8 segment skip messages already one-per-band
     _ = skip_count  # ≤8 by construction (SEED map size)
     return parts
+
+
+def _knee_adj_radius_m(
+    parts: list[RecipePart],
+    side: str,
+    report: ProportionReport,
+) -> float | None:
+    """0045 B5: adjacent shaft radius for knee soft (name-keyed primary)."""
+    by = {p.name: p for p in parts}
+    candidates: list[float] = []
+    thigh = by.get(f"RECIPE_limb_thigh_{side}")
+    if thigh is not None and thigh.radius_m is not None:
+        candidates.append(float(thigh.radius_m))
+    calf_a = by.get(f"RECIPE_calf_a_{side}")
+    if calf_a is not None and calf_a.rx_m is not None:
+        candidates.append(float(calf_a.rx_m))
+    if candidates:
+        return max(candidates)
+    # Fallback only when both parts absent: diameter ladder half-widths
+    th = _resolve_diameter(report.diameters, f"thigh_{side}")
+    ca = _resolve_diameter(report.diameters, f"calf_{side}")
+    for d in (th, ca):
+        if d is not None:
+            hw = _half_width_from_diameter(d)
+            if hw is not None:
+                candidates.append(float(hw))
+    return max(candidates) if candidates else None
+
+
+def _knee_center_and_placement(
+    report: ProportionReport,
+    side: str,
+    skeleton: BlockoutSkeleton | None,
+) -> tuple[list[float], Literal["full3d", "front_plane"]] | None:
+    """Knee landmark first (finite XZ); skeleton knee_{side} fallback.
+
+    Placement full3d when Y known; else front_plane with y_plane policy.
+    """
+    lms = report.landmarks_xyz
+    kid = f"knee_{side}"
+    if kid in lms:
+        lm = lms[kid]
+        if lm.x_m is not None and lm.z_m is not None:
+            if lm.y_m is not None:
+                return (
+                    [float(lm.x_m), float(lm.y_m), float(lm.z_m)],
+                    "full3d",
+                )
+            return (
+                [float(lm.x_m), 0.0, float(lm.z_m)],
+                "front_plane",
+            )
+    sk = _joint_xyz(_joints_map(skeleton).get(kid))
+    if sk is not None:
+        return (list(sk), "full3d")
+    return None
+
+
+def _append_knee_softs(
+    parts: list[RecipePart],
+    report: ProportionReport,
+    skeleton: BlockoutSkeleton | None,
+    height_m: float | None,
+    messages: list[str],
+) -> None:
+    """0045 B5: post-pass knee soft ellipsoids after limbs emit."""
+    for side in ("l", "r"):
+        center_place = _knee_center_and_placement(report, side, skeleton)
+        if center_place is None:
+            continue  # skip missing joint — not fail
+        center, placement = center_place
+        adj = _knee_adj_radius_m(parts, side, report)
+        r: float | None = KNEE_SOFT_FRAC * adj if adj is not None else None
+        if height_m is not None and height_m > 0:
+            floor = KNEE_SOFT_MIN_FRAC_H * float(height_m)
+            r = max(r, floor) if r is not None else floor
+        if r is None:
+            continue
+        name = f"RECIPE_knee_soft_{side}"
+        _append_part(
+            parts,
+            RecipePart(
+                name=name,
+                role="limb_segment",
+                kind="ellipsoid",
+                center=center,
+                rx_m=r,
+                ry_m=r,
+                rz_m=r,
+                placement=placement,
+                label=name,
+            ),
+        )
+        messages.append(f"knee_soft_{side}: r={r:.4f}")
 
 
 # ---------------------------------------------------------------------------
@@ -2488,6 +2617,14 @@ def build_blockout_recipe(
     if limbs:
         for p in _build_limbs(report, messages, skeleton=skeleton):
             _append_part(parts, p)
+        # 0045 B5: knee soft post-pass (independent of feet)
+        _append_knee_softs(
+            parts,
+            report,
+            skeleton,
+            resolved.height_m,
+            messages,
+        )
     else:
         messages.append("--no-limbs: limb_segment parts omitted")
 
@@ -3521,8 +3658,14 @@ def run_blockout_emit_setup(
 __all__ = [
     "AXIS_NOTES",
     "BPY_BASENAME",
+    "CALF_BELLY_SCALE",
+    "CALF_DIST_END_SCALE",
+    "CALF_PROX_END_SCALE",
     "CROTCH_Z_FRAC_FALLBACK",
     "JSON_BASENAME",
+    "KNEE_SOFT_FRAC",
+    "KNEE_SOFT_MIN_FRAC_H",
+    "LIMB_DISTAL_SOFT_SCALE",
     "MIDLINE_X_TOL_M",
     "RECIPE_HONESTY",
     "RECIPE_ID",

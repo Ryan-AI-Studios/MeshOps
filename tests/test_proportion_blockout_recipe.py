@@ -412,7 +412,12 @@ def test_recipe__limbs_y_null_front_plane() -> None:
 
 
 def test_recipe__limbs_emit_split_calf() -> None:
-    """0034 B1/B2/B4: calf → a/cyl/b per side; no RECIPE_limb_calf_*."""
+    """0034 names + 0045 B1/B2: calf belly + asymmetric ends; no RECIPE_limb_calf_*."""
+    from meshops.proportion.blockout_recipe import (
+        CALF_BELLY_SCALE,
+        CALF_DIST_END_SCALE,
+        CALF_PROX_END_SCALE,
+    )
     from meshops.proportion.constraints import classify_part_name
 
     knee_y, ankle_y = 0.04, 0.01
@@ -432,6 +437,10 @@ def test_recipe__limbs_emit_split_calf() -> None:
     pkg = build_blockout_recipe(report, limbs=True)
     by_name = {p.name: p for p in pkg.parts}
 
+    prox_r = max(half_w * CALF_PROX_END_SCALE, 1e-4)
+    cyl_r = max(half_w * CALF_BELLY_SCALE, 1e-4)
+    dist_r = max(half_w * CALF_DIST_END_SCALE, 1e-4)
+
     for side in ("l", "r"):
         a = by_name[f"RECIPE_calf_a_{side}"]
         cyl = by_name[f"RECIPE_calf_cyl_{side}"]
@@ -442,12 +451,15 @@ def test_recipe__limbs_emit_split_calf() -> None:
         assert classify_part_name(a.name) == ("calf_proximal", side)
         assert classify_part_name(cyl.name) == ("calf", side)
         assert classify_part_name(b.name) == ("calf_distal", side)
-        end_r = max(half_w * 0.95, 1e-4)
-        assert a.rx_m == pytest.approx(end_r)
-        assert a.ry_m == pytest.approx(end_r)
-        assert a.rz_m == pytest.approx(end_r)
-        assert b.rx_m == pytest.approx(end_r)
-        assert cyl.radius_m == pytest.approx(half_w)
+        # T1: ordering dist < cyl; prox ≤ cyl; dist ≤ prox
+        assert a.rx_m == pytest.approx(prox_r, abs=1e-9)
+        assert a.ry_m == pytest.approx(prox_r, abs=1e-9)
+        assert a.rz_m == pytest.approx(prox_r, abs=1e-9)
+        assert b.rx_m == pytest.approx(dist_r, abs=1e-9)
+        assert cyl.radius_m == pytest.approx(cyl_r, abs=1e-9)
+        assert float(b.rx_m) < float(cyl.radius_m)  # type: ignore[arg-type]
+        assert float(a.rx_m) <= float(cyl.radius_m)  # type: ignore[arg-type]
+        assert float(b.rx_m) <= float(a.rx_m)  # type: ignore[arg-type]
         assert a.center is not None and b.center is not None
         assert float(a.center[1]) == pytest.approx(knee_y)
         assert float(b.center[1]) == pytest.approx(ankle_y)
@@ -455,10 +467,11 @@ def test_recipe__limbs_emit_split_calf() -> None:
         assert float(cyl.p0[1]) == pytest.approx(knee_y)
         assert float(cyl.p1[1]) == pytest.approx(ankle_y)
         assert a.placement == "full3d"
-        assert any(f"calf_{side}: split a/cyl/b" in m for m in pkg.messages)
+        # T2: belly/taper message
+        assert any(f"calf_{side}: belly/taper a=" in m for m in pkg.messages)
 
     assert not any("limb_calf" in p.name.lower() for p in pkg.parts)
-    # Non-calf bands remain single RECIPE_limb_{band}
+    # T8: no RECIPE_limb_calf on limbs path
     assert "RECIPE_limb_thigh_l" in by_name
     assert "RECIPE_limb_calf_l" not in by_name
 
@@ -609,6 +622,199 @@ def test_recipe__calf_split_feet_slant_pass() -> None:
     calf = by_id["C_calf_slant"]
     assert calf.status == "pass", calf.message
     assert "whole calf only" not in calf.message.lower()
+
+
+def _limb_mass_report(
+    *,
+    height_m: float = 1.72,
+    thigh_hw: float = 0.06,
+    calf_hw: float = 0.05,
+    arm_hw: float = 0.04,
+    include_knees: bool = True,
+    knee_y: float | None = 0.04,
+) -> ProportionReport:
+    """Synthetic full-limb report for 0045 limb visual mass tests."""
+    extra: dict[str, LandmarkXYZ] = {
+        "elbow_l": _lm("elbow_l", x_m=-0.25, y_m=0.0, z_m=1.10),
+        "elbow_r": _lm("elbow_r", x_m=0.25, y_m=0.0, z_m=1.10),
+        "wrist_l": _lm("wrist_l", x_m=-0.30, y_m=0.0, z_m=0.90),
+        "wrist_r": _lm("wrist_r", x_m=0.30, y_m=0.0, z_m=0.90),
+        "ankle_l": _lm("ankle_l", x_m=-0.10, y_m=0.01, z_m=0.08),
+        "ankle_r": _lm("ankle_r", x_m=0.10, y_m=0.01, z_m=0.08),
+    }
+    if include_knees:
+        extra["knee_l"] = _lm("knee_l", x_m=-0.12, y_m=knee_y, z_m=0.50)
+        extra["knee_r"] = _lm("knee_r", x_m=0.12, y_m=knee_y, z_m=0.50)
+    diams = [
+        _diam("bust", half_width_m=0.16),
+        _diam("waist", half_width_m=0.13),
+        _diam("neck", half_width_m=0.05),
+        _diam("upper_arm_l", half_width_m=arm_hw),
+        _diam("upper_arm_r", half_width_m=arm_hw),
+        _diam("forearm_l", half_width_m=arm_hw),
+        _diam("forearm_r", half_width_m=arm_hw),
+        _diam("thigh_l", half_width_m=thigh_hw),
+        _diam("thigh_r", half_width_m=thigh_hw),
+        _diam("calf_l", half_width_m=calf_hw),
+        _diam("calf_r", half_width_m=calf_hw),
+    ]
+    return _full_torso_report(
+        height_m=height_m,
+        extra_lms=extra,
+        diameters=diams,
+    )
+
+
+def test_recipe__t3_thigh_no_dist_soft() -> None:
+    """0045 T3/B13: thigh emits capsule only — no dist_soft / no thigh soft at knee."""
+    report = _limb_mass_report()
+    pkg = build_blockout_recipe(report, limbs=True)
+    by_name = {p.name: p for p in pkg.parts}
+    assert "RECIPE_limb_thigh_l" in by_name
+    assert "RECIPE_limb_thigh_r" in by_name
+    thigh = by_name["RECIPE_limb_thigh_l"]
+    assert thigh.kind == "capsule"
+    assert thigh.radius_m is not None
+    soft_names = [p.name for p in pkg.parts if "dist_soft" in p.name.lower()]
+    assert not any("thigh" in n for n in soft_names)
+    assert "RECIPE_dist_soft_thigh_l" not in by_name
+    assert "RECIPE_dist_soft_thigh_r" not in by_name
+
+
+def test_recipe__t4_arm_dist_soft_scale() -> None:
+    """0045 T4: upper_arm + forearm emit dist_soft; soft_r ~ 0.78 x shaft_r."""
+    from meshops.proportion.blockout_recipe import LIMB_DISTAL_SOFT_SCALE
+
+    arm_hw = 0.04
+    report = _limb_mass_report(arm_hw=arm_hw)
+    pkg = build_blockout_recipe(report, limbs=True)
+    by_name = {p.name: p for p in pkg.parts}
+    expected_soft = max(arm_hw * LIMB_DISTAL_SOFT_SCALE, 1e-4)
+    for band in (
+        "upper_arm_l",
+        "upper_arm_r",
+        "forearm_l",
+        "forearm_r",
+    ):
+        shaft = by_name[f"RECIPE_limb_{band}"]
+        soft = by_name[f"RECIPE_dist_soft_{band}"]
+        assert shaft.kind == "capsule"
+        assert soft.kind == "ellipsoid"
+        assert soft.role == "limb_segment"
+        assert shaft.radius_m == pytest.approx(arm_hw, abs=1e-9)
+        assert soft.rx_m == pytest.approx(expected_soft, abs=1e-9)
+        assert soft.ry_m == pytest.approx(expected_soft, abs=1e-9)
+        assert soft.rz_m == pytest.approx(expected_soft, abs=1e-9)
+        # Dist soft centered at shaft p1
+        assert soft.center is not None and shaft.p1 is not None
+        assert float(soft.center[0]) == pytest.approx(float(shaft.p1[0]))
+        assert float(soft.center[1]) == pytest.approx(float(shaft.p1[1]))
+        assert float(soft.center[2]) == pytest.approx(float(shaft.p1[2]))
+
+
+def test_recipe__t5_knee_soft_radius_mixed_thigh_calf() -> None:
+    """0045 T5: knee_soft r = max(0.55*max(thigh.r, calf_a.rx), 0.018*H)."""
+    from meshops.proportion.blockout_recipe import (
+        CALF_PROX_END_SCALE,
+        KNEE_SOFT_FRAC,
+        KNEE_SOFT_MIN_FRAC_H,
+    )
+
+    height_m = 1.72
+    thigh_hw = 0.08  # larger than calf_a.rx so max = thigh
+    calf_hw = 0.04
+    report = _limb_mass_report(
+        height_m=height_m,
+        thigh_hw=thigh_hw,
+        calf_hw=calf_hw,
+    )
+    pkg = build_blockout_recipe(report, limbs=True)
+    by_name = {p.name: p for p in pkg.parts}
+    for side in ("l", "r"):
+        knee = by_name[f"RECIPE_knee_soft_{side}"]
+        thigh = by_name[f"RECIPE_limb_thigh_{side}"]
+        calf_a = by_name[f"RECIPE_calf_a_{side}"]
+        assert knee.kind == "ellipsoid"
+        assert knee.role == "limb_segment"
+        adj = max(float(thigh.radius_m), float(calf_a.rx_m))  # type: ignore[arg-type]
+        expected = max(KNEE_SOFT_FRAC * adj, KNEE_SOFT_MIN_FRAC_H * height_m)
+        # Mixed: thigh 0.08 > calf_a.rx = 0.04*0.88 → adj = thigh
+        assert float(calf_a.rx_m) == pytest.approx(  # type: ignore[arg-type]
+            calf_hw * CALF_PROX_END_SCALE, abs=1e-9
+        )
+        assert float(thigh.radius_m) > float(calf_a.rx_m)  # type: ignore[arg-type]
+        assert knee.rx_m == pytest.approx(expected, abs=1e-9)
+        assert any(f"knee_soft_{side}: r=" in m for m in pkg.messages)
+        assert knee.center is not None
+        assert float(knee.center[2]) == pytest.approx(0.50)
+
+
+def test_recipe__t5b_no_knee_joint_skips_knee_soft() -> None:
+    """0045 T5b/B13: no knee → no knee_soft; recipe ok; still no thigh dist_soft."""
+    report = _limb_mass_report(include_knees=False)
+    # Without knees, thigh/calf segments also skip (missing joint) — still no softs.
+    pkg = build_blockout_recipe(report, limbs=True)
+    assert not any("knee_soft" in p.name for p in pkg.parts)
+    assert not any("dist_soft_thigh" in p.name for p in pkg.parts)
+    assert not any("RECIPE_dist_soft_thigh" in p.name for p in pkg.parts)
+
+
+def test_recipe__t8_no_limb_calf_on_limbs_path() -> None:
+    """0045 T8: product limbs path never emits RECIPE_limb_calf_*."""
+    report = _limb_mass_report()
+    pkg = build_blockout_recipe(report, limbs=True)
+    assert not any("limb_calf" in p.name.lower() for p in pkg.parts)
+    assert any(p.name.startswith("RECIPE_calf_cyl_") for p in pkg.parts)
+
+
+def test_recipe__t10_join_ready_preserves_calf_taper() -> None:
+    """0045 T10/P3-4: after join_ready nudge, calf_b.rx_m < calf_cyl.radius_m."""
+    mid_r = 0.05
+    report = _full_torso_report(
+        height_m=1.72,
+        extra_lms={
+            "elbow_l": _lm("elbow_l", x_m=-0.25, y_m=0.0, z_m=1.10),
+            "elbow_r": _lm("elbow_r", x_m=0.25, y_m=0.0, z_m=1.10),
+            "wrist_l": _lm("wrist_l", x_m=-0.30, y_m=0.0, z_m=0.90),
+            "wrist_r": _lm("wrist_r", x_m=0.30, y_m=0.0, z_m=0.90),
+            "knee_l": _lm("knee_l", x_m=-0.12, y_m=0.04, z_m=0.50),
+            "knee_r": _lm("knee_r", x_m=0.12, y_m=0.04, z_m=0.50),
+            "ankle_l": _lm("ankle_l", x_m=-0.10, y_m=0.02, z_m=0.08),
+            "ankle_r": _lm("ankle_r", x_m=0.10, y_m=0.02, z_m=0.08),
+            "heel_l": _lm("heel_l", x_m=-0.10, y_m=0.06, z_m=0.02),
+            "heel_r": _lm("heel_r", x_m=0.10, y_m=0.06, z_m=0.02),
+            "toe_l": _lm("toe_l", x_m=-0.10, y_m=-0.12, z_m=0.02),
+            "toe_r": _lm("toe_r", x_m=0.10, y_m=-0.12, z_m=0.02),
+        },
+        diameters=[
+            _diam("bust", half_width_m=0.16),
+            _diam("waist", half_width_m=0.13),
+            _diam("neck", half_width_m=0.05),
+            *(
+                _diam(b, half_width_m=mid_r)
+                for b in (
+                    "upper_arm_l",
+                    "upper_arm_r",
+                    "forearm_l",
+                    "forearm_r",
+                    "thigh_l",
+                    "thigh_r",
+                    "calf_l",
+                    "calf_r",
+                )
+            ),
+            _diam("ank_foot_l", half_width_m=0.035),
+            _diam("ank_foot_r", half_width_m=0.035),
+        ],
+    )
+    pkg = build_blockout_recipe(report, limbs=True, feet=True, join_ready=True)
+    by_name = {p.name: p for p in pkg.parts}
+    for side in ("l", "r"):
+        b = by_name[f"RECIPE_calf_b_{side}"]
+        cyl = by_name[f"RECIPE_calf_cyl_{side}"]
+        assert b.rx_m is not None and cyl.radius_m is not None
+        # Worst-case: calf_b may grow <=1.08x; dist*1.08 still < belly (0.72*1.08=0.7776 < 1.08)
+        assert float(b.rx_m) < float(cyl.radius_m)
 
 
 def test_recipe__depth_at_landmarks_override(tmp_path: Path) -> None:
