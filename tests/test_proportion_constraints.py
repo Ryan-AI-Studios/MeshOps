@@ -163,6 +163,28 @@ def test_classify_foot_plate_and_heel() -> None:
     assert classify_part_name("RECIPE_heel_r") == ("heel", "r")
 
 
+def test_classify__t0_dist_soft_unknown() -> None:
+    """0045 T0: RECIPE_dist_soft_upper_arm_* → unknown (not upper_arm)."""
+    role, side = classify_part_name("RECIPE_dist_soft_upper_arm_l")
+    assert role == "unknown"
+    assert side == "l"
+    role2, side2 = classify_part_name("RECIPE_dist_soft_forearm_r")
+    assert role2 == "unknown"
+    assert side2 == "r"
+
+
+def test_classify__t0b_knee_soft_unknown() -> None:
+    """0045 T0b: RECIPE_knee_soft_* → unknown (confirm-not-regress)."""
+    assert classify_part_name("RECIPE_knee_soft_l") == ("unknown", "l")
+    assert classify_part_name("RECIPE_knee_soft_r") == ("unknown", "r")
+
+
+def test_classify__t0c_thigh_still_thigh() -> None:
+    """0045 T0c: RECIPE_limb_thigh_* still classifies as thigh."""
+    assert classify_part_name("RECIPE_limb_thigh_l") == ("thigh", "l")
+    assert classify_part_name("RECIPE_limb_thigh_r") == ("thigh", "r")
+
+
 def test_constants_and_honesty_tokens() -> None:
     assert CONSTRAINT_HONESTY == ("proportion_blockout_constraints_not_mesh_or_print_success")
     assert OPTIMIZE_HONESTY == ("proportion_blockout_optimize_not_mesh_or_print_success")
@@ -1370,6 +1392,154 @@ def test_freeze_feet_product_calf_split_distal_y_unchanged() -> None:
     assert part_y(by_name["RECIPE_calf_b_l"]) == pytest.approx(distal_y0)
     assert part_y(by_name["RECIPE_ank_foot_l"]) == pytest.approx(ankle_y0)
     # Shaft may move with free set (B8); only require distal frozen.
+
+
+def test_constraints__t6_calf_slant_and_no_dup_with_limb_mass() -> None:
+    """0045 T6: product-like package with dist_soft + knee_soft → slant + no_dup pass."""
+    # Split calf with distal toward ankle (+Y vs prox) so slant passes.
+    pkg = _pkg(
+        [
+            _part(
+                "RECIPE_calf_a_l",
+                kind="ellipsoid",
+                center=[0.12, 0.0, 0.50],
+                rx_m=0.044,
+                ry_m=0.044,
+                rz_m=0.044,
+            ),
+            _part(
+                "RECIPE_calf_cyl_l",
+                kind="capsule",
+                center=None,
+                rx_m=None,
+                ry_m=None,
+                rz_m=None,
+                radius_m=0.054,
+                p0=[0.12, 0.0, 0.50],
+                p1=[0.12, 0.04, 0.12],
+            ),
+            _part(
+                "RECIPE_calf_b_l",
+                kind="ellipsoid",
+                center=[0.12, 0.04, 0.12],
+                rx_m=0.036,
+                ry_m=0.036,
+                rz_m=0.036,
+            ),
+            _part(
+                "RECIPE_ank_foot_l",
+                kind="ellipsoid",
+                center=[0.12, 0.04, 0.08],
+                rx_m=0.03,
+                ry_m=0.03,
+                rz_m=0.03,
+            ),
+            _part(
+                "RECIPE_limb_thigh_l",
+                kind="capsule",
+                center=None,
+                rx_m=None,
+                ry_m=None,
+                rz_m=None,
+                radius_m=0.06,
+                p0=[0.12, 0.0, 0.95],
+                p1=[0.12, 0.0, 0.50],
+            ),
+            _part(
+                "RECIPE_limb_upper_arm_l",
+                kind="capsule",
+                center=None,
+                rx_m=None,
+                ry_m=None,
+                rz_m=None,
+                radius_m=0.04,
+                p0=[-0.20, 0.0, 1.38],
+                p1=[-0.25, 0.0, 1.10],
+            ),
+            _part(
+                "RECIPE_dist_soft_upper_arm_l",
+                kind="ellipsoid",
+                center=[-0.25, 0.0, 1.10],
+                rx_m=0.0312,
+                ry_m=0.0312,
+                rz_m=0.0312,
+            ),
+            _part(
+                "RECIPE_knee_soft_l",
+                kind="ellipsoid",
+                center=[0.12, 0.0, 0.50],
+                rx_m=0.033,
+                ry_m=0.033,
+                rz_m=0.033,
+            ),
+        ]
+    )
+    result = validate_constraints(pkg)
+    by_id = {r.id: r for r in result.rules}
+    assert by_id["C_calf_slant"].status == "pass", by_id["C_calf_slant"].message
+    assert by_id["C_no_dup_limb"].status == "pass", by_id["C_no_dup_limb"].message
+    assert classify_part_name("RECIPE_dist_soft_upper_arm_l") == ("unknown", "l")
+    assert classify_part_name("RECIPE_knee_soft_l") == ("unknown", "l")
+
+
+def test_constraints__t7_freeze_feet_knee_soft_not_frozen() -> None:
+    """0045 T7: freeze-feet freezes calf_distal; knee_soft not in FREEZE_FEET."""
+    assert "calf_distal" in FREEZE_FEET_ROLES
+    assert "unknown" not in FREEZE_FEET_ROLES
+    knee_role, knee_side = classify_part_name("RECIPE_knee_soft_l")
+    assert knee_role == "unknown"
+    assert knee_side == "l"
+    assert knee_role not in FREEZE_FEET_ROLES
+    # Product freeze set still freezes calf_distal only among calf family
+    assert classify_part_name("RECIPE_calf_b_l") == ("calf_distal", "l")
+    assert classify_part_name("RECIPE_calf_b_l")[0] in FREEZE_FEET_ROLES
+    assert classify_part_name("RECIPE_calf_a_l")[0] not in FREEZE_FEET_ROLES
+    assert classify_part_name("RECIPE_calf_cyl_l")[0] not in FREEZE_FEET_ROLES
+
+
+def test_hip_pair__t11_excludes_dist_soft_decoy() -> None:
+    """0045 T11/P3-2: _hip_pair proximal fallback skips dist_soft decoy."""
+    from meshops.proportion.connection_metrics import _hip_pair
+
+    # Non-canonical thigh name so _find_named(RECIPE_limb_thigh_l) misses and
+    # hits the role/name fallback that must exclude dist_soft (P3-2).
+    thigh = _part(
+        "RECIPE_custom_thigh_l",
+        kind="capsule",
+        center=None,
+        rx_m=None,
+        ry_m=None,
+        rz_m=None,
+        radius_m=0.06,
+        p0=[0.12, 0.0, 0.95],
+        p1=[0.12, 0.0, 0.50],
+    )
+    decoy = _part(
+        "RECIPE_dist_soft_thigh_l",
+        kind="ellipsoid",
+        center=[0.12, 0.0, 0.50],
+        rx_m=0.04,
+        ry_m=0.04,
+        rz_m=0.04,
+    )
+    pelvis = _part(
+        "RECIPE_pelvis_oval",
+        role="pelvis",
+        kind="ellipsoid",
+        center=[0.0, 0.0, 0.90],
+        rx_m=0.12,
+        ry_m=0.08,
+        rz_m=0.06,
+    )
+    # Decoy first — naive substring loop would pick it without dist_soft guard
+    parts = [decoy, thigh, pelvis]
+    by_name = {p.name: p for p in parts}
+    pair = _hip_pair(parts, by_name, "l")
+    assert pair is not None
+    child, parent = pair
+    assert child.name == "RECIPE_custom_thigh_l"
+    assert parent.name == "RECIPE_pelvis_oval"
+    assert "dist_soft" not in child.name
 
 
 def test_band_weighted_free_dof_score_ranks_glute_y() -> None:

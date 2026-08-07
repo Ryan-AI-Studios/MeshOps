@@ -220,9 +220,9 @@ def _hip_pair(
     if child is None:
         child = _find_role(parts, "hip_bridge", side=side)
     if child is None:
-        # Proximal thigh capsule fallback
+        # Proximal thigh capsule fallback (0045 B11/P3-2: exclude dist_soft decoys)
         for p in parts:
-            if p.role == "limb_segment" and f"thigh_{side}" in p.name:
+            if p.role == "limb_segment" and f"thigh_{side}" in p.name and "dist_soft" not in p.name:
                 child = p
                 break
     parent = _find_named(
