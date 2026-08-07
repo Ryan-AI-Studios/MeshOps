@@ -5,7 +5,7 @@ or landmarks. Authoring only — not print-ready articulated digits, not boots
 as law (Difficulty §12 / N6).
 
 All names stay RECIPE_* (never HAND_*/FOOT_*/DIGIT_* prefixes).
-Ankle mass labels must contain ank_foot (classifier → ankle_bridge).
+Ankle mass labels must contain ank_foot (classifier -> ankle_bridge).
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ _FOOT_LEN_NO_TEMPLATE_FRAC: Final[float] = 0.15
 _FOOT_WIDTH_FALLBACK_FRAC_H: Final[float] = 0.02
 _PLATE_THICKNESS_FRAC_H: Final[float] = 0.02
 _HAND_LEN_FALLBACK_FRAC_H: Final[float] = 0.11
+# Hand constants — main tip / 0040 (0044 B14 prune; no hand-scope expansion)
 _PALM_WIDTH_FRAC_HAND: Final[float] = 0.55
 _PALM_THICKNESS_FRAC_HAND: Final[float] = 0.22
 _PALM_LEN_FRAC_HAND: Final[float] = 0.48
@@ -39,13 +40,22 @@ _MITTEN_R_FRAC_PALM: Final[float] = 0.72  # fat mitt, not thin stick
 _FINGER_SEG_FRAC_HAND: Final[float] = 1.0 / 5.0
 _FINGER_R_FRAC_PALM: Final[float] = 0.08
 _THUMB_SEG_FRAC_HAND: Final[float] = 1.0 / 6.0
-_TOE_WEDGE_LEN_FRAC: Final[float] = 0.38  # elongated front mass (not a ball on plate)
-_TOE_FULL_LEN_FRAC: Final[float] = 0.20
-_BALL_SOFT_R_FRAC_FOOT: Final[float] = 0.12
-# Heel bridge min-floor inside max(...) — not the primary heel size (0040 B3 / AI1 P3-3).
-# Primary size comes from (heel_z_hi - heel_z_lo)*0.5 and half_width*1.1.
+# Foot-friendly toe / sole fracs (0044 Phase 0 organic sole)
+_TOE_WEDGE_LEN_FRAC: Final[float] = 0.42  # elongated front mass (not a ball on plate)
+_TOE_FULL_LEN_FRAC: Final[float] = 0.22
+_BALL_SOFT_R_FRAC_FOOT: Final[float] = 0.14
+# Rounded sole: ellipsoid foot_plate (not world-axis square box).
+# Heel min-floor inside max(...) — rear pad primary (0044 B6-B8), not tower.
 _HEEL_R_FRAC_FOOT: Final[float] = 0.18
-_HEEL_BRIDGE_OVERLAP_FRAC: Final[float] = 0.35  # overlap into ank_foot vertical extent
+_HEEL_BRIDGE_OVERLAP_FRAC: Final[float] = 0.35  # 0040 reuse (reach overlap concept)
+# 0044 B1-B3 / B6-B8 visual mass freezes
+FOOT_LEN_VISUAL_MIN_FRAC_H: Final[float] = 0.12
+FOOT_LEN_MIN_VS_ANK_HW: Final[float] = 4.8
+FOOT_LEN_MIN_VS_CALF_DIAM: Final[float] = 1.55
+HEEL_REAR_Y_BIAS_FRAC_DEPTH: Final[float] = 0.12
+HEEL_Z_FRAC_ANK: Final[float] = 0.42
+HEEL_RZ_CAP_FRAC_ANK: Final[float] = 0.48
+HEEL_RY_MIN_FRAC_DEPTH: Final[float] = 0.42
 _FINGER_Y_BIAS_FRAC: Final[float] = 0.10  # secondary only when no tip
 _NEAR_ZERO: Final[float] = 1e-9
 _FINGER_NAMES: Final[tuple[str, ...]] = ("index", "middle", "ring", "pinky")
@@ -148,6 +158,11 @@ def _ellipsoid(
     *,
     parent_joint: str | None = None,
     notes: str | None = None,
+    half_depth_m: float | None = None,
+    top_half_width_m: float | None = None,
+    bottom_half_width_m: float | None = None,
+    z_bottom_m: float | None = None,
+    z_top_m: float | None = None,
 ) -> RecipePart:
     from meshops.proportion.blockout_recipe import RecipePart
 
@@ -160,6 +175,11 @@ def _ellipsoid(
         rx_m=rx,
         ry_m=ry,
         rz_m=rz,
+        half_depth_m=half_depth_m,
+        top_half_width_m=top_half_width_m,
+        bottom_half_width_m=bottom_half_width_m,
+        z_bottom_m=z_bottom_m,
+        z_top_m=z_top_m,
         placement="full3d",
         label=name,
         parent_joint=parent_joint,
@@ -306,6 +326,64 @@ def resolve_foot_half_width_m(
     return 0.03
 
 
+def apply_foot_length_visual_floor(
+    foot_len: float,
+    *,
+    height_m: float | None,
+    half_width: float,
+    calf_distal_r: float | None,
+    messages: list[str],
+    side: str,
+) -> float:
+    """0044 B1-B5: mannequin visual length floor; never shrinks measured/template.
+
+    Floor sources (skip when unavailable): stature 0.12·H, ank half-width 4.8·hw,
+    calf distal diam 1.55·(2·calf_r). Template length is not a floor when measured
+    exists (B18).
+    """
+    floors: list[tuple[str, float]] = []
+    if height_m is not None and height_m > 0:
+        floors.append(("stature", FOOT_LEN_VISUAL_MIN_FRAC_H * float(height_m)))
+    if half_width > 0:
+        floors.append(("ank_hw", FOOT_LEN_MIN_VS_ANK_HW * float(half_width)))
+    if calf_distal_r is not None and calf_distal_r > 0:
+        diam = 2.0 * float(calf_distal_r)
+        floors.append(("calf_diam", FOOT_LEN_MIN_VS_CALF_DIAM * diam))
+    if not floors:
+        return foot_len
+    floor_val = max(v for _, v in floors)
+    winner = max(floors, key=lambda t: t[1])[0]
+    if foot_len + 1e-12 < floor_val:
+        messages.append(
+            f"foot_{side}: length visual floor {foot_len:.4f}->{floor_val:.4f} m ({winner})"
+        )
+        return floor_val
+    return foot_len
+
+
+def _calf_distal_r_from_parts(
+    existing_parts: list[RecipePart] | None,
+    side: str,
+) -> float | None:
+    """B5: calf distal r from RECIPE_calf_b_{side}; prefer rx else mean of finite radii."""
+    if not existing_parts:
+        return None
+    name = f"RECIPE_calf_b_{side}"
+    part = next((p for p in existing_parts if p.name == name), None)
+    if part is None:
+        return None
+    if part.rx_m is not None and float(part.rx_m) > 0:
+        return float(part.rx_m)
+    vals = [
+        float(v)
+        for v in (part.rx_m, part.ry_m, part.rz_m)
+        if v is not None and float(v) == float(v) and float(v) > 0
+    ]
+    if not vals:
+        return None
+    return sum(vals) / len(vals)
+
+
 # ---------------------------------------------------------------------------
 # Finger axis (B7) — exported for tests
 # ---------------------------------------------------------------------------
@@ -317,7 +395,7 @@ def finger_primary_axis(
     *,
     hand_len: float,
 ) -> tuple[float, float, float]:
-    """Primary finger/mitten axis: wrist→tip when both finite; else -Z (B7).
+    """Primary finger/mitten axis: wrist->tip when both finite; else -Z (B7).
 
     Optional slight -Y bias (<=10% hand_len) is applied only as secondary nudge
     when no tip — returned as unit vector of (-small_Y, -Z) renormalized.
@@ -353,8 +431,13 @@ def build_foot_parts(
     height_m: float | None = None,
     toes: ToeTier = "wedge",
     messages: list[str] | None = None,
+    existing_parts: list[RecipePart] | None = None,
 ) -> list[RecipePart]:
-    """Emit L/R foot plate + heel + ank_foot (+ toes per tier). RECIPE_* only."""
+    """Emit L/R foot plate + heel + ank_foot (+ toes per tier). RECIPE_* only.
+
+    ``existing_parts`` supplies already-emitted limb parts (e.g. calf_b) for the
+    0044 visual length floor (B5).
+    """
     msgs = messages if messages is not None else []
     if toes not in TOE_TIERS:
         msg = f"toes must be one of {sorted(TOE_TIERS)} (got {toes!r})"
@@ -376,6 +459,7 @@ def build_foot_parts(
                 height_m=h,
                 toes=toes,
                 messages=msgs,
+                existing_parts=existing_parts,
             )
         )
     return parts
@@ -390,7 +474,10 @@ def _build_foot_side(
     height_m: float | None,
     toes: ToeTier,
     messages: list[str],
+    existing_parts: list[RecipePart] | None = None,
 ) -> list[RecipePart]:
+    from meshops.proportion.constraints import HEEL_REACH_GAP_TOL_M
+
     ankle = _joint_or_lm(report, skeleton, f"ankle_{side}")
     heel = _joint_or_lm(report, skeleton, f"heel_{side}")
     toe = _joint_or_lm(report, skeleton, f"toe_{side}")
@@ -411,7 +498,6 @@ def _build_foot_side(
     if foot_len is None or foot_len <= _NEAR_ZERO:
         return []
 
-    half_depth = foot_len / 2.0
     half_width = resolve_foot_half_width_m(
         report,
         template_applied=template_applied,
@@ -419,6 +505,20 @@ def _build_foot_side(
         side=side,
         messages=messages,
     )
+
+    # 0044 B1-B5: visual floor after resolve (never shrinks)
+    calf_r = _calf_distal_r_from_parts(existing_parts, side)
+    foot_len = apply_foot_length_visual_floor(
+        foot_len,
+        height_m=height_m,
+        half_width=half_width,
+        calf_distal_r=calf_r,
+        messages=messages,
+        side=side,
+    )
+
+    # B17: start from floored length; max with measured heel↔toe half-span
+    half_depth = foot_len / 2.0
     thickness = (
         _PLATE_THICKNESS_FRAC_H * float(height_m) if height_m is not None and height_m > 0 else 0.03
     )
@@ -443,27 +543,27 @@ def _build_foot_side(
         if hy < ty:
             hy, ty = ty, hy
         plate_y = 0.5 * (hy + ty)
-        # Prefer measured span for plate half-depth when it is usable
         measured_half = abs(hy - ty) / 2.0
         if measured_half > _NEAR_ZERO:
-            half_depth = measured_half
+            # Never overwrite floor with measured alone (P1-1)
+            half_depth = max(measured_half, half_depth)
+            foot_len = max(foot_len, 2.0 * half_depth)
     elif ankle is not None:
         plate_y = float(ankle[1])
     else:
         plate_y = 0.0
 
-    # Z floor: plate bottom ≈ 0 (B8)
+    # Organic sole ellipsoid: center_z = sole_rz, z_bottom=0 -> z_top = 2xsole_rz (R5a2)
+    sole_rz = max(thickness * 0.55, 0.012)
     z_bottom = 0.0
-    z_top = thickness
-    plate_z = thickness / 2.0
+    z_top = 2.0 * sole_rz
+    sole_cz = sole_rz
 
-    # Heel mass + ankle share rear-third Y so C_ankle_over_heel passes on heel-tol
-    # path when both roles are present, and rear-third path when only plate.
+    # Heel mass + ankle: rear-third stack; heel rear-biased pad (0044 B6)
     # Mid of rear third: plate_y + (2/3)*half_depth (toward heel +Y).
     stack_y = plate_y + (2.0 / 3.0) * half_depth
-    heel_y = stack_y
     ank_y = stack_y
-    toe_y = plate_y - (2.0 / 3.0) * half_depth  # front third for toe wedge
+    heel_y = stack_y + HEEL_REAR_Y_BIAS_FRAC_DEPTH * half_depth
 
     # Ankle Z: use joint when clearly above the plate (real ankle height).
     if ankle is not None and ankle[2] == ankle[2] and float(ankle[2]) > z_top:
@@ -472,32 +572,50 @@ def _build_foot_side(
         ank_z = z_top + half_width * 2.2  # rest above plate top
 
     # Ankle mass: keep rx = half_width for C_foot_width; grow ry/rz so it reads as a
-    # joint and meets the heel bridge + calf distal (not a pea on the plate).
+    # joint and meets the heel pad + calf distal (not a pea on the plate).
     ank_rx = half_width
     ank_ry = max(half_width * 1.05, 0.028)
     ank_rz = max(half_width * 1.35, 0.034)
 
-    # Tall heel bridge: rear mass from plate up into ank_foot so leg↔foot connect.
-    # (Decorative sole-ball heels left a ~cm gap under the ankle joint.)
-    heel_z_lo = z_top * 0.25
-    heel_z_hi = ank_z + ank_rz * _HEEL_BRIDGE_OVERLAP_FRAC
-    heel_rz = max(_HEEL_R_FRAC_FOOT * foot_len, (heel_z_hi - heel_z_lo) * 0.5, half_width * 1.1)
-    heel_z = 0.5 * (heel_z_lo + heel_z_hi)
-    # Keep bridge below pure ankle-clone mid-shin: center must stay under ank_z.
-    if heel_z >= ank_z:
-        heel_z = ank_z * 0.55
-        heel_rz = max(heel_rz, ank_z * 0.45)
+    # Heel rear pad (B6-B8): lower center, +Y bias, rz capped — still reaches ank_foot.
+    heel_z = HEEL_Z_FRAC_ANK * ank_z
+    reach_need = (ank_z - ank_rz) - HEEL_REACH_GAP_TOL_M - heel_z
+    heel_rz = max(reach_need, _HEEL_R_FRAC_FOOT * foot_len * 0.55, half_width * 0.9)
+    rz_cap = HEEL_RZ_CAP_FRAC_ANK * ank_z
+    if heel_rz > rz_cap + _NEAR_ZERO:
+        # Prefer lower center so min rz can still meet reach under the cap
+        heel_z = min(heel_z, (ank_z - ank_rz) - HEEL_REACH_GAP_TOL_M - rz_cap)
+        heel_z = max(heel_z, z_top * 0.35)
+        heel_rz = min(heel_rz, rz_cap)
+        still_need = (ank_z - ank_rz) - HEEL_REACH_GAP_TOL_M - heel_z
+        if still_need > heel_rz + _NEAR_ZERO:
+            # Rare: cap loses to reach — grow rz and message (R4c fail-safe)
+            heel_rz = still_need
+            messages.append(
+                f"foot_{side}: heel_rz cap lose for C_heel_reaches "
+                f"(rz={heel_rz:.4f} > cap={rz_cap:.4f})"
+            )
+    heel_ry = max(
+        HEEL_RY_MIN_FRAC_DEPTH * half_depth,
+        half_depth * 0.38,
+        heel_rz * 0.70,
+    )
     heel_rx = max(half_width * 1.05, ank_rx * 0.95)
-    heel_ry = max(half_depth * 0.38, heel_rz * 0.55)
+    # Strict heel_z < ank_z
+    if heel_z >= ank_z - _NEAR_ZERO:
+        heel_z = min(ank_z * 0.55, ank_z - _NEAR_ZERO)
+        if heel_z < z_top * 0.35:
+            heel_z = min(max(z_top * 0.35, ank_z * 0.35), ank_z - _NEAR_ZERO)
 
-    # Toe wedge: front of plate (-Y), elongated in depth, flat on sole — not a ball on top.
+    # Toe wedge: **in front of** the plate (-Y past front edge), elongated + flat on sole.
     # Skeleton heel/toe often inherit ankle Z (estimated) — never use that for sole masses.
-    toe_ry = max(_TOE_WEDGE_LEN_FRAC * foot_len * 0.5, half_depth * 0.42)
+    toe_ry = max(_TOE_WEDGE_LEN_FRAC * foot_len * 0.5, half_depth * 0.45)
     toe_rx = half_width * 0.95
-    toe_rz = max(thickness * 0.9, half_width * 0.45, 0.012)
-    toe_z = z_top + toe_rz * 0.35
-    # Push toe mass to the front third/edge of the plate (clearly forward of heel).
-    toe_y = plate_y - half_depth * 0.82
+    toe_rz = max(thickness * 0.55, half_width * 0.28, 0.010)  # flatter sole wedge
+    toe_z = sole_cz + sole_rz * 0.1  # sole-class Z (not perched mid-ball)
+    plate_front_y = plate_y - half_depth  # toes -Y edge of foot_plate
+    # Center past the front edge so the bulk of the ellipsoid is *ahead* of the plate.
+    toe_y = plate_front_y - toe_ry * 0.55
 
     # parent_joint
     pj_plate = _parent_joint(
@@ -535,22 +653,28 @@ def _build_foot_side(
 
     out: list[RecipePart] = []
 
-    # foot_plate (B8.1)
+    # foot_plate = rounded sole ellipsoid (not square box — canvas read as brick).
+    # Keep half_depth_m / z_top_m / half_width for C_ankle_over_heel / C_foot_width / sole-Z.
     plate_name = f"RECIPE_foot_plate_{side}"
     out.append(
-        _box(
+        _ellipsoid(
             plate_name,
             "foot_plate",
-            [plate_x, plate_y, plate_z],
-            half_width=half_width,
-            half_depth=half_depth,
-            z_bottom=z_bottom,
-            z_top=z_top,
+            [plate_x, plate_y, sole_cz],
+            half_width * 1.05,  # rx width
+            half_depth,  # ry heel->toe
+            sole_rz,  # rz thin sole
             parent_joint=pj_plate,
+            half_depth_m=half_depth,
+            top_half_width_m=half_width,
+            bottom_half_width_m=half_width,
+            z_bottom_m=z_bottom,
+            z_top_m=z_top,
+            notes="organic sole ellipsoid (not box)",
         )
     )
 
-    # Heel bridge at rear stack Y (+Y of plate mid) — same Y as ank_foot (0023)
+    # Heel rear pad (+Y of stack) — reaches ank_foot without tower (0044)
     heel_name = f"RECIPE_heel_{side}"
     out.append(
         _ellipsoid(
@@ -561,6 +685,24 @@ def _build_foot_side(
             heel_ry,
             heel_rz,
             parent_joint=pj_heel,
+        )
+    )
+
+    # Arch always with --feet (R5b2), including toes=none. Role stays ball_soft.
+    arch_y = plate_y + half_depth * 0.08
+    arch_rx = half_width * 0.92
+    arch_ry = half_depth * 0.38  # elongated along foot
+    arch_rz = max(sole_rz * 1.15, half_width * 0.28)  # low pad, not a perched sphere
+    arch_z = sole_cz + sole_rz * 0.25  # mostly embedded; slight instep rise only
+    out.append(
+        _ellipsoid(
+            f"RECIPE_arch_soft_{side}",
+            "ball_soft",
+            [plate_x, arch_y, arch_z],
+            arch_rx,
+            arch_ry,
+            arch_rz,
+            parent_joint=pj_ank,
         )
     )
 
@@ -582,8 +724,26 @@ def _build_foot_side(
     if toes == "none":
         return out
 
+    # Ball of foot (forefoot pad) — toes ≠ none; in sole, not stacked on top
+    ball_y = plate_y - (1.0 / 3.0) * half_depth
+    ball_rx = half_width * 0.95
+    ball_ry = max(_BALL_SOFT_R_FRAC_FOOT * foot_len * 1.1, half_depth * 0.28)
+    ball_rz = max(sole_rz * 1.1, half_width * 0.22)
+    ball_z = sole_cz + sole_rz * 0.2
+    out.append(
+        _ellipsoid(
+            f"RECIPE_ball_soft_{side}",
+            "ball_soft",
+            [plate_x, ball_y, ball_z],
+            ball_rx,
+            ball_ry,
+            ball_rz,
+            parent_joint=pj_ank,
+        )
+    )
+
     if toes == "wedge":
-        # Elongated toe mass at front of plate (-Y), flat on sole
+        # Elongated toe mass past plate front (-Y), flat sole wedge
         out.append(
             _ellipsoid(
                 f"RECIPE_toe_soft_{side}",
@@ -597,38 +757,26 @@ def _build_foot_side(
         )
         return out
 
-    # toes == full: ball_soft + 5 toe capsules (no "foot" substring in soft names)
-    ball_r = _BALL_SOFT_R_FRAC_FOOT * foot_len
-    ball_y = plate_y - (1.0 / 3.0) * half_depth
-    out.append(
-        _ellipsoid(
-            f"RECIPE_ball_soft_{side}",
-            "ball_soft",
-            [plate_x, ball_y, z_top + ball_r * 0.5],
-            half_width * 0.9,
-            ball_r,
-            ball_r * 0.7,
-            parent_joint=pj_ank,
-        )
-    )
+    # toes == full: 5 toe capsules past front edge
     toe_len = _TOE_FULL_LEN_FRAC * foot_len
-    toe_radius = max(half_width * 0.18, 0.005)
-    splay = half_width * 0.7
+    toe_radius = max(half_width * 0.16, 0.006)
+    splay = half_width * 0.85
     for i in range(1, 6):
         # 1=medial ... 5=lateral; sign by side
         t = (i - 3) / 3.0  # -2/3 ... +2/3
         dx = t * splay
         if side == "l":
             dx = -dx  # mirror splay
-        base = [plate_x + dx, plate_y - half_depth + toe_len * 0.15, toe_z]
-        tip = [plate_x + dx, plate_y - half_depth - toe_len * 0.35, toe_z * 0.9]
+        # Past plate front (-Y)
+        base = [plate_x + dx, plate_front_y - toe_len * 0.05, toe_z]
+        tip = [plate_x + dx, plate_front_y - toe_len * 0.95, toe_z * 0.85]
         out.append(
             _capsule(
                 f"RECIPE_toe_{i}_{side}",
                 "toe_soft",
                 base,
                 tip,
-                toe_radius,
+                toe_radius * (1.15 if i == 1 else 1.0),  # big toe slightly thicker
                 parent_joint=pj_toe,
             )
         )
@@ -687,7 +835,7 @@ def _build_hand_side(
     hand = _joint_or_lm(report, skeleton, f"hand_{side}")
     tip = _joint_or_lm(report, skeleton, f"fingertip_{side}")
 
-    # Hand estimate: hand joint or mid wrist→tip or tip alone
+    # Hand estimate: hand joint or mid wrist->tip or tip alone
     hand_est = hand
     if hand_est is None and wrist is not None and tip is not None:
         hand_est = [
@@ -717,7 +865,7 @@ def _build_hand_side(
 
     axis = finger_primary_axis(wrist, tip, hand_len=hand_len)
 
-    # Palm center: hand joint or mid wrist→tip or wrist + 0.35*hand_len along axis
+    # Palm center: hand joint or mid wrist->tip or wrist + 0.35*hand_len along axis
     if hand is not None:
         palm_c = list(hand)
     elif wrist is not None and tip is not None:
@@ -806,7 +954,7 @@ def _build_hand_side(
         )
         return out
 
-    # fingers == full: 4 fingers x 3 capsules + thumb x 2
+    # fingers == full: 4 fingers x 3 capsules + thumb x 2 (main tip / 0040)
     seg = _FINGER_SEG_FRAC_HAND * hand_len
     fr = max(_FINGER_R_FRAC_PALM * palm_w, 0.004)
     # Lateral splay in X
@@ -861,10 +1009,18 @@ def _build_hand_side(
 __all__ = [
     "FINGER_TIERS",
     "FOOT_LEN_BASE_FRAC_H",
+    "FOOT_LEN_MIN_VS_ANK_HW",
+    "FOOT_LEN_MIN_VS_CALF_DIAM",
+    "FOOT_LEN_VISUAL_MIN_FRAC_H",
+    "HEEL_REAR_Y_BIAS_FRAC_DEPTH",
+    "HEEL_RY_MIN_FRAC_DEPTH",
+    "HEEL_RZ_CAP_FRAC_ANK",
+    "HEEL_Z_FRAC_ANK",
     "PARENT_UNRESOLVED_MSG",
     "TOE_TIERS",
     "FingerTier",
     "ToeTier",
+    "apply_foot_length_visual_floor",
     "build_foot_parts",
     "build_hand_parts",
     "finger_primary_axis",

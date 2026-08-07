@@ -18,12 +18,18 @@ from meshops.proportion.blockout_recipe import (
 )
 from meshops.proportion.constraints import (
     FOOT_WIDTH_TOL_M,
+    HEEL_REACH_GAP_TOL_M,
     classify_part_name,
     validate_constraints,
 )
 from meshops.proportion.extremity_recipe import (
     FOOT_LEN_BASE_FRAC_H,
+    FOOT_LEN_MIN_VS_CALF_DIAM,
+    FOOT_LEN_VISUAL_MIN_FRAC_H,
+    HEEL_RZ_CAP_FRAC_ANK,
     _assert_ank_foot_name,
+    apply_foot_length_visual_floor,
+    build_foot_parts,
     finger_primary_axis,
 )
 from meshops.proportion.models import (
@@ -271,7 +277,7 @@ def test_ext__default_no_extremity_roles() -> None:
 
 
 def test_ext__feet_wedge_roles_and_rear_third() -> None:
-    """R7: --feet wedge → L+R plate/heel/ank_foot/toe_soft; ank Y in rear third."""
+    """R7: --feet wedge -> L+R plate/heel/ank_foot/toe_soft; ank Y in rear third."""
     report = _report_with_extremities()
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="wedge")
     by_role = pkg.counts.get("by_role") or {}
@@ -318,8 +324,28 @@ def test_ext__frame_toe_y_lt_heel_y() -> None:
         assert float(toe.center[1]) < float(heel.center[1])
 
 
+def test_ext__toe_wedge_in_front_of_plate() -> None:
+    """Toe mass sits past plate front edge (-Y), not on top of the foot plate."""
+    report = _report_with_extremities()
+    pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="wedge")
+    by_name = {p.name: p for p in pkg.parts}
+    for side in ("l", "r"):
+        plate = by_name[f"RECIPE_foot_plate_{side}"]
+        toe = by_name[f"RECIPE_toe_soft_{side}"]
+        assert plate.center is not None and toe.center is not None
+        half_d = float(plate.half_depth_m or 0.0)
+        plate_front = float(plate.center[1]) - half_d
+        # Center at or past front edge (bulk ahead of plate)
+        assert float(toe.center[1]) <= plate_front + 1e-6, (
+            f"toe Y {toe.center[1]} still over plate (front edge {plate_front})"
+        )
+        # Flat sole-class Z (not a tall ball perched on the plate)
+        z_top = float(plate.z_top_m or 0.03)
+        assert float(toe.center[2]) <= z_top + 0.04
+
+
 def test_ext__foot_z_floor() -> None:
-    """R7: plate bottom ≈ 0."""
+    """R7: plate bottom ≈ 0; sole may be box or organic ellipsoid."""
     report = _report_with_extremities()
     pkg = build_blockout_recipe(report, limbs=False, feet=True)
     for p in pkg.parts:
@@ -328,11 +354,17 @@ def test_ext__foot_z_floor() -> None:
             assert abs(float(p.z_bottom_m)) < 1e-6
             assert p.z_top_m is not None and float(p.z_top_m) > 0
             assert p.center is not None
-            assert abs(float(p.center[2]) - float(p.z_top_m) / 2.0) < 1e-6
+            assert float(p.center[2]) >= 0.0
+            # Organic sole ellipsoid: center near sole thickness; box: mid of z span
+            assert float(p.center[2]) <= float(p.z_top_m) + 1e-6
+            assert p.kind in ("box", "ellipsoid")
+            if p.kind == "ellipsoid":
+                assert p.rx_m is not None and p.ry_m is not None and p.rz_m is not None
+                assert p.half_depth_m is not None  # constraint rear-third needs this
 
 
 def test_ext__toe_heel_z_not_ankle_clone() -> None:
-    """Estimated heel/toe often inherit ankle Z — toe stays sole; heel bridges up; ank high."""
+    """Estimated heel/toe often inherit ankle Z — toe stays sole; heel pad reaches; ank high."""
     ank_z = 0.131
     extra = _extremity_lms()
     # Clone ankle height onto heel/toe (skeleton estimated pattern that floated toe_soft).
@@ -365,10 +397,11 @@ def test_ext__toe_heel_z_not_ankle_clone() -> None:
         # Toe flat on sole — never mid-shin ankle clone
         assert float(toe.center[2]) < z_top + 0.05
         assert float(toe.center[2]) < ank_z * 0.5
-        # Heel is a tall bridge (not a decorative sole ball, not ankle-clone sphere)
+        # Heel is a rear pad that reaches ank_foot (0044) — not ankle-clone sphere
         assert hz < az  # center below ankle joint
-        assert hz + hrz >= az - arz * 0.6  # top reaches into ank_foot
-        assert hrz > z_top  # clearly taller than plate thickness
+        heel_top = hz + hrz
+        ank_bottom = az - arz
+        assert heel_top >= ank_bottom - HEEL_REACH_GAP_TOL_M - 1e-6
         # Ankle bridge stays at real ankle height
         assert az == pytest.approx(ank_z, abs=1e-6)
         # Toe forward of heel (-Y)
@@ -386,6 +419,36 @@ def test_ext__palm_is_ellipsoid_not_box() -> None:
         assert mitt.kind == "ellipsoid"
         assert palm.rx_m is not None and palm.rx_m > 0.015
         assert mitt.rx_m is not None and mitt.rx_m > 0.01
+
+
+def test_ext__foot_plate_not_box() -> None:
+    """Organic sole: foot_plate is ellipsoid, not square box."""
+    report = _report_with_extremities()
+    pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="wedge")
+    for p in pkg.parts:
+        if p.role == "foot_plate":
+            assert p.kind == "ellipsoid"
+            assert p.ry_m is not None and p.rx_m is not None
+            assert float(p.ry_m) > float(p.rx_m)  # longer heel->toe than width
+
+
+def test_ext__arch_ball_embedded_in_sole() -> None:
+    """Arch/ball centers stay in sole Z band — not perched above the foot."""
+    report = _report_with_extremities()
+    pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="wedge")
+    by_name = {p.name: p for p in pkg.parts}
+    for side in ("l", "r"):
+        plate = by_name[f"RECIPE_foot_plate_{side}"]
+        arch = by_name[f"RECIPE_arch_soft_{side}"]
+        ball = by_name[f"RECIPE_ball_soft_{side}"]
+        assert plate.center is not None and arch.center is not None and ball.center is not None
+        sole_top = float(plate.center[2]) + float(plate.rz_m or 0.0)
+        # Centers at or below sole top (pads live in the sole, not stacked on it)
+        assert float(arch.center[2]) <= sole_top + 1e-6
+        assert float(ball.center[2]) <= sole_top + 1e-6
+        # Flat-ish pads: rz not much larger than sole thickness
+        assert float(arch.rz_m or 0) <= sole_top * 1.6
+        assert float(ball.rz_m or 0) <= sole_top * 1.6
 
 
 def test_ext__mitten_radius_vs_palm() -> None:
@@ -409,7 +472,7 @@ def test_ext__mitten_radius_vs_palm() -> None:
 
 
 def test_ext__finger_direction_with_and_without_tip() -> None:
-    """R7: with fingertip axis aligns wrist→tip; without primary -Z."""
+    """R7: with fingertip axis aligns wrist->tip; without primary -Z."""
     wrist = [0.0, 0.0, 1.0]
     tip = [0.1, -0.2, 0.7]
     axis = finger_primary_axis(wrist, tip, hand_len=0.3)
@@ -428,7 +491,7 @@ def test_ext__finger_direction_with_and_without_tip() -> None:
 
 
 def test_ext__hands_mitten_recipe_only() -> None:
-    """R7: --hands mitten → palm + mitten per side; RECIPE_* only."""
+    """R7: --hands mitten -> palm + mitten per side; RECIPE_* only."""
     report = _report_with_extremities()
     pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="mitten")
     by_role = pkg.counts.get("by_role") or {}
@@ -449,12 +512,12 @@ def test_ext__hands_mitten_recipe_only() -> None:
 
 
 def test_ext__fingers_full_count() -> None:
-    """R7: fingers full → ≥ palm + 4x3 finger capsules per side (+ thumb 2)."""
+    """R7: fingers full -> >= palm + 4x3 finger capsules per side (+ thumb 2)."""
     report = _report_with_extremities()
     pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="full")
     by_role = pkg.counts.get("by_role") or {}
     assert by_role.get("palm", 0) == 2
-    # 4 fingers x 3 = 12 finger_soft per side → 24; thumb is thumb_soft
+    # 4 fingers x 3 = 12 finger_soft per side -> 24; thumb is thumb_soft
     assert by_role.get("finger_soft", 0) >= 24
     assert by_role.get("thumb_soft", 0) >= 4  # 2 per side
     names = {p.name for p in pkg.parts}
@@ -479,7 +542,7 @@ def test_ext__classifier_b5() -> None:
     ]
     for name, expected in cases:
         role, _side = classify_part_name(name)
-        assert role == expected, f"{name} → {role}, expected {expected}"
+        assert role == expected, f"{name} -> {role}, expected {expected}"
 
 
 def test_ext__ank_foot_assert_raises() -> None:
@@ -554,7 +617,7 @@ def test_ext__mcp_schema_and_tool_count() -> None:
 
 
 def test_ext__validate_constraints_complete_feet() -> None:
-    """R7 / B16 / 0042: complete feet wedge → ankle/width + foot-stack connectivity pass."""
+    """R7 / B16 / 0042: complete feet wedge -> ankle/width + foot-stack connectivity pass."""
     report = _report_with_extremities()
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="wedge")
     result = validate_constraints(pkg, report=report)
@@ -657,16 +720,18 @@ def test_ext__toes_full_ball_and_beads() -> None:
     report = _report_with_extremities()
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     by_role = pkg.counts.get("by_role") or {}
-    assert by_role.get("ball_soft", 0) == 2
+    # arch_soft + ball_soft per side (organic foot masses)
+    assert by_role.get("ball_soft", 0) == 4
     # 5 toes x 2 sides + no wedge
     assert by_role.get("toe_soft", 0) == 10
     names = {p.name for p in pkg.parts}
     assert "RECIPE_ball_soft_l" in names
+    assert "RECIPE_arch_soft_l" in names
     assert "RECIPE_toe_1_l" in names
     assert "RECIPE_toe_5_r" in names
     # Soft toe names must not contain "foot"
     for n in names:
-        if "toe_" in n or "ball_soft" in n:
+        if "toe_" in n or "ball_soft" in n or "arch_soft" in n:
             assert "foot" not in n.lower() or "ank_foot" in n.lower()
 
 
@@ -678,3 +743,202 @@ def test_ext__skeleton_parent_joint() -> None:
     assert by_name["RECIPE_palm_l"].parent_joint in ("hand_l", "wrist_l")
     assert by_name["RECIPE_ank_foot_r"].parent_joint == "ankle_r"
     assert by_name["RECIPE_heel_l"].parent_joint in ("heel_l", "ankle_l")
+
+
+# ---------------------------------------------------------------------------
+# 0044 — Foot visual mass (T1-T8)
+# ---------------------------------------------------------------------------
+
+
+def _report_foot_span(
+    *,
+    heel_y: float,
+    toe_y: float,
+    height_m: float = 1.72,
+    ank_z: float = 0.13,
+    half_width_m: float = 0.028,
+) -> ProportionReport:
+    """Synthetic L/R feet with deliberate heel<->toe Y span (measured length)."""
+    extra: dict[str, LandmarkXYZ] = {}
+    for side, sx in (("l", -0.10), ("r", 0.10)):
+        extra[f"ankle_{side}"] = _lm(f"ankle_{side}", x_m=sx, y_m=0.0, z_m=ank_z)
+        extra[f"heel_{side}"] = _lm(f"heel_{side}", x_m=sx, y_m=heel_y, z_m=0.02)
+        extra[f"toe_{side}"] = _lm(f"toe_{side}", x_m=sx, y_m=toe_y, z_m=0.02)
+    return _full_torso_report(
+        height_m=height_m,
+        extra_lms=extra,
+        extra_diams=[
+            _diam("ank_foot_l", half_width_m=half_width_m),
+            _diam("ank_foot_r", half_width_m=half_width_m),
+        ],
+    )
+
+
+def test_ext__t1_short_measured_plate_ry_visual_floor() -> None:
+    """T1: short heel<->toe (~0.10 m) + H=1.72 -> plate.ry_m >= 0.5x(0.12xH) - eps."""
+    # heel_y - toe_y = 0.10
+    report = _report_foot_span(heel_y=0.05, toe_y=-0.05, height_m=1.72)
+    pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="wedge")
+    floor_half = 0.5 * FOOT_LEN_VISUAL_MIN_FRAC_H * 1.72
+    for p in pkg.parts:
+        if p.role == "foot_plate":
+            ry = float(p.ry_m or 0.0)
+            half_d = float(p.half_depth_m or 0.0)
+            assert ry >= floor_half - 1e-6, f"ry={ry} < floor_half={floor_half}"
+            assert half_d >= floor_half - 1e-6
+
+
+def test_ext__t2_long_measured_not_shrunk() -> None:
+    """T2: long measured (0.28 m) -> half_depth not shrunk below measured/2."""
+    # heel_y - toe_y = 0.28
+    report = _report_foot_span(heel_y=0.14, toe_y=-0.14, height_m=1.72)
+    pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="wedge")
+    measured_half = 0.14
+    for p in pkg.parts:
+        if p.role == "foot_plate":
+            half_d = float(p.half_depth_m or 0.0)
+            ry = float(p.ry_m or 0.0)
+            assert half_d >= measured_half - 1e-6
+            assert ry >= measured_half - 1e-6
+
+
+def test_ext__t3_apply_foot_length_visual_floor_calf() -> None:
+    """T3: unit floor calf_r=0.08, H=None, hw=0.02 -> >=1.55x0.16; source calf_diam."""
+    msgs: list[str] = []
+    out = apply_foot_length_visual_floor(
+        0.10,
+        height_m=None,
+        half_width=0.02,
+        calf_distal_r=0.08,
+        messages=msgs,
+        side="l",
+    )
+    expect = FOOT_LEN_MIN_VS_CALF_DIAM * (2.0 * 0.08)
+    assert out >= expect - 1e-9
+    assert out == pytest.approx(expect, abs=1e-9)
+    assert any("calf_diam" in m for m in msgs)
+    assert any("0.1000->" in m or "length visual floor" in m for m in msgs)
+
+
+def test_ext__t4_heel_rear_pad_reach_and_cap() -> None:
+    """T4: heel.y >= ank.y; heel.z < ank.z; heel_rz <= cap; C_heel_reaches pass."""
+    report = _report_foot_span(heel_y=0.06, toe_y=-0.12, height_m=1.72, ank_z=0.13)
+    pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="wedge")
+    by_name = {p.name: p for p in pkg.parts}
+    for side in ("l", "r"):
+        heel = by_name[f"RECIPE_heel_{side}"]
+        ank = by_name[f"RECIPE_ank_foot_{side}"]
+        assert heel.center is not None and ank.center is not None
+        assert float(heel.center[1]) >= float(ank.center[1]) - 1e-9
+        assert float(heel.center[2]) < float(ank.center[2])
+        hrz = float(heel.rz_m or 0.0)
+        az = float(ank.center[2])
+        assert hrz <= HEEL_RZ_CAP_FRAC_ANK * az + 1e-6
+    result = validate_constraints(pkg, report=report)
+    by_id = {r.id: r for r in result.rules}
+    assert by_id["C_heel_reaches_ank_foot"].status == "pass", by_id[
+        "C_heel_reaches_ank_foot"
+    ].message
+
+
+def test_ext__t5_heel_not_tower_class() -> None:
+    """T5: product-like emit heel_rz <= 0.48xank_z and < old tower class ~0.068."""
+    report = _report_foot_span(
+        heel_y=0.06,
+        toe_y=-0.08,  # short-ish measured like product
+        height_m=1.72,
+        ank_z=0.13,
+        half_width_m=0.028,
+    )
+    pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="wedge")
+    by_name = {p.name: p for p in pkg.parts}
+    for side in ("l", "r"):
+        heel = by_name[f"RECIPE_heel_{side}"]
+        ank = by_name[f"RECIPE_ank_foot_{side}"]
+        assert heel.center is not None and ank.center is not None
+        hrz = float(heel.rz_m or 0.0)
+        az = float(ank.center[2])
+        assert hrz <= HEEL_RZ_CAP_FRAC_ANK * az + 1e-6
+        assert hrz < 0.068 - 1e-6, f"heel_rz={hrz} still tower-class"
+
+
+def test_ext__t6_organic_sole_arch_ball_toe_topology() -> None:
+    """T6: ellipsoid plate; z_top≈2xsole_rz; arch always; ball when toes; wedge past front."""
+    report = _report_with_extremities()
+    pkg_w = build_blockout_recipe(report, limbs=False, feet=True, toes="wedge")
+    by_name = {p.name: p for p in pkg_w.parts}
+    for side in ("l", "r"):
+        plate = by_name[f"RECIPE_foot_plate_{side}"]
+        arch = by_name[f"RECIPE_arch_soft_{side}"]
+        ball = by_name[f"RECIPE_ball_soft_{side}"]
+        toe = by_name[f"RECIPE_toe_soft_{side}"]
+        assert plate.kind == "ellipsoid"
+        assert plate.rz_m is not None and plate.z_top_m is not None
+        assert float(plate.z_top_m) == pytest.approx(2.0 * float(plate.rz_m), abs=1e-6)
+        sole_top = float(plate.center[2]) + float(plate.rz_m)  # type: ignore[index]
+        assert float(arch.center[2]) <= sole_top + 1e-6  # type: ignore[index]
+        assert float(ball.center[2]) <= sole_top + 1e-6  # type: ignore[index]
+        half_d = float(plate.half_depth_m or 0.0)
+        plate_front = float(plate.center[1]) - half_d  # type: ignore[index]
+        assert float(toe.center[1]) <= plate_front + 1e-6  # type: ignore[index]
+
+    # toes=none: arch present, no forefoot ball_soft name
+    pkg_n = build_blockout_recipe(report, limbs=False, feet=True, toes="none")
+    names_n = {p.name for p in pkg_n.parts}
+    assert "RECIPE_arch_soft_l" in names_n
+    assert "RECIPE_arch_soft_r" in names_n
+    assert "RECIPE_ball_soft_l" not in names_n
+    assert "RECIPE_ball_soft_r" not in names_n
+
+
+def test_ext__t7_constraints_complete_feet_0044() -> None:
+    """T7: validate_constraints complete feet — C_foot_width + ankle + 0042 foot rules."""
+    report = _report_with_extremities()
+    pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="wedge")
+    result = validate_constraints(pkg, report=report)
+    by_id = {r.id: r for r in result.rules}
+    for rid in ("C_ankle_over_heel", "C_foot_width"):
+        rule = by_id[rid]
+        assert rule.status in ("pass", "skip"), f"{rid}: {rule.status} {rule.message}"
+    for rid in (
+        "C_toe_forward_of_heel",
+        "C_heel_reaches_ank_foot",
+        "C_toe_sole_z",
+    ):
+        assert by_id[rid].status == "pass", f"{rid}: {by_id[rid].status} {by_id[rid].message}"
+
+
+def test_ext__t8_mcp_catalog_stays_46() -> None:
+    """T8: MCP catalog stays 46 (no new tool)."""
+    from meshops.mcp import TOOL_NAMES
+
+    assert len(TOOL_NAMES) == 46
+
+
+def test_ext__build_foot_parts_existing_parts_calf_floor() -> None:
+    """existing_parts calf_b feeds visual floor (B5 wiring)."""
+    report = _report_foot_span(heel_y=0.04, toe_y=-0.04, height_m=1.72, half_width_m=0.02)
+    # Strip height so stature floor does not dominate; calf term should win
+    report = report.model_copy(update={"height_m": None})
+    calf = RecipePart(
+        name="RECIPE_calf_b_l",
+        role="limb_segment",
+        kind="ellipsoid",
+        center=[-0.1, 0.0, 0.2],
+        rx_m=0.08,
+        ry_m=0.08,
+        rz_m=0.08,
+    )
+    msgs: list[str] = []
+    parts = build_foot_parts(
+        report,
+        toes="none",
+        messages=msgs,
+        existing_parts=[calf],
+        height_m=None,
+    )
+    left_plates = [p for p in parts if p.name == "RECIPE_foot_plate_l"]
+    assert left_plates
+    half = float(left_plates[0].half_depth_m or 0.0)
+    assert half >= 0.5 * FOOT_LEN_MIN_VS_CALF_DIAM * 0.16 - 1e-6
+    assert any("calf_diam" in m for m in msgs)
