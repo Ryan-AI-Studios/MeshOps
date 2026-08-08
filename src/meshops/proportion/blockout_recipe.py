@@ -20,6 +20,8 @@ can pass; B6 distal/cyl p1 Y sync to ank_foot after feet emit.
 --nofuse; setup re-emit via run_blockout_emit_setup; schema stay 1.4.0 + join_ready bool.
 0047: torso oval ry depth taper (anti-snowman chest/waist/hip); schema stay 1.4.0.
 0049: breast_soft center Z hang drop (before 0033 tilt); B1 floor 0.55*rz; schema stay 1.4.0.
+0050: neck column forward tilt (p0/p1) + head/face co-move + radius ceiling vs head.rx;
+schema stay 1.4.0.
 """
 
 from __future__ import annotations
@@ -99,6 +101,19 @@ TORSO_OVAL_RZ_FLOOR_M: Final[float] = 0.025
 BREAST_HANG_Z_DROP_FRAC_RZ: Final[float] = 0.55
 # 0049 D2: unit min hang drop vs pre-anchor (softer than B1; waist soft-clamp threshold).
 BREAST_HANG_Z_MIN_DROP_FRAC_RZ: Final[float] = 0.40
+# 0050 B1/B5: neck column forward tilt about +X (tip -Y) + radius ceiling vs head.rx.
+NECK_FORWARD_TILT_DEG: Final[float] = 12.0
+NECK_R_MAX_FRAC_HEAD_RX: Final[float] = 0.55
+_NECK_HEAD_ATTACHED_TOKENS: Final[tuple[str, ...]] = (
+    "jaw",
+    "brow_soft",
+    "eye_soft",
+    "nose_soft",
+    "ear_soft",
+    "lip_soft",
+    "hair_mass",
+    "neck_head_fuse",
+)
 
 _GIRAFFE_FRAC: Final[float] = 0.20
 _GIRAFFE_ABS_NO_H: Final[float] = 0.35
@@ -2710,6 +2725,9 @@ def build_blockout_recipe(
         ):
             _append_part(parts, p)
 
+    # 0050: mild forward neck tilt + head co-move + radius ceiling (after face kit if any)
+    _apply_neck_column_priors(parts, messages)
+
     # 5-6 shoulder bridges
     for p in _build_shoulder_bridges(report, resolved, messages):
         _append_part(parts, p)
@@ -2969,6 +2987,94 @@ def _shift_part_along_axis(part: RecipePart, axis: int, delta: float) -> None:
         p1 = [float(part.p1[0]), float(part.p1[1]), float(part.p1[2])]
         p1[axis] += float(delta)
         part.p1 = p1
+
+
+def _apply_neck_column_priors(parts: list[RecipePart], messages: list[str]) -> None:
+    """0050: mild forward cervical tilt of RECIPE_neck + head stack co-move + radius ceiling.
+
+    Rewrites neck p0/p1 only (bpy cylinder ignores Euler). Base p0 fixed; length L preserved;
+    tip leans -Y by NECK_FORWARD_TILT_DEG about +X. Head-attached parts full dY; SCM tip only.
+    Radius ceiling after template thickness_scale already applied.
+    """
+    idxs = [
+        i
+        for i, p in enumerate(parts)
+        if p.name == "RECIPE_neck"
+        and p.kind == "cylinder"
+        and p.p0 is not None
+        and p.p1 is not None
+        and len(p.p0) >= 3
+        and len(p.p1) >= 3
+    ]
+    if not idxs:
+        messages.append("neck_column_tilt_applied: false")
+        return
+
+    i = idxs[0]
+    neck = parts[i]
+    assert neck.p0 is not None and neck.p1 is not None
+    p0 = [float(c) for c in neck.p0]
+    p1 = [float(c) for c in neck.p1]
+    length = math.dist(p0, p1)
+    if length <= 0.0 or not math.isfinite(length):
+        messages.append("neck_column_tilt_applied: false")
+        messages.append("neck_column_tilt_reason=nonpositive_length")
+        return
+
+    theta = math.radians(NECK_FORWARD_TILT_DEG)
+    if not math.isfinite(theta) or abs(theta) <= 1e-15:
+        messages.append("neck_column_tilt_applied: false")
+        return
+
+    y0 = p0[1]
+    z0 = p0[2]
+    p1_new = [p0[0], y0 - length * math.sin(theta), z0 + length * math.cos(theta)]
+    dy_tip = p1_new[1] - y0
+    parts[i] = neck.model_copy(update={"p0": list(p0), "p1": p1_new})
+
+    # B5 radius ceiling vs head (after template scale already applied upstream)
+    head = next((p for p in parts if p.name == "RECIPE_head"), None)
+    neck_r = parts[i].radius_m
+    head_rx = head.rx_m if head is not None else None
+    if (
+        neck_r is not None
+        and head_rx is not None
+        and math.isfinite(float(head_rx))
+        and float(head_rx) > 0.0
+        and math.isfinite(float(neck_r))
+        and float(neck_r) > 0.0
+    ):
+        cap = NECK_R_MAX_FRAC_HEAD_RX * float(head_rx)
+        r0 = float(neck_r)
+        if r0 > cap:
+            parts[i] = parts[i].model_copy(update={"radius_m": cap})
+            messages.append(f"neck_radius_clamped_head_frac={NECK_R_MAX_FRAC_HEAD_RX}")
+
+    # B4a head-attached full translate by dy_tip
+    moved_head = False
+    for j, p in enumerate(parts):
+        if j == i:
+            continue
+        name_l = p.name.lower()
+        if p.name == "RECIPE_head" or any(t in name_l for t in _NECK_HEAD_ATTACHED_TOKENS):
+            _shift_part_along_axis(p, 1, dy_tip)
+            if p.name == "RECIPE_head":
+                moved_head = True
+            if "neck_head_fuse" in name_l and p.p0 is not None and len(p.p0) >= 3:
+                # AI2 P3: fuse p0 Z meets post-tilt neck tip
+                p.p0 = [float(p.p0[0]), float(p.p0[1]), float(p1_new[2])]
+
+    # B4b SCM: head-end (p1) only; p0 base fixed
+    for p in parts:
+        if "sternomastoid" not in p.name.lower():
+            continue
+        if p.p1 is not None and len(p.p1) >= 3:
+            p.p1 = [float(p.p1[0]), float(p.p1[1]) + dy_tip, float(p.p1[2])]
+
+    messages.append(f"neck_forward_tilt_deg={NECK_FORWARD_TILT_DEG}")
+    messages.append("neck_column_tilt_applied: true")
+    messages.append(f"neck_column_tip_dy_m={dy_tip}")
+    messages.append(f"neck_column_head_comove: {str(moved_head).lower()}")
 
 
 def _scale_part_radii(part: RecipePart, factor: float) -> None:
@@ -4093,6 +4199,8 @@ __all__ = [
     "KNEE_SOFT_MIN_FRAC_H",
     "LIMB_DISTAL_SOFT_SCALE",
     "MIDLINE_X_TOL_M",
+    "NECK_FORWARD_TILT_DEG",
+    "NECK_R_MAX_FRAC_HEAD_RX",
     "RECIPE_HONESTY",
     "RECIPE_ID",
     "RECIPE_SCHEMA_VERSION",
@@ -4105,6 +4213,7 @@ __all__ = [
     "RecipeMetrics",
     "RecipePart",
     "_apply_join_ready_overlaps",
+    "_apply_neck_column_priors",
     "_apply_thigh_adduction",
     "_midpoint_of_joints",
     "build_blockout_recipe",

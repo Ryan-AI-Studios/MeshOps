@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -204,12 +205,13 @@ def test_recipe__neck_0_12_golden() -> None:
     report = _full_torso_report(chin_z=1.50, shoulder_z=1.38, height_m=1.72)
     pkg = build_blockout_recipe(report, limbs=False)
     assert pkg.metrics.neck_len_m == pytest.approx(0.12)
-    necks = [p for p in pkg.parts if p.role == "neck"]
+    necks = [p for p in pkg.parts if p.name == "RECIPE_neck"]
     assert len(necks) == 1
     n = necks[0]
     assert n.kind == "cylinder"
     assert n.p0 is not None and n.p1 is not None
-    length = abs(n.p1[2] - n.p0[2])
+    # 0050: axis length preserved under forward tilt (not pure Δz)
+    length = math.dist(n.p0, n.p1)
     assert length == pytest.approx(0.12)
 
 
@@ -222,11 +224,12 @@ def test_recipe__giraffe_clamp() -> None:
     pkg = build_blockout_recipe(report, limbs=False)
     cap = 0.20 * h
     assert pkg.metrics.neck_len_m == pytest.approx(cap)
-    necks = [p for p in pkg.parts if p.role == "neck"]
+    necks = [p for p in pkg.parts if p.name == "RECIPE_neck"]
     assert len(necks) == 1
     n = necks[0]
     assert n.p0 is not None and n.p1 is not None
-    assert abs(n.p1[2] - n.p0[2]) == pytest.approx(cap)
+    # 0050: giraffe length is axis length after tilt
+    assert math.dist(n.p0, n.p1) == pytest.approx(cap)
     assert any("0.500" in m and "clamped" in m and "giraffe" in m for m in pkg.messages)
 
 
@@ -2064,13 +2067,20 @@ def _axial_pin_report(
 
 
 def test_recipe__axial_chest_y_prefers_mid_not_front() -> None:
-    """0032 pin: shoulders y null + chest_front=-0.13 + mid=0 → axial Y≈0, not front."""
+    """0032 pin: shoulders y null + chest_front=-0.13 + mid=0 → axial Y≈0, not front.
+
+    0050: neck tip leans -Y by L*sin(tilt); base p0 stays mid.
+    """
+    from meshops.proportion.blockout_recipe import NECK_FORWARD_TILT_DEG
+
     report = _axial_pin_report(chest_front_y=-0.13, chest_mid_y=0.0, shoulder_y=None)
     pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
     neck = next(p for p in pkg.parts if p.name == "RECIPE_neck")
     assert neck.p0 is not None and neck.p1 is not None
     assert neck.p0[1] == pytest.approx(0.0, abs=1e-6)
-    assert neck.p1[1] == pytest.approx(0.0, abs=1e-6)
+    length = math.dist(neck.p0, neck.p1)
+    expected_tip_y = 0.0 - length * math.sin(math.radians(NECK_FORWARD_TILT_DEG))
+    assert neck.p1[1] == pytest.approx(expected_tip_y, abs=1e-6)
     ovals = [p for p in pkg.parts if p.name.startswith("RECIPE_torso_oval_")]
     assert ovals
     for o in ovals:
@@ -2182,7 +2192,9 @@ def test_recipe__shoulder_bridge_forward_joint_clamped_axial() -> None:
 
 
 def test_recipe__head_no_y_uses_axial_chest_y() -> None:
-    """B5: chin/top lack y_m → head Y = axial mid (chest_mid=0.05), not hardcode 0 alone."""
+    """B5: chin/top lack y_m → head Y = axial mid (chest_mid=0.05) + 0050 dy_tip co-move."""
+    from meshops.proportion.blockout_recipe import NECK_FORWARD_TILT_DEG
+
     report = _axial_pin_report(chest_front_y=-0.13, chest_mid_y=0.05, shoulder_y=None)
     lms = dict(report.landmarks_xyz)
     # Chin and cranial_vertex without y_m
@@ -2191,20 +2203,28 @@ def test_recipe__head_no_y_uses_axial_chest_y() -> None:
     report = report.model_copy(update={"landmarks_xyz": lms})
     pkg = build_blockout_recipe(report, limbs=False)
     head = next(p for p in pkg.parts if p.name == "RECIPE_head")
-    assert head.center is not None
-    assert head.center[1] == pytest.approx(0.05, abs=1e-6)
+    neck = next(p for p in pkg.parts if p.name == "RECIPE_neck")
+    assert head.center is not None and neck.p0 is not None and neck.p1 is not None
+    length = math.dist(neck.p0, neck.p1)
+    dy_tip = -length * math.sin(math.radians(NECK_FORWARD_TILT_DEG))
+    assert head.center[1] == pytest.approx(0.05 + dy_tip, abs=1e-6)
 
 
 def test_recipe__head_chin_y_preserved() -> None:
-    """B5: when chin y present, keep it (do not force mid)."""
+    """B5: when chin y present, keep offset + 0050 dy_tip co-move (do not force mid)."""
+    from meshops.proportion.blockout_recipe import NECK_FORWARD_TILT_DEG
+
     report = _axial_pin_report(chest_front_y=-0.13, chest_mid_y=0.0, shoulder_y=None)
     lms = dict(report.landmarks_xyz)
     lms["chin"] = _lm("chin", x_m=0.0, y_m=-0.04, z_m=1.50)
     report = report.model_copy(update={"landmarks_xyz": lms})
     pkg = build_blockout_recipe(report, limbs=False)
     head = next(p for p in pkg.parts if p.name == "RECIPE_head")
-    assert head.center is not None
-    assert head.center[1] == pytest.approx(-0.04, abs=1e-6)
+    neck = next(p for p in pkg.parts if p.name == "RECIPE_neck")
+    assert head.center is not None and neck.p0 is not None and neck.p1 is not None
+    length = math.dist(neck.p0, neck.p1)
+    dy_tip = -length * math.sin(math.radians(NECK_FORWARD_TILT_DEG))
+    assert head.center[1] == pytest.approx(-0.04 + dy_tip, abs=1e-6)
 
 
 def test_recipe__axial_soft_breast_glute_not_mid_forced() -> None:
