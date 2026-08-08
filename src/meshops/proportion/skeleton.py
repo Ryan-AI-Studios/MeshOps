@@ -47,6 +47,10 @@ _SHOULDER_HALF_WIDTH_FRAC: Final[float] = 0.12
 _HIP_HALF_WIDTH_FRAC: Final[float] = 0.09
 # Mild A-pose arm depth offset (meters scale via height) - only when inventing missing arm Y.
 _A_POSE_ARM_Y_FRAC: Final[float] = -0.05
+# 0051: anterior arm prior when shoulder Y is torso-plane (chest_mid/chest) or invent.
+ARM_FORWARD_OF_HALF_DEPTH_FRAC: Final[float] = 0.45
+_ARM_FORWARD_ABS_FALLBACK_M: Final[float] = 0.05
+_TORSO_PLANE_DEPTH_SRCS: Final[frozenset[str]] = frozenset({"chest_mid", "chest"})
 
 SkeletonFormat = Literal["json", "bpy", "both"]
 JointSource = Literal["measured", "estimated", "template", "missing"]
@@ -303,16 +307,66 @@ def _try_depth_y(
     samples: DepthSamplesPackage | None,
     height_m: float | None,
     messages: list[str],
-) -> tuple[float | None, bool, bool]:
-    """If y missing, try depth ladder before invent. Returns (y, y_from_lm, y_from_depth)."""
+) -> tuple[float | None, bool, bool, str | None]:
+    """If y missing, try depth ladder before invent.
+
+    Returns (y, y_from_lm, y_from_depth, src_id).
+    src_id is set only when the ladder filled Y; None when landmark Y already set.
+    """
     if y is not None:
-        return y, y_from_lm, False
+        return y, y_from_lm, False, None
     got = _resolve_depth_y_m(joint_id, lms, bands, samples, height_m)
     if got is not None:
         y_m, src_id = got
         messages.append(f"joint {joint_id}: y_m from {src_id} (depth)")
-        return y_m, False, True
-    return None, False, False
+        return y_m, False, True, src_id
+    return None, False, False, None
+
+
+def _chest_half_depth_for_arm_prior(
+    lms: dict[str, LandmarkXYZ],
+    bands: list[DepthBand] | None,
+) -> float | None:
+    """Half torso depth for arm forward prior (B3). No 0.12*H recipe fallback.
+
+    Order: chest band depth_m/2 -> |chest_front.y - chest_mid.y| -> None.
+    """
+    if bands:
+        for band in bands:
+            if band.band_id != "chest":
+                continue
+            if _finite(band.depth_m) and float(band.depth_m) > 0.0:
+                return float(band.depth_m) / 2.0
+    front = lms.get("chest_front")
+    mid = lms.get("chest_mid")
+    if front is not None and mid is not None and _finite(front.y_m) and _finite(mid.y_m):
+        return abs(float(front.y_m) - float(mid.y_m))
+    return None
+
+
+def _arm_forward_y(
+    y_plane: float,
+    *,
+    half_depth: float | None,
+    height_m: float | None,
+    chest_front_y: float | None,
+) -> float:
+    """Anterior (-Y) arm prior from a torso mid-plane (B2/B3).
+
+    half_depth path: y = y_plane - frac * half_depth
+    else stature: y = y_plane + (-0.05)*H
+    else abs: y = y_plane - 0.05 m
+    Clamp: y = max(y, chest_front_y) when front known (do not pass front).
+    """
+    if half_depth is not None and half_depth > 0.0 and math.isfinite(half_depth):
+        y = float(y_plane) - ARM_FORWARD_OF_HALF_DEPTH_FRAC * float(half_depth)
+    elif height_m is not None and math.isfinite(height_m):
+        y = float(y_plane) + _A_POSE_ARM_Y_FRAC * float(height_m)
+    else:
+        y = float(y_plane) - _ARM_FORWARD_ABS_FALLBACK_M
+    if chest_front_y is not None and math.isfinite(chest_front_y):
+        y = max(y, float(chest_front_y))
+    return y
 
 
 def _joint_source(
@@ -483,7 +537,7 @@ def _resolve_pelvis(
         if lid is None:
             lid = lid2
 
-    ym, y_from, y_depth = _try_depth_y(
+    ym, y_from, y_depth, _ = _try_depth_y(
         "pelvis",
         ym,
         y_from,
@@ -548,7 +602,7 @@ def _resolve_spine(
     mx, my, mz, mlid, mx_from, my_from, mz_from = _raw_coords_from_lm(navel)
     if navel is not None and mlid is None:
         mlid = navel_id
-    my, my_from, my_depth = _try_depth_y(
+    my, my_from, my_depth, _ = _try_depth_y(
         "spine_mid",
         my,
         my_from,
@@ -598,7 +652,7 @@ def _resolve_spine(
     hy_depth: bool
     if cm is not None and _any_finite_xyz(cm.x_m, cm.y_m, cm.z_m):
         hx, hy, hz, hlid, hx_from, hy_from, hz_from = _raw_coords_from_lm(cm)
-        hy, hy_from, hy_depth = _try_depth_y(
+        hy, hy_from, hy_depth, _ = _try_depth_y(
             "spine_high",
             hy,
             hy_from,
@@ -644,7 +698,7 @@ def _resolve_spine(
         hz_from = hz is not None
         hlid = "+".join(used) if used else None
         if hy is None:
-            hy, hy_from, hy_depth = _try_depth_y(
+            hy, hy_from, hy_depth, _ = _try_depth_y(
                 "spine_high",
                 None,
                 False,
@@ -687,7 +741,7 @@ def _resolve_spine(
     # --- spine_low ← belt_hip or between pelvis and spine_mid ---
     belt, belt_id = _pick_lm(lms, "belt_hip")
     lx, ly, lz, llid, lx_from, ly_from, lz_from = _raw_coords_from_lm(belt)
-    ly, ly_from, ly_depth = _try_depth_y(
+    ly, ly_from, ly_depth, _ = _try_depth_y(
         "spine_low",
         ly,
         ly_from,
@@ -776,7 +830,7 @@ def _resolve_neck_head(
     # Depth Y must not suppress X/Z fills (0035 P2 — limb-style independent axis fill).
     neck_lm, neck_lid = _pick_lm(lms, "neck")
     nx, ny, nz, nlid, nx_from, ny_from, nz_from = _raw_coords_from_lm(neck_lm)
-    ny, ny_from, ny_depth = _try_depth_y(
+    ny, ny_from, ny_depth, _ = _try_depth_y(
         "neck_base",
         ny,
         ny_from,
@@ -833,7 +887,7 @@ def _resolve_neck_head(
     # head ← cranial_vertex → hair_crown (B6); depth Y does not suppress Z fill
     head_lm, head_lid = _pick_lm(lms, "cranial_vertex", "hair_crown")
     hx, hy, hz, hlid, hx_from, hy_from, hz_from = _raw_coords_from_lm(head_lm)
-    hy, hy_from, hy_depth = _try_depth_y(
+    hy, hy_from, hy_depth, _ = _try_depth_y(
         "head",
         hy,
         hy_from,
@@ -875,7 +929,7 @@ def _resolve_neck_head(
     # neck_top: estimate between neck_base and head if no landmark; depth Y independent
     ntop_lm, ntop_lid = _pick_lm(lms, "neck_top")
     tx, ty, tz, tlid, tx_from, ty_from, tz_from = _raw_coords_from_lm(ntop_lm)
-    ty, ty_from, ty_depth = _try_depth_y(
+    ty, ty_from, ty_depth, _ = _try_depth_y(
         "neck_top",
         ty,
         ty_from,
@@ -935,7 +989,7 @@ def _resolve_neck_head(
     # chin ← chin parent=head; depth Y does not suppress Z fill
     chin_lm, chin_lid = _pick_lm(lms, "chin")
     cx, cy, cz, clid, cx_from, cy_from, cz_from = _raw_coords_from_lm(chin_lm)
-    cy, cy_from, cy_depth = _try_depth_y(
+    cy, cy_from, cy_depth, _ = _try_depth_y(
         "chin",
         cy,
         cy_from,
@@ -979,7 +1033,7 @@ def _resolve_neck_head(
     # crown ← hair_crown else copy head + message (B6); depth Y independent of Z fill
     crown_lm, crown_lid = _pick_lm(lms, "hair_crown")
     crx, cry, crz, crlid, crx_from, cry_from, crz_from = _raw_coords_from_lm(crown_lm)
-    cry, cry_from, cry_depth = _try_depth_y(
+    cry, cry_from, cry_depth, _ = _try_depth_y(
         "crown",
         cry,
         cry_from,
@@ -1070,8 +1124,21 @@ def _resolve_limb_side(
         default_sh_x = sign * _SHOULDER_HALF_WIDTH_FRAC * float(height_m)
         default_hip_x = sign * _HIP_HALF_WIDTH_FRAC * float(height_m)
     default_arm_y = _A_POSE_ARM_Y_FRAC * float(height_m) if height_m is not None else 0.0
+    half_depth = _chest_half_depth_for_arm_prior(lms, bands)
+    chest_front_lm = lms.get("chest_front")
+    chest_front_y: float | None = (
+        float(chest_front_lm.y_m)
+        if chest_front_lm is not None and _finite(chest_front_lm.y_m)
+        else None
+    )
+    chest_mid_lm = lms.get("chest_mid")
+    chest_mid_y: float | None = (
+        float(chest_mid_lm.y_m) if chest_mid_lm is not None and _finite(chest_mid_lm.y_m) else None
+    )
 
-    def _depth_y(jid: str, y: float | None, y_from: bool) -> tuple[float | None, bool, bool]:
+    def _depth_y(
+        jid: str, y: float | None, y_from: bool
+    ) -> tuple[float | None, bool, bool, str | None]:
         return _try_depth_y(
             jid,
             y,
@@ -1083,11 +1150,41 @@ def _resolve_limb_side(
             messages=messages,
         )
 
+    def _arm_inherit_msg(joint_id: str) -> str:
+        if shoulder_arm_prior:
+            return f"joint {joint_id}: y_m inherited from {sh_id} (arm prior)"
+        if shoulder_y_real:
+            return f"joint {joint_id}: y_m inherited from {sh_id} (depth)"
+        return f"joint {joint_id}: front-plane placement (y_m estimated)"
+
     # --- shoulder ---
     lm, lid = _pick_lm(lms, sh_id)
     x, y, z, lid2, x_from, y_from, z_from = _raw_coords_from_lm(lm)
     lid = lid2 or lid
-    y, y_from, y_depth = _depth_y(sh_id, y, y_from)
+    y, y_from, y_depth, depth_src_id = _depth_y(sh_id, y, y_from)
+    applied_prior = False
+    # B1-B6: arm forward prior when Y is torso-plane depth or invent (not landmark).
+    if y_from:
+        pass  # direct landmark Y wins — no prior
+    elif y is not None and y_depth and depth_src_id in _TORSO_PLANE_DEPTH_SRCS:
+        y_plane = float(y)
+        y_new = _arm_forward_y(
+            y_plane,
+            half_depth=half_depth,
+            height_m=height_m,
+            chest_front_y=chest_front_y,
+        )
+        dy = y_new - y_plane
+        y = y_new
+        applied_prior = True
+        y_from, y_depth = False, False
+        # Suppress stale lone "from chest_mid (depth)" claim (B6 / P3-4).
+        depth_msg = f"joint {sh_id}: y_m from {depth_src_id} (depth)"
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i] == depth_msg:
+                del messages[i]
+                break
+        messages.append(f"joint {sh_id}: arm forward prior (from {depth_src_id}; Δy={dy:.4f})")
     if not _all_finite_xyz(x, y, z):
         if z is None:
             z = _stature_z(height_m, "shoulder")
@@ -1096,11 +1193,20 @@ def _resolve_limb_side(
         if x is None and default_sh_x is not None:
             x = default_sh_x
             x_from = False
-        if y is None and z is not None:
-            y = default_arm_y
-            y_from = False
-            y_depth = False
-            messages.append(f"joint {sh_id}: front-plane placement (y_m estimated)")
+        if y is None and z is not None and not applied_prior:
+            # Invent path (P2-1): plane = chest_mid if finite else 0 — never invent value.
+            y_plane = float(chest_mid_y) if chest_mid_y is not None else 0.0
+            y_new = _arm_forward_y(
+                y_plane,
+                half_depth=half_depth,
+                height_m=height_m,
+                chest_front_y=chest_front_y,
+            )
+            dy = y_new - y_plane
+            y = y_new
+            applied_prior = True
+            y_from, y_depth = False, False
+            messages.append(f"joint {sh_id}: arm forward prior (from invent; Δy={dy:.4f})")
         elif y is None and z is None and x is None and default_sh_x is not None:
             messages.append(f"joint {sh_id}: estimated from stature/lateral defaults")
     src = _joint_source(
@@ -1131,9 +1237,9 @@ def _resolve_limb_side(
     if joints[sh_id].source == "missing":
         messages.append(f"joint {sh_id}: missing")
 
-    # Provenance for arm-chain Y inherit (0037 R1): capture before wrist overwrites locals.
-    # Real = landmark Y or depth ladder — not invent/default_arm_y (AI2 B1).
-    shoulder_y_real = bool(y_from or y_depth)
+    # Provenance for arm-chain Y inherit (0037 R1 + 0051 arm prior): capture before wrist.
+    shoulder_y_real = bool(y_from or y_depth or applied_prior)
+    shoulder_arm_prior = applied_prior
 
     # --- wrist (needed before elbow mid); arms have NO depth band (R2) ---
     lm, lid = _pick_lm(lms, wr_id)
@@ -1154,10 +1260,7 @@ def _resolve_limb_side(
                 y = shj.y_m
                 y_from = False
                 y_depth = False
-                if shoulder_y_real:
-                    messages.append(f"joint {wr_id}: y_m inherited from {sh_id} (depth)")
-                else:
-                    messages.append(f"joint {wr_id}: front-plane placement (y_m estimated)")
+                messages.append(_arm_inherit_msg(wr_id))
             else:
                 y = default_arm_y
                 y_from = False
@@ -1210,10 +1313,7 @@ def _resolve_limb_side(
                     y = shy2
                     y_from = False
                     y_depth = False
-                    if shoulder_y_real:
-                        messages.append(f"joint {el_id}: y_m inherited from {sh_id} (depth)")
-                    else:
-                        messages.append(f"joint {el_id}: front-plane placement (y_m estimated)")
+                    messages.append(_arm_inherit_msg(el_id))
                 else:
                     y = default_arm_y
                     y_from = False
@@ -1318,7 +1418,7 @@ def _resolve_limb_side(
     lm, lid = _pick_lm(lms, hip_id, f"greater_trochanter_{s}")
     x, y, z, lid2, x_from, y_from, z_from = _raw_coords_from_lm(lm)
     lid = lid2 or lid
-    y, y_from, y_depth = _depth_y(hip_id, y, y_from)
+    y, y_from, y_depth, _ = _depth_y(hip_id, y, y_from)
     if not _all_finite_xyz(x, y, z):
         if z is None:
             z = _stature_z(height_m, "hip")
@@ -1357,7 +1457,7 @@ def _resolve_limb_side(
     lm, lid = _pick_lm(lms, an_id)
     x, y, z, lid2, x_from, y_from, z_from = _raw_coords_from_lm(lm)
     lid = lid2 or lid
-    y, y_from, y_depth = _depth_y(an_id, y, y_from)
+    y, y_from, y_depth, _ = _depth_y(an_id, y, y_from)
     if not _all_finite_xyz(x, y, z):
         if z is None:
             z = _stature_z(height_m, "ankle")
@@ -1395,7 +1495,7 @@ def _resolve_limb_side(
     lm, lid = _pick_lm(lms, kn_id)
     x, y, z, lid2, x_from, y_from, z_from = _raw_coords_from_lm(lm)
     lid = lid2 or lid
-    y, y_from, y_depth = _depth_y(kn_id, y, y_from)
+    y, y_from, y_depth, _ = _depth_y(kn_id, y, y_from)
     if not _all_finite_xyz(x, y, z):
         hip_xyz = _joint_xyz(joints[hip_id])
         an_xyz = _joint_xyz(joints[an_id])
@@ -1463,7 +1563,7 @@ def _resolve_limb_side(
         lm, lid = _pick_lm(lms, *keys)
         x, y, z, lid2, x_from, y_from, z_from = _raw_coords_from_lm(lm)
         lid = lid2 or lid
-        y, y_from, y_depth = _depth_y(jid, y, y_from)
+        y, y_from, y_depth, _ = _depth_y(jid, y, y_from)
         if not _all_finite_xyz(x, y, z):
             anj = joints[an_id]
             # 0041 B1-B4: invent sole-class Z - never clone ankle Z.
@@ -2053,6 +2153,7 @@ def run_skeleton_build(
 
 
 __all__ = [
+    "ARM_FORWARD_OF_HALF_DEPTH_FRAC",
     "AXIS_NOTES",
     "BPY_BASENAME",
     "JSON_BASENAME",
@@ -2064,6 +2165,8 @@ __all__ = [
     "SkeletonCounts",
     "SkeletonFormat",
     "SkeletonJoint",
+    "_arm_forward_y",
+    "_chest_half_depth_for_arm_prior",
     "_depth_family_for_joint",
     "build_blockout_skeleton",
     "emit_bpy_script",

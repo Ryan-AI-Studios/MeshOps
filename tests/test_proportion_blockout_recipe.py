@@ -393,6 +393,7 @@ def test_recipe__limbs_sparse_skip_cap() -> None:
 
 
 def test_recipe__limbs_y_null_front_plane() -> None:
+    """0051 T5: arm both-null → prior full3d; thigh still front_plane (not all limbs)."""
     report = _full_torso_report(
         extra_lms={
             "elbow_l": _lm("elbow_l", x_m=-0.25, z_m=1.10),  # y null
@@ -405,13 +406,36 @@ def test_recipe__limbs_y_null_front_plane() -> None:
             "ankle_r": _lm("ankle_r", x_m=0.10, z_m=0.08),
         }
     )
-    # shoulders/hips have y; limb joints y null → front_plane
-    # need to also null shoulder y for upper_arm? SEED uses shoulder→elbow
-    # shoulders have y_m; elbow y null → front_plane path
+    # Null shoulder Y so upper_arm is both-null (shoulder→elbow)
+    report = report.model_copy(
+        update={
+            "landmarks_xyz": {
+                **report.landmarks_xyz,
+                "shoulder_l": _lm("shoulder_l", x_m=-0.20, y_m=None, z_m=1.38),
+                "shoulder_r": _lm("shoulder_r", x_m=0.20, y_m=None, z_m=1.38),
+            }
+        }
+    )
     pkg = build_blockout_recipe(report, limbs=True)
     limbs = [p for p in pkg.parts if p.role == "limb_segment"]
     assert len(limbs) >= 1
-    assert all(p.placement == "front_plane" for p in limbs)
+    arms = [
+        p
+        for p in limbs
+        if p.name
+        in (
+            "RECIPE_limb_upper_arm_l",
+            "RECIPE_limb_upper_arm_r",
+            "RECIPE_limb_forearm_l",
+            "RECIPE_limb_forearm_r",
+        )
+    ]
+    thighs = [p for p in limbs if p.name and "thigh" in p.name and "prox_soft" not in p.name]
+    assert arms
+    assert all(p.placement == "full3d" for p in arms)
+    assert any("arm forward prior" in m for m in pkg.messages)
+    if thighs:
+        assert all(p.placement == "front_plane" for p in thighs)
 
 
 def test_recipe__limbs_emit_split_calf() -> None:
@@ -2392,14 +2416,19 @@ def test_recipe__axial_band_skipped_when_height_null() -> None:
 
 
 def test_recipe__0037_t4_limbs_skeleton_arm_full3d() -> None:
-    """T4: with skeleton finite arm joints → upper_arm full3d + skeleton endpoints msg.
+    """T4 (0051): skeleton arm full3d; Y tracks prior (not absolute chest_mid 0.08).
 
-    Without skeleton + null report Y → still front_plane (paired with
-    test_recipe__limbs_y_null_front_plane).
+    T4b: without skeleton + both-null arms → prior full3d + arm-forward message.
     """
-    from meshops.proportion.skeleton import build_blockout_skeleton
+    from meshops.proportion.skeleton import (
+        _arm_forward_y,
+        _chest_half_depth_for_arm_prior,
+        build_blockout_skeleton,
+    )
 
-    # Report landmarks: arm Y null (would be front_plane without skeleton)
+    h = 1.72
+    chest_y = 0.08
+    # Report landmarks: arm Y null
     report = _full_torso_report(
         extra_lms={
             "elbow_l": _lm("elbow_l", x_m=-0.25, z_m=1.10),  # y null
@@ -2410,11 +2439,11 @@ def test_recipe__0037_t4_limbs_skeleton_arm_full3d() -> None:
             "knee_r": _lm("knee_r", x_m=0.12, z_m=0.50),
             "ankle_l": _lm("ankle_l", x_m=-0.10, z_m=0.08),
             "ankle_r": _lm("ankle_r", x_m=0.10, z_m=0.08),
-            # Non-zero chest_mid so skeleton shoulder/elbow chain carry real Y
-            "chest_mid": _lm("chest_mid", x_m=0.0, y_m=0.08, z_m=1.25),
+            # Non-zero chest_mid so skeleton shoulder chain has a plane for prior
+            "chest_mid": _lm("chest_mid", x_m=0.0, y_m=chest_y, z_m=1.25),
         }
     )
-    # Null shoulder Y on report so recipe-alone would front_plane upper_arm
+    # Null shoulder Y on report so both-null arm path fires without skeleton
     report = report.model_copy(
         update={
             "landmarks_xyz": {
@@ -2424,8 +2453,10 @@ def test_recipe__0037_t4_limbs_skeleton_arm_full3d() -> None:
             }
         }
     )
+    half = _chest_half_depth_for_arm_prior(report.landmarks_xyz, report.depth_bands)
+    expected_y = _arm_forward_y(chest_y, half_depth=half, height_m=h, chest_front_y=None)
 
-    # Without skeleton → front_plane (baseline)
+    # T4b: Without skeleton → arm forward prior full3d (not front_plane)
     pkg_no = build_blockout_recipe(report, limbs=True)
     arms_no = [
         p
@@ -2439,9 +2470,12 @@ def test_recipe__0037_t4_limbs_skeleton_arm_full3d() -> None:
         )
     ]
     assert arms_no
-    assert all(p.placement == "front_plane" for p in arms_no)
+    assert all(p.placement == "full3d" for p in arms_no)
+    assert any("arm forward prior" in m for m in pkg_no.messages)
+    assert arms_no[0].p0 is not None
+    assert arms_no[0].p0[1] == pytest.approx(expected_y, abs=1e-6)
 
-    # With skeleton (finite arm joint XYZ after build) → full3d + skeleton message
+    # With skeleton (finite arm joint XYZ after prior) → full3d + skeleton message
     skel = build_blockout_skeleton(report)
     pkg = build_blockout_recipe(report, limbs=True, skeleton=skel)
     ua_l = next(p for p in pkg.parts if p.name == "RECIPE_limb_upper_arm_l")
@@ -2452,10 +2486,10 @@ def test_recipe__0037_t4_limbs_skeleton_arm_full3d() -> None:
     assert fa_l.placement == "full3d"
     assert any("upper_arm_l: endpoints from skeleton joints" in m for m in pkg.messages)
     assert any("forearm_l: endpoints from skeleton joints" in m for m in pkg.messages)
-    # Capsule Y tracks skeleton (non-zero chest depth), not invent-0 plane
+    # Capsule Y tracks skeleton prior chain, not absolute chest_mid 0.08
     assert ua_l.p0 is not None and ua_l.p1 is not None
-    assert ua_l.p0[1] == pytest.approx(0.08, abs=1e-6)
-    assert ua_l.p1[1] == pytest.approx(0.08, abs=1e-6)
+    assert ua_l.p0[1] == pytest.approx(expected_y, abs=1e-6)
+    assert ua_l.p1[1] == pytest.approx(expected_y, abs=1e-6)
     # Arm-only DoD (AI2 B4): thigh/calf must NOT claim skeleton endpoints
     assert not any("thigh" in m and "endpoints from skeleton" in m for m in pkg.messages)
     assert not any("calf" in m and "endpoints from skeleton" in m for m in pkg.messages)
