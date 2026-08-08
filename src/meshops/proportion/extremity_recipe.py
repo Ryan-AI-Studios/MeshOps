@@ -31,15 +31,24 @@ _FOOT_LEN_NO_TEMPLATE_FRAC: Final[float] = 0.15
 _FOOT_WIDTH_FALLBACK_FRAC_H: Final[float] = 0.02
 _PLATE_THICKNESS_FRAC_H: Final[float] = 0.02
 _HAND_LEN_FALLBACK_FRAC_H: Final[float] = 0.11
-# Hand constants — main tip / 0040 (0044 B14 prune; no hand-scope expansion)
-_PALM_WIDTH_FRAC_HAND: Final[float] = 0.55
-_PALM_THICKNESS_FRAC_HAND: Final[float] = 0.22
+# Hand constants — 0048 bulk priors (anti-stick full digits; mitten fence unchanged)
+_PALM_WIDTH_FRAC_HAND: Final[float] = 0.62
+_PALM_THICKNESS_FRAC_HAND: Final[float] = 0.30
+_PALM_PAD_RY_FRAC_TH: Final[float] = 0.65  # pad mult on thickness axis (was bare 0.55)
 _PALM_LEN_FRAC_HAND: Final[float] = 0.48
 _MITTEN_LEN_FRAC_HAND: Final[float] = 0.50
-_MITTEN_R_FRAC_PALM: Final[float] = 0.72  # fat mitt, not thin stick
+_MITTEN_R_FRAC_PALM: Final[float] = 0.72  # fat mitt, not thin stick — DO NOT CHANGE
 _FINGER_SEG_FRAC_HAND: Final[float] = 1.0 / 5.0
-_FINGER_R_FRAC_PALM: Final[float] = 0.08
+_FINGER_R_FRAC_PALM: Final[float] = 0.16
+_FINGER_R_FLOOR_M: Final[float] = 0.006
+_FINGER_R_CAP_VS_HALF_W: Final[float] = 0.55
+_FINGER_SPLAY_FRAC_HALF_W: Final[float] = 1.95
+_FINGER_MIN_CENTER_SPACING_VS_R: Final[float] = 2.0  # T12 groove law docs
 _THUMB_SEG_FRAC_HAND: Final[float] = 1.0 / 6.0
+_THUMB_R_SCALE_VS_FINGER: Final[float] = 1.25
+_THUMB_BASE_LATERAL_FRAC_HALF_W: Final[float] = 0.95
+_THUMB_OPPOSE_LATERAL: Final[float] = 0.45
+_THUMB_PALM_PITCH: Final[float] = 0.55
 # Foot-friendly toe / sole fracs (0044 Phase 0 organic sole)
 _TOE_WEDGE_LEN_FRAC: Final[float] = 0.42  # elongated front mass (not a ball on plate)
 _TOE_FULL_LEN_FRAC: Final[float] = 0.22
@@ -819,6 +828,12 @@ def build_hand_parts(
                 messages=msgs,
             )
         )
+    # B11: bulk message once when full digits emitted
+    if fingers == "full" and parts:
+        msgs.append(
+            f"hand bulk: full digits r_frac={_FINGER_R_FRAC_PALM} "
+            f"palm_w={_PALM_WIDTH_FRAC_HAND} splay={_FINGER_SPLAY_FRAC_HALF_W} (anti-stick)"
+        )
     return parts
 
 
@@ -910,13 +925,13 @@ def _build_hand_side(
     if abs(axis[2]) >= abs(axis[1]):
         # A-pose hang: flattened hand pad
         palm_rx = max(half_w, 0.02)
-        palm_ry = max(palm_th * 0.55, 0.012)
+        palm_ry = max(palm_th * _PALM_PAD_RY_FRAC_TH, 0.012)
         palm_rz = max(palm_len * 0.5, 0.025)
     else:
-        # Tip-directed (often -Y): length along Y
+        # Tip-directed (often -Y): length along Y; thickness on Z
         palm_rx = max(half_w, 0.02)
         palm_ry = max(palm_len * 0.5, 0.025)
-        palm_rz = max(palm_th * 0.55, 0.012)
+        palm_rz = max(palm_th * _PALM_PAD_RY_FRAC_TH, 0.012)
     out.append(
         _ellipsoid(
             palm_name,
@@ -954,11 +969,14 @@ def _build_hand_side(
         )
         return out
 
-    # fingers == full: 4 fingers x 3 capsules + thumb x 2 (main tip / 0040)
+    # fingers == full: 4 fingers x 3 capsules + thumb x 2 (0048 bulk + splay)
     seg = _FINGER_SEG_FRAC_HAND * hand_len
-    fr = max(_FINGER_R_FRAC_PALM * palm_w, 0.004)
-    # Lateral splay in X
-    splay = half_w * 0.9
+    fr = min(
+        max(_FINGER_R_FRAC_PALM * palm_w, _FINGER_R_FLOOR_M),
+        _FINGER_R_CAP_VS_HALF_W * half_w,
+    )
+    # Lateral splay in X (B12: scale with bulk so grooves stay visible)
+    splay = half_w * _FINGER_SPLAY_FRAC_HALF_W
     # Perpendicular-ish offset in X for finger rows
     for fi, fname in enumerate(_FINGER_NAMES):
         t = (fi - 1.5) / 1.5  # -1 ... +1-ish
@@ -979,14 +997,26 @@ def _build_hand_side(
                 )
             )
 
-    # Thumb: 2 segs, slight oppose (+X for L, -X for R anatomical palm)
+    # Thumb: 2 segs, bulk + lateral base + palm-plane pitch (B5 / AI1 P2)
     thumb_seg = _THUMB_SEG_FRAC_HAND * hand_len
-    oppose = 0.35 if side == "l" else -0.35
-    # Combine axis with lateral oppose
-    thumb_dir_raw = (axis[0] + oppose * 0.5, axis[1], axis[2])
+    thumb_r = fr * _THUMB_R_SCALE_VS_FINGER
+    oppose = _THUMB_OPPOSE_LATERAL if side == "l" else -_THUMB_OPPOSE_LATERAL
+    # Palm-plane pitch: +Y when axis primarily -Z (A-pose hang) so thumb swings across palm front
+    pitch = _THUMB_PALM_PITCH  # positive Y component
+    thumb_dir_raw = (
+        axis[0] + oppose * 0.5,
+        axis[1] + pitch,  # primary oppose read (AI1 P2)
+        axis[2],
+    )
     thumb_dir = _normalize(thumb_dir_raw) or axis
+    # B5 pin floor 0.95*half_w; with B12 splay, outer finger sits ~0.975*half_w so
+    # pure pin is slightly inboard of index -> raise lat to clear T14 soft notch
+    # (open decision: geometry raise, not threshold-only harden).
+    lat = half_w * _THUMB_BASE_LATERAL_FRAC_HALF_W
+    outer_dx = splay * 0.5
+    lat = max(lat, outer_dx + 0.35 * (fr + thumb_r))
     thumb_base = _add(
-        [palm_c[0] + (half_w * 0.6 if side == "l" else -half_w * 0.6), palm_c[1], palm_c[2]],
+        [palm_c[0] + (lat if side == "l" else -lat), palm_c[1], palm_c[2]],
         thumb_dir,
         0.05 * hand_len,
     )
@@ -999,7 +1029,7 @@ def _build_hand_side(
                 "thumb_soft",
                 p0,
                 p1,
-                fr * 1.15,
+                thumb_r,
                 parent_joint=pj_digit,
             )
         )

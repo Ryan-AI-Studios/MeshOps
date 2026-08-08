@@ -942,3 +942,247 @@ def test_ext__build_foot_parts_existing_parts_calf_floor() -> None:
     half = float(left_plates[0].half_depth_m or 0.0)
     assert half >= 0.5 * FOOT_LEN_MIN_VS_CALF_DIAM * 0.16 - 1e-6
     assert any("calf_diam" in m for m in msgs)
+
+
+# ---------------------------------------------------------------------------
+# 0048 — Hand bulk priors (T4-T14)
+# ---------------------------------------------------------------------------
+
+
+def _hand_len_from_lms(lms: dict[str, LandmarkXYZ], side: str = "l") -> float:
+    """Measure wrist→fingertip length in meters (0048 synthetic ≈ 0.235)."""
+    w = lms[f"wrist_{side}"]
+    t = lms[f"fingertip_{side}"]
+    assert w.x_m is not None and w.z_m is not None
+    assert t.x_m is not None and t.z_m is not None
+    wy = float(w.y_m) if w.y_m is not None else 0.0
+    ty = float(t.y_m) if t.y_m is not None else 0.0
+    dx = float(t.x_m) - float(w.x_m)
+    dy = ty - wy
+    dz = float(t.z_m) - float(w.z_m)
+    return (dx * dx + dy * dy + dz * dz) ** 0.5
+
+
+def _capsule_center(part: RecipePart) -> list[float]:
+    """Midpoint of capsule endpoints; asserts p0/p1 present."""
+    assert part.p0 is not None and part.p1 is not None
+    p0 = part.p0
+    p1 = part.p1
+    return [
+        0.5 * (float(p0[0]) + float(p1[0])),
+        0.5 * (float(p0[1]) + float(p1[1])),
+        0.5 * (float(p0[2]) + float(p1[2])),
+    ]
+
+
+def _require_radius_m(part: RecipePart) -> float:
+    assert part.radius_m is not None
+    return float(part.radius_m)
+
+
+def test_ext__t4_full_finger_bulk() -> None:
+    """T4: full finger radius_m == 0.16*palm_w when uncapped; always >= 0.14*palm_w."""
+    report = _report_with_extremities()
+    hand_len = _hand_len_from_lms(report.landmarks_xyz)
+    palm_w = 0.62 * hand_len
+    half_w = palm_w / 2.0
+    uncapped = 0.16 * palm_w
+    cap = 0.55 * half_w
+    expected = min(max(uncapped, 0.006), cap)
+    pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="full")
+    for side in ("l", "r"):
+        idx = next(p for p in pkg.parts if p.name == f"RECIPE_finger_index_0_{side}")
+        fr = _require_radius_m(idx)
+        palm = next(p for p in pkg.parts if p.name == f"RECIPE_palm_{side}")
+        assert palm.rx_m is not None
+        palm_w_meas = 2.0 * float(palm.rx_m)
+        assert fr == pytest.approx(expected, abs=1e-9)
+        assert fr == pytest.approx(0.16 * palm_w_meas, abs=1e-9)
+        assert fr >= 0.14 * palm_w_meas - 1e-12
+
+
+def test_ext__t5_palm_pad_exact() -> None:
+    """T5: palm.rx_m == max(0.31*hand_len, 0.02); pad axis == max(0.30*hand_len*0.65, 0.012)."""
+    report = _report_with_extremities()
+    hand_len = _hand_len_from_lms(report.landmarks_xyz)
+    expect_rx = max(0.31 * hand_len, 0.02)
+    expect_pad = max(0.30 * hand_len * 0.65, 0.012)
+    pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="full")
+    for side in ("l", "r"):
+        palm = next(p for p in pkg.parts if p.name == f"RECIPE_palm_{side}")
+        assert palm.kind == "ellipsoid"
+        assert palm.rx_m is not None and palm.ry_m is not None and palm.rz_m is not None
+        assert float(palm.rx_m) == pytest.approx(expect_rx, abs=1e-9)
+        # A-pose hang (primary -Z): pad is ry
+        assert float(palm.ry_m) == pytest.approx(expect_pad, abs=1e-9)
+
+
+def test_ext__t6_thumb_thicker_than_index() -> None:
+    """T6: thumb_soft_0.radius_m >= 1.20 x index_0.radius_m."""
+    report = _report_with_extremities()
+    pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="full")
+    for side in ("l", "r"):
+        thumb = next(p for p in pkg.parts if p.name == f"RECIPE_thumb_soft_0_{side}")
+        idx = next(p for p in pkg.parts if p.name == f"RECIPE_finger_index_0_{side}")
+        assert _require_radius_m(thumb) >= 1.20 * _require_radius_m(idx) - 1e-12
+
+
+def test_ext__t7_thumb_lateral_base() -> None:
+    """T7: abs(thumb.p0.x - palm.center[0]) >= 0.85 x palm.rx_m."""
+    report = _report_with_extremities()
+    pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="full")
+    for side in ("l", "r"):
+        thumb = next(p for p in pkg.parts if p.name == f"RECIPE_thumb_soft_0_{side}")
+        palm = next(p for p in pkg.parts if p.name == f"RECIPE_palm_{side}")
+        assert thumb.p0 is not None and palm.center is not None and palm.rx_m is not None
+        lat = abs(float(thumb.p0[0]) - float(palm.center[0]))
+        assert lat >= 0.85 * float(palm.rx_m) - 1e-9
+
+
+def test_ext__t8_recipe_prefix_only_full_hands() -> None:
+    """T8: full hands emit RECIPE_* only (no HAND_/DIGIT_ prefixes)."""
+    report = _report_with_extremities()
+    pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="full")
+    for p in pkg.parts:
+        assert p.name.startswith("RECIPE_")
+        assert p.label.startswith("RECIPE_")
+        assert not p.name.startswith("HAND_")
+        assert not p.name.startswith("DIGIT_")
+
+
+def test_ext__t9_c_palm_ellipsoid_pass() -> None:
+    """T9: C_palm_ellipsoid pass when palms present."""
+    report = _report_with_extremities()
+    pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="full")
+    assert any(p.role == "palm" for p in pkg.parts)
+    result = validate_constraints(pkg, report=report)
+    by_id = {r.id: r for r in result.rules}
+    assert by_id["C_palm_ellipsoid"].status == "pass", by_id["C_palm_ellipsoid"].message
+
+
+def test_ext__t10_finger_tier_counts() -> None:
+    """T10: none=0 digits; mitten=1 finger_soft/side; full already covered by count test."""
+    report = _report_with_extremities()
+    pkg_none = build_blockout_recipe(report, limbs=False, hands=True, fingers="none")
+    by_none = pkg_none.counts.get("by_role") or {}
+    assert by_none.get("palm", 0) == 2
+    assert by_none.get("finger_soft", 0) == 0
+    assert by_none.get("thumb_soft", 0) == 0
+
+    pkg_mitt = build_blockout_recipe(report, limbs=False, hands=True, fingers="mitten")
+    by_mitt = pkg_mitt.counts.get("by_role") or {}
+    assert by_mitt.get("finger_soft", 0) == 2  # one mitten per side
+    assert by_mitt.get("thumb_soft", 0) == 0
+    names = {p.name for p in pkg_mitt.parts}
+    assert "RECIPE_finger_mitten_l" in names
+    assert "RECIPE_finger_mitten_r" in names
+
+
+def test_ext__t11_finger_r_floor() -> None:
+    """T11: short hand forces fr floor 0.006 m."""
+    # hand_len in (~0.035, ~0.060) so floor binds and cap does not
+    extra = _extremity_lms()
+    for side, sx in (("l", -0.45), ("r", 0.45)):
+        extra[f"wrist_{side}"] = _lm(f"wrist_{side}", x_m=sx, y_m=0.0, z_m=0.95)
+        extra[f"hand_{side}"] = _lm(
+            f"hand_{side}", x_m=sx - 0.01 if side == "l" else sx + 0.01, y_m=0.0, z_m=0.93
+        )
+        extra[f"fingertip_{side}"] = _lm(
+            f"fingertip_{side}",
+            x_m=sx - 0.02 if side == "l" else sx + 0.02,
+            y_m=0.0,
+            z_m=0.91,  # ~0.045 m wrist→tip
+        )
+    report = _full_torso_report(
+        extra_lms=extra,
+        extra_diams=[
+            _diam("ank_foot_l", half_width_m=0.035),
+            _diam("ank_foot_r", half_width_m=0.035),
+        ],
+    )
+    hand_len = _hand_len_from_lms(report.landmarks_xyz)
+    assert 0.035 < hand_len < 0.060
+    pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="full")
+    for side in ("l", "r"):
+        idx = next(p for p in pkg.parts if p.name == f"RECIPE_finger_index_0_{side}")
+        assert _require_radius_m(idx) >= 0.006 - 1e-12
+        assert _require_radius_m(idx) == pytest.approx(0.006, abs=1e-9)
+
+
+def test_ext__t12_inter_finger_groove_spacing() -> None:
+    """T12: min adjacent same-side finger_0 center |Δx| >= spacing_vs_r * fr - 1e-6."""
+    from meshops.proportion.extremity_recipe import _FINGER_MIN_CENTER_SPACING_VS_R
+
+    report = _report_with_extremities()
+    pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="full")
+    finger_names = ("index", "middle", "ring", "pinky")
+    for side in ("l", "r"):
+        segs = []
+        for fname in finger_names:
+            part = next(p for p in pkg.parts if p.name == f"RECIPE_finger_{fname}_0_{side}")
+            segs.append(part)
+        fr = _require_radius_m(segs[0])
+        xs = [_capsule_center(p)[0] for p in segs]
+        min_dx = min(abs(xs[i + 1] - xs[i]) for i in range(len(xs) - 1))
+        assert min_dx >= _FINGER_MIN_CENTER_SPACING_VS_R * fr - 1e-6, (
+            f"side={side} min_dx={min_dx} fr={fr}"
+        )
+
+
+def test_ext__t13_thumb_palm_plane_pitch() -> None:
+    """T13: thumb_dir from p0→p1 has |dy| > |dx|*0.3 OR abs(dir.y) >= 0.25."""
+    report = _report_with_extremities()
+    pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="full")
+    for side in ("l", "r"):
+        thumb = next(p for p in pkg.parts if p.name == f"RECIPE_thumb_soft_0_{side}")
+        assert thumb.p0 is not None and thumb.p1 is not None
+        dx = float(thumb.p1[0]) - float(thumb.p0[0])
+        dy = float(thumb.p1[1]) - float(thumb.p0[1])
+        dz = float(thumb.p1[2]) - float(thumb.p0[2])
+        n = (dx * dx + dy * dy + dz * dz) ** 0.5
+        assert n > 1e-12
+        dir_x, dir_y = dx / n, dy / n
+        assert abs(dir_y) > abs(dir_x) * 0.3 or abs(dir_y) >= 0.25, (
+            f"side={side} dir=({dir_x:.4f},{dir_y:.4f}) lacks palm pitch"
+        )
+
+
+def test_ext__t14_thumb_clear_of_fingers() -> None:
+    """T14: 3D dist(thumb_0 center, nearest finger_0 center) >= 0.75*(thumb_r+fr)."""
+    report = _report_with_extremities()
+    pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="full")
+    finger_names = ("index", "middle", "ring", "pinky")
+    for side in ("l", "r"):
+        thumb = next(p for p in pkg.parts if p.name == f"RECIPE_thumb_soft_0_{side}")
+        thumb_c = _capsule_center(thumb)
+        thumb_r = _require_radius_m(thumb)
+        fr = None
+        min_d = float("inf")
+        for fname in finger_names:
+            fp = next(p for p in pkg.parts if p.name == f"RECIPE_finger_{fname}_0_{side}")
+            if fr is None:
+                fr = _require_radius_m(fp)
+            fc = _capsule_center(fp)
+            d = (
+                (thumb_c[0] - fc[0]) ** 2 + (thumb_c[1] - fc[1]) ** 2 + (thumb_c[2] - fc[2]) ** 2
+            ) ** 0.5
+            min_d = min(min_d, d)
+        assert fr is not None
+        assert min_d >= 0.75 * (thumb_r + fr) - 1e-9, (
+            f"side={side} min_d={min_d} need {0.75 * (thumb_r + fr)}"
+        )
+
+
+def test_ext__t_b11_bulk_message_full() -> None:
+    """B11: hand bulk message once when fingers=full and parts non-empty."""
+    report = _report_with_extremities()
+    pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="full")
+    bulk_msgs = [m for m in pkg.messages if "hand bulk: full digits" in m]
+    assert len(bulk_msgs) == 1
+    assert "r_frac=0.16" in bulk_msgs[0]
+    assert "palm_w=0.62" in bulk_msgs[0]
+    assert "splay=1.95" in bulk_msgs[0]
+    assert "anti-stick" in bulk_msgs[0]
+
+    pkg_mitt = build_blockout_recipe(report, limbs=False, hands=True, fingers="mitten")
+    assert not any("hand bulk: full digits" in m for m in pkg_mitt.messages)
