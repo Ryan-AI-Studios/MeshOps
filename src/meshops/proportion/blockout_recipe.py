@@ -42,6 +42,10 @@ from meshops.proportion.models import (
     LandmarkXYZ,
     ProportionReport,
 )
+from meshops.proportion.skeleton import (
+    _arm_forward_y,
+    _chest_half_depth_for_arm_prior,
+)
 
 if TYPE_CHECKING:
     from meshops.proportion.anatomy_profile import (
@@ -797,6 +801,7 @@ def _build_shoulder_bridges(
     report: ProportionReport,
     m: _ResolvedMetrics,
     messages: list[str],
+    skeleton: BlockoutSkeleton | None = None,
 ) -> list[RecipePart]:
     parts: list[RecipePart] = []
     lms = report.landmarks_xyz
@@ -824,6 +829,7 @@ def _build_shoulder_bridges(
         if front_lm is not None and front_lm.y_m is not None and math.isfinite(float(front_lm.y_m))
         else None
     )
+    skel_joints = _joints_map(skeleton)
 
     for side, lm_id, ua_hw in (
         ("l", "shoulder_l", ua_hw_l),
@@ -847,8 +853,15 @@ def _build_shoulder_bridges(
             continue
         sx = float(lm.x_m)
         sz = float(lm.z_m)
-        # B12: p0 = axial mid; p1 = joint y if finite else axial mid
-        sy = float(lm.y_m) if lm.y_m is not None and math.isfinite(float(lm.y_m)) else y_torso
+        # B13: p1 Y prefers skeleton shoulder when finite; else landmark; else y_torso.
+        # B12: p0 stays axial mid (y_torso).
+        sk_sh = skel_joints.get(lm_id)
+        if sk_sh is not None and sk_sh.y_m is not None and math.isfinite(float(sk_sh.y_m)):
+            sy = float(sk_sh.y_m)
+        elif lm.y_m is not None and math.isfinite(float(lm.y_m)):
+            sy = float(lm.y_m)
+        else:
+            sy = y_torso
         # Torso side attachment at shoulder_hw * 0.85 toward shoulder
         torso_x = (
             math.copysign(m.shoulder_hw * 0.85, sx)
@@ -1098,6 +1111,7 @@ def _build_deltoids(
     crotch_z: float | None,
     *,
     michelin_cap_frac_h: float | None = None,
+    skeleton: BlockoutSkeleton | None = None,
 ) -> list[RecipePart]:
     parts: list[RecipePart] = []
     if m.shoulder_hw is None:
@@ -1107,6 +1121,20 @@ def _build_deltoids(
     clamp_max = _michelin_clamp_max(m, michelin_cap_frac_h=michelin_cap_frac_h)
     if clamp_max is None:
         clamp_max = _MICHELIN_FRAC * m.shoulder_hw
+    skel_joints = _joints_map(skeleton)
+    half_depth = _chest_half_depth_for_arm_prior(lms, report.depth_bands)
+    front_lm = lms.get("chest_front")
+    chest_front_y = (
+        float(front_lm.y_m)
+        if front_lm is not None and front_lm.y_m is not None and math.isfinite(float(front_lm.y_m))
+        else None
+    )
+    mid_lm = lms.get("chest_mid")
+    chest_mid_y = (
+        float(mid_lm.y_m)
+        if mid_lm is not None and mid_lm.y_m is not None and math.isfinite(float(mid_lm.y_m))
+        else None
+    )
     for side, lm_id, band in (
         ("l", "shoulder_l", "upper_arm_l"),
         ("r", "shoulder_r", "upper_arm_r"),
@@ -1127,10 +1155,24 @@ def _build_deltoids(
             messages.append(
                 f"deltoid radius {measured:.3f}m clamped to {clamped:.3f}m (Michelin guard)"
             )
-        y = float(lm.y_m) if lm.y_m is not None else 0.0
-        placement: Literal["full3d", "front_plane"] = (
-            "full3d" if lm.y_m is not None else "front_plane"
-        )
+        # 0051 B8: skeleton shoulder Y → landmark Y → arm forward prior.
+        sk_sh = skel_joints.get(lm_id)
+        if sk_sh is not None and sk_sh.y_m is not None and math.isfinite(float(sk_sh.y_m)):
+            y = float(sk_sh.y_m)
+            placement: Literal["full3d", "front_plane"] = "full3d"
+        elif lm.y_m is not None and math.isfinite(float(lm.y_m)):
+            y = float(lm.y_m)
+            placement = "full3d"
+        else:
+            y_plane = float(chest_mid_y) if chest_mid_y is not None else 0.0
+            y = _arm_forward_y(
+                y_plane,
+                half_depth=half_depth,
+                height_m=m.height_m,
+                chest_front_y=chest_front_y,
+            )
+            placement = "full3d"
+            messages.append(f"RECIPE_deltoid_soft_{side}: y_m from arm forward prior")
         center = [float(lm.x_m), y, float(lm.z_m)]
         _apply_delt_outer_x_bias(center, side, clamped, messages)
         name = f"RECIPE_deltoid_soft_{side}"
@@ -1808,14 +1850,47 @@ def _build_limbs(
                 continue
             y0_null = lm0.y_m is None
             y1_null = lm1.y_m is None
+            is_arm = band_id in _ARM_SKELETON_BANDS
             if y0_null or y1_null:
-                ys = [y for y in (lm0.y_m, lm1.y_m) if y is not None]
-                y_plane = (sum(ys) / len(ys)) if ys else 0.0
-                p0 = [float(lm0.x_m), y_plane, float(lm0.z_m)]
-                p1 = [float(lm1.x_m), y_plane, float(lm1.z_m)]
-                placement = "front_plane"
-                if band_id not in ("calf_l", "calf_r"):
-                    messages.append(f"{band_id}: y_m null — front_plane limb capsule")
+                # 0051 B7: arm both-null → arm forward prior (full3d); mixed → mean/front_plane.
+                # Thigh/calf unchanged: any-null → front_plane.
+                if is_arm and y0_null and y1_null:
+                    half_depth = _chest_half_depth_for_arm_prior(lms, report.depth_bands)
+                    front_lm = lms.get("chest_front")
+                    chest_front_y = (
+                        float(front_lm.y_m)
+                        if front_lm is not None
+                        and front_lm.y_m is not None
+                        and math.isfinite(float(front_lm.y_m))
+                        else None
+                    )
+                    mid_lm = lms.get("chest_mid")
+                    chest_mid_y = (
+                        float(mid_lm.y_m)
+                        if mid_lm is not None
+                        and mid_lm.y_m is not None
+                        and math.isfinite(float(mid_lm.y_m))
+                        else None
+                    )
+                    y_plane = float(chest_mid_y) if chest_mid_y is not None else 0.0
+                    y_prior = _arm_forward_y(
+                        y_plane,
+                        half_depth=half_depth,
+                        height_m=report.height_m,
+                        chest_front_y=chest_front_y,
+                    )
+                    p0 = [float(lm0.x_m), y_prior, float(lm0.z_m)]
+                    p1 = [float(lm1.x_m), y_prior, float(lm1.z_m)]
+                    placement = "full3d"
+                    messages.append(f"{band_id}: y_m null — arm forward prior")
+                else:
+                    ys = [y for y in (lm0.y_m, lm1.y_m) if y is not None]
+                    y_plane = (sum(ys) / len(ys)) if ys else 0.0
+                    p0 = [float(lm0.x_m), y_plane, float(lm0.z_m)]
+                    p1 = [float(lm1.x_m), y_plane, float(lm1.z_m)]
+                    placement = "front_plane"
+                    if band_id not in ("calf_l", "calf_r"):
+                        messages.append(f"{band_id}: y_m null — front_plane limb capsule")
             else:
                 p0 = [float(lm0.x_m), float(lm0.y_m), float(lm0.z_m)]  # type: ignore[arg-type]
                 p1 = [float(lm1.x_m), float(lm1.y_m), float(lm1.z_m)]  # type: ignore[arg-type]
@@ -2729,7 +2804,7 @@ def build_blockout_recipe(
     _apply_neck_column_priors(parts, messages)
 
     # 5-6 shoulder bridges
-    for p in _build_shoulder_bridges(report, resolved, messages):
+    for p in _build_shoulder_bridges(report, resolved, messages, skeleton=skeleton):
         _append_part(parts, p)
 
     # 7-8 hip bridges
@@ -2738,7 +2813,7 @@ def build_blockout_recipe(
 
     # 9-10 deltoids (skip when profile owns delts)
     if "deltoid_soft" not in skip_roles:
-        for p in _build_deltoids(report, resolved, messages, crotch_z):
+        for p in _build_deltoids(report, resolved, messages, crotch_z, skeleton=skeleton):
             _append_part(parts, p)
     else:
         messages.append("base deltoid_soft skipped (profile owns delts)")
