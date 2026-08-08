@@ -1473,8 +1473,13 @@ def test_recipe__glute_oval_and_two_spheres_y_pos() -> None:
     for g in spheres:
         assert g.center is not None
         assert g.center[1] > 0
-        assert g.rx_m == pytest.approx(g.ry_m)
-        assert g.ry_m == pytest.approx(g.rz_m)
+        # 0052 seat may grow ry past equal-axis spheres (anisotropy bound ry/rx ≤ 2.0)
+        assert g.rx_m is not None and g.ry_m is not None and g.rz_m is not None
+        assert float(g.ry_m) / float(g.rx_m) <= 2.0 + 1e-9
+    # Dual L/R equality (same report → same seat floors)
+    assert spheres[0].ry_m == pytest.approx(float(spheres[1].ry_m or 0.0))
+    assert spheres[0].center is not None and spheres[1].center is not None
+    assert spheres[0].center[1] == pytest.approx(spheres[1].center[1])
     assert any("glute_mode=two_spheres" in m for m in pkg_sp.messages)
     assert any("glute_mode=oval" in m for m in pkg_oval.messages)
 

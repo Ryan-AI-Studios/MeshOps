@@ -22,6 +22,7 @@ can pass; B6 distal/cyl p1 Y sync to ank_foot after feet emit.
 0049: breast_soft center Z hang drop (before 0033 tilt); B1 floor 0.55*rz; schema stay 1.4.0.
 0050: neck column forward tilt (p0/p1) + head/face co-move + radius ceiling vs head.rx;
 schema stay 1.4.0.
+0052: glute_soft seat mass (ry floor + rear +Y) before 0036 outer align; schema stay 1.4.0.
 """
 
 from __future__ import annotations
@@ -118,6 +119,13 @@ _NECK_HEAD_ATTACHED_TOKENS: Final[tuple[str, ...]] = (
     "hair_mass",
     "neck_head_fuse",
 )
+# 0052 B1-B13: glute_soft seat depth (ry) + rear projection (+Y) before 0036 outer.
+GLUTE_SEAT_RY_FRAC_HALF_DEPTH: Final[float] = 0.90
+GLUTE_SEAT_RY_FROM_RX: Final[float] = 1.05
+GLUTE_SEAT_BEYOND_REF_Y: Final[float] = 0.020  # meters beyond pelvis/hip ref rear
+GLUTE_SEAT_RY_CAP_FRAC_H: Final[float] = 0.10
+GLUTE_SEAT_Y_CAP_FRAC_H: Final[float] = 0.15
+GLUTE_SEAT_RY_ANISOTROPY_MAX: Final[float] = 2.0  # ry/rx after seat
 
 _GIRAFFE_FRAC: Final[float] = 0.20
 _GIRAFFE_ABS_NO_H: Final[float] = 0.35
@@ -2936,6 +2944,9 @@ def build_blockout_recipe(
     # 0046 B9: thigh adduction after limbs+knee+calf exist; before glute outer + join_ready
     _apply_thigh_adduction(parts, template_applied, messages)
 
+    # 0052: glute seat ry floor + rear +Y (before 0036 outer so rx stays outer-correct)
+    _apply_glute_seat_mass(parts, report, resolved, messages)
+
     # 0036: glute outer tip X = hip_bridge outer X (same formula as constraints opt clamp)
     _align_glute_outer_to_hip_bridge(parts, messages)
 
@@ -3440,6 +3451,279 @@ def _apply_thigh_adduction(
         if capped:
             msg += " (capped from ideal)"
         messages.append(msg)
+
+
+def _is_glute_soft_ellipsoid(part: RecipePart) -> bool:
+    """0052 B5: seat pass gate — role glute_soft + ellipsoid + center len ≥ 3."""
+    return (
+        part.role == "glute_soft"
+        and part.kind == "ellipsoid"
+        and part.center is not None
+        and len(part.center) >= 3
+    )
+
+
+def _glute_or_hip_half_depth_m(report: ProportionReport) -> float | None:
+    """0052 local half soft-depth ladder (do not import body_template._soft_half_depth_m).
+
+    1. depth_bands ``glute`` then ``hip`` → depth_m/2 when finite > 0
+    2. measured landmark half-extent (hip_front/back or glute peak pair) when both finite
+    3. else None (B2-only path)
+    """
+    for band_id in ("glute", "hip"):
+        band = _depth_band(report, band_id)
+        if band is None:
+            continue
+        depth = _finite_m(getattr(band, "depth_m", None))
+        if depth is not None and depth > 0.0:
+            return float(depth) / 2.0
+
+    lms = report.landmarks_xyz
+
+    def _lm_y(lm_id: str) -> float | None:
+        lm = lms.get(lm_id)
+        if lm is None:
+            return None
+        return _finite_m(lm.y_m)
+
+    # Prefer hip_front / hip_back body-frame Y half-extent.
+    y_f = _lm_y("hip_front")
+    y_b = _lm_y("hip_back")
+    if y_f is not None and y_b is not None:
+        half = abs(float(y_b) - float(y_f)) / 2.0
+        if half > 0.0:
+            return half
+    # Named glute front/back pairs when present (product may not emit these).
+    for front_id, back_id in (
+        ("glute_front", "glute_back"),
+        ("glute_peak_front", "glute_peak_back"),
+    ):
+        y_front = _lm_y(front_id)
+        y_back = _lm_y(back_id)
+        if y_front is not None and y_back is not None:
+            half = abs(float(y_back) - float(y_front)) / 2.0
+            if half > 0.0:
+                return half
+    return None
+
+
+def _part_rear_y_m(part: RecipePart) -> float | None:
+    """Whole-part rear tip Y = center_y + depth half-extent when both finite.
+
+    Prefer ``ry_m`` (ellipsoid). Fall back to ``half_depth_m`` for trap_box /
+    box pelvis (0053-ready; AI1 Blind Spot 1) so RECIPE_pelvis_bucket contributes
+    to B3 ref without needing a role-ellipsoid sibling.
+    """
+    if part.center is None or len(part.center) < 3:
+        return None
+    cy = _finite_m(float(part.center[1]))
+    if cy is None:
+        return None
+    depth_extent = _finite_m(part.ry_m)
+    if depth_extent is None:
+        depth_extent = _finite_m(part.half_depth_m)
+    if depth_extent is None:
+        return None
+    return float(cy) + float(depth_extent)
+
+
+def _pelvis_ref_rear_y(parts: list[RecipePart]) -> tuple[float | None, str | None]:
+    """0052 B3 ref rear ladder: max rear over pelvis oval/bucket/role/hip oval.
+
+    Returns (ref_rear_y, short_name) for messaging. whole-part rear, not z-slice.
+    """
+    candidates: list[tuple[float, str]] = []
+
+    def _add_named(name: str, short: str) -> None:
+        for p in parts:
+            if p.name != name:
+                continue
+            rear = _part_rear_y_m(p)
+            if rear is not None:
+                candidates.append((float(rear), short))
+            return
+
+    _add_named("RECIPE_pelvis_oval", "pelvis_oval")
+    _add_named("RECIPE_pelvis_bucket", "pelvis_bucket")
+    for p in parts:
+        if p.role != "pelvis":
+            continue
+        rear = _part_rear_y_m(p)
+        if rear is not None:
+            candidates.append((float(rear), "pelvis"))
+    _add_named("RECIPE_torso_oval_hip", "torso_oval_hip")
+
+    if not candidates:
+        return None, None
+    best = max(candidates, key=lambda t: t[0])
+    return best[0], best[1]
+
+
+def _apply_glute_seat_mass(
+    parts: list[RecipePart],
+    report: ProportionReport,
+    m: _ResolvedMetrics,
+    messages: list[str],
+) -> None:
+    """0052: floor glute_soft seat ry + push +Y so rear tip clears pelvis/hip ref.
+
+    Mutates *parts* in place. Order: B1/B2 floors → B7 ry cap → B13 anisotropy →
+    B3 beyond-ref Y → B12 y cap → B4 dual lock. Quiet when no glute_soft candidates.
+    Never invents ry=0 when floors are missing (B5 skip). Leaves rx unchanged (B8).
+    """
+    idxs = [i for i, p in enumerate(parts) if _is_glute_soft_ellipsoid(p)]
+    if not idxs:
+        return  # P3-7 quiet — no spam on glute-less builds
+
+    half = _glute_or_hip_half_depth_m(report)
+    ref_rear, ref_name = _pelvis_ref_rear_y(parts)
+    h_raw = m.height_m
+    h_f: float | None = None
+    if h_raw is not None:
+        try:
+            h_cand = float(h_raw)
+        except (TypeError, ValueError):
+            h_cand = float("nan")
+        if math.isfinite(h_cand) and h_cand > 0.0:
+            h_f = h_cand
+
+    applied_depth_floor = False
+    applied_rx_floor = False
+    any_seated = False
+    anisotropy_capped = False
+    ry_stature_capped = False
+    y_capped = False
+    beyond_applied = False
+    beyond_dy = 0.0
+    target_rear_msg: float | None = None
+    seated_idxs: list[int] = []
+
+    for i in idxs:
+        p = parts[i]
+        ry_opt: float | None = None
+        if p.ry_m is not None:
+            try:
+                ry_cand = float(p.ry_m)
+            except (TypeError, ValueError):
+                ry_cand = float("nan")
+            if math.isfinite(ry_cand):
+                ry_opt = ry_cand
+        rx: float | None = None
+        if p.rx_m is not None:
+            try:
+                rx_cand = float(p.rx_m)
+            except (TypeError, ValueError):
+                rx_cand = float("nan")
+            if math.isfinite(rx_cand) and rx_cand > 0.0:
+                rx = rx_cand
+
+        floored = False
+        ry_work = ry_opt if ry_opt is not None else 0.0
+        if half is not None and half > 0.0:
+            floor_d = GLUTE_SEAT_RY_FRAC_HALF_DEPTH * float(half)
+            ry_work = max(ry_work, floor_d)
+            floored = True
+            applied_depth_floor = True
+        if rx is not None:
+            floor_rx = float(rx) * GLUTE_SEAT_RY_FROM_RX
+            ry_work = max(ry_work, floor_rx)
+            floored = True
+            applied_rx_floor = True
+
+        if not floored or ry_work <= 0.0:
+            messages.append(f"glute_seat: skip {p.name} (no ry floor source)")
+            continue
+
+        ry_final = float(ry_work)
+        if h_f is not None:
+            ry_cap = GLUTE_SEAT_RY_CAP_FRAC_H * h_f
+            if ry_final > ry_cap:
+                ry_final = ry_cap
+                ry_stature_capped = True
+
+        if rx is not None and ry_final / float(rx) > GLUTE_SEAT_RY_ANISOTROPY_MAX:
+            ry_final = GLUTE_SEAT_RY_ANISOTROPY_MAX * float(rx)
+            anisotropy_capped = True
+
+        p.ry_m = ry_final
+
+        # B3: rear tip beyond ref (+Y only; never face-ward).
+        center = p.center
+        if center is None or len(center) < 3:
+            continue
+        cy = float(center[1])
+        if ref_rear is not None:
+            target_rear = float(ref_rear) + GLUTE_SEAT_BEYOND_REF_Y
+            need_y = target_rear - ry_final
+            if need_y > cy:
+                beyond_dy = max(beyond_dy, need_y - cy)
+                cy = need_y
+                beyond_applied = True
+                target_rear_msg = target_rear
+
+        # B12: center_y soft stature cap.
+        if h_f is not None and cy > GLUTE_SEAT_Y_CAP_FRAC_H * h_f:
+            cy = GLUTE_SEAT_Y_CAP_FRAC_H * h_f
+            y_capped = True
+
+        p.center = [float(center[0]), float(cy), float(center[2])]
+        any_seated = True
+        seated_idxs.append(i)
+
+    if applied_depth_floor and half is not None:
+        floor_d = GLUTE_SEAT_RY_FRAC_HALF_DEPTH * float(half)
+        messages.append(
+            f"glute_seat: ry_floor_depth={floor_d:.4f} "
+            f"(half={float(half):.4f} x {GLUTE_SEAT_RY_FRAC_HALF_DEPTH:.2f}) applied l/r"
+        )
+    elif applied_rx_floor and half is None:
+        messages.append("glute_seat: depth missing; ry_from_rx only")
+
+    if ry_stature_capped and h_f is not None:
+        ry_cap_m = GLUTE_SEAT_RY_CAP_FRAC_H * h_f
+        messages.append(
+            f"glute_seat: ry_cap ry_m<={ry_cap_m:.4f} ({GLUTE_SEAT_RY_CAP_FRAC_H:.2f}xH)"
+        )
+
+    if anisotropy_capped:
+        messages.append("glute_seat: ry_anisotropy_cap")
+
+    if beyond_applied and ref_rear is not None and target_rear_msg is not None:
+        messages.append(
+            f"glute_seat: beyond_ref dy={beyond_dy:+.4f} "
+            f"target_rear={target_rear_msg:.4f} ref={ref_name} "
+            f"(whole-part max; not z-slice)"
+        )
+    elif ref_rear is None and any_seated:
+        messages.append("glute_seat: beyond_ref skipped (no pelvis/hip ref)")
+
+    if y_capped and h_f is not None:
+        y_cap = GLUTE_SEAT_Y_CAP_FRAC_H * h_f
+        messages.append(
+            f"glute_seat: y_cap center_y<={y_cap:.4f} ({GLUTE_SEAT_Y_CAP_FRAC_H:.2f}xH)"
+        )
+
+    # B4 dual lock: same ry + center_y on all seated L/R (max of pair).
+    if len(seated_idxs) >= 2:
+        rys: list[float] = []
+        cys: list[float] = []
+        for i in seated_idxs:
+            sp = parts[i]
+            if sp.ry_m is not None:
+                rys.append(float(sp.ry_m))
+            sc = sp.center
+            if sc is not None and len(sc) >= 3:
+                cys.append(float(sc[1]))
+        if rys and cys:
+            lock_ry = max(rys)
+            lock_y = max(cys)
+            for i in seated_idxs:
+                p = parts[i]
+                p.ry_m = lock_ry
+                sc = p.center
+                if sc is not None and len(sc) >= 3:
+                    p.center = [float(sc[0]), lock_y, float(sc[2])]
+            messages.append(f"glute_seat: dual lock ry={lock_ry:.4f} y={lock_y:.4f}")
 
 
 def _align_glute_outer_to_hip_bridge(
@@ -4296,6 +4580,12 @@ __all__ = [
     "DELT_OUTER_X_FRAC",
     "DELT_RY_FRAC",
     "DELT_RZ_FRAC",
+    "GLUTE_SEAT_BEYOND_REF_Y",
+    "GLUTE_SEAT_RY_ANISOTROPY_MAX",
+    "GLUTE_SEAT_RY_CAP_FRAC_H",
+    "GLUTE_SEAT_RY_FRAC_HALF_DEPTH",
+    "GLUTE_SEAT_RY_FROM_RX",
+    "GLUTE_SEAT_Y_CAP_FRAC_H",
     "JSON_BASENAME",
     "KNEE_SOFT_FRAC",
     "KNEE_SOFT_MIN_FRAC_H",
@@ -4314,10 +4604,13 @@ __all__ = [
     "BlockoutRecipePackage",
     "RecipeMetrics",
     "RecipePart",
+    "_apply_glute_seat_mass",
     "_apply_join_ready_overlaps",
     "_apply_neck_column_priors",
     "_apply_thigh_adduction",
+    "_glute_or_hip_half_depth_m",
     "_midpoint_of_joints",
+    "_pelvis_ref_rear_y",
     "build_blockout_recipe",
     "emit_bpy_script",
     "load_blockout_recipe",
