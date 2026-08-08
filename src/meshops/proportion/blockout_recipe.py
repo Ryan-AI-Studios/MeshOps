@@ -19,6 +19,7 @@ can pass; B6 distal/cyl p1 Y sync to ank_foot after feet emit.
 0039: opt-in --join-ready socket overlaps (shoulder/hip/neck/ankle); mutually exclusive with
 --nofuse; setup re-emit via run_blockout_emit_setup; schema stay 1.4.0 + join_ready bool.
 0047: torso oval ry depth taper (anti-snowman chest/waist/hip); schema stay 1.4.0.
+0049: breast_soft center Z hang drop (before 0033 tilt); B1 floor 0.55*rz; schema stay 1.4.0.
 """
 
 from __future__ import annotations
@@ -94,6 +95,11 @@ TORSO_OVAL_RY_WAIST_FRAC: Final[float] = 0.72
 TORSO_OVAL_RY_HIP_FRAC: Final[float] = 0.80  # ≠ pelvis hardcoded 0.85
 TORSO_OVAL_RZ_SPAN_FRAC: Final[float] = 0.22
 TORSO_OVAL_RZ_FLOOR_M: Final[float] = 0.025
+# 0049 B1: breast_soft vertical hang floor (center Z drop as fraction of rz).
+BREAST_HANG_Z_DROP_FRAC_RZ: Final[float] = 0.55
+# 0049 D2: unit min hang drop vs pre-anchor (softer than B1; waist soft-clamp threshold).
+BREAST_HANG_Z_MIN_DROP_FRAC_RZ: Final[float] = 0.40
+
 _GIRAFFE_FRAC: Final[float] = 0.20
 _GIRAFFE_ABS_NO_H: Final[float] = 0.35
 _MICHELIN_FRAC: Final[float] = 0.45
@@ -2801,6 +2807,9 @@ def build_blockout_recipe(
             ):
                 messages.append("trap_soft L/R coincident — check neck_base/shoulder joints")
 
+    # 0049 B4: drop breast_soft center Z for readable hang (before 0033 tilt)
+    _apply_breast_hang_z(parts, report, resolved, messages)
+
     # 0033 B3/B8: attach breast hang tilt to breast_soft ellipsoids after all emitters
     _apply_breast_tilt(parts, tilt_val=tilt_val, messages=messages)
 
@@ -3260,6 +3269,176 @@ def _align_glute_outer_to_hip_bridge(
         if missing_half:
             # Emit even when some siblings aligned (observability; product paths always set rx)
             messages.append(f"glute_{side}: outer X align skipped (no glute half-extent)")
+
+
+def _resolve_breast_lower_z_m(report: ProportionReport) -> float | None:
+    """0049 B2: measured lower-pole Z — prefer breast_lower, else L/R mean or single."""
+    lms = report.landmarks_xyz
+    bl = lms.get("breast_lower")
+    if bl is not None and bl.z_m is not None:
+        z = float(bl.z_m)
+        if math.isfinite(z):
+            return z
+    zs: list[float] = []
+    for key in ("breast_lower_l", "breast_lower_r"):
+        lm = lms.get(key)
+        if lm is not None and lm.z_m is not None:
+            z = float(lm.z_m)
+            if math.isfinite(z):
+                zs.append(z)
+    if not zs:
+        return None
+    return sum(zs) / float(len(zs))
+
+
+def _chest_ref_z_for_hang(parts: list[RecipePart], m: _ResolvedMetrics) -> float | None:
+    """0049 B6: prefer RECIPE_torso_oval_chest.center[2]; else m.chest_z."""
+    for p in parts:
+        if p.name == "RECIPE_torso_oval_chest" and p.center is not None and len(p.center) >= 3:
+            z = float(p.center[2])
+            if math.isfinite(z):
+                return z
+    if m.chest_z is not None:
+        z = float(m.chest_z)
+        if math.isfinite(z):
+            return z
+    return None
+
+
+def _crotch_z_quiet(report: ProportionReport, height_m: float | None) -> float | None:
+    """Crotch Z for breast hang floor without re-emitting fallback messages."""
+    cp = report.landmarks_xyz.get("crotch_pubic")
+    if cp is not None and cp.z_m is not None:
+        z = float(cp.z_m)
+        if math.isfinite(z):
+            return z
+    if height_m is not None:
+        h = float(height_m)
+        if math.isfinite(h) and h > 0.0:
+            return CROTCH_Z_FRAC_FALLBACK * h
+    return None
+
+
+def _apply_breast_hang_z(
+    parts: list[RecipePart],
+    report: ProportionReport,
+    m: _ResolvedMetrics,
+    messages: list[str],
+) -> None:
+    """0049: drop breast_soft center Z for readable lower-pole hang (before 0033 tilt).
+
+    Mutates *parts* in place. B3 gate: role breast_soft + ellipsoid + finite rz>0 only.
+    Never pec_soft. B1 floor 0.55*rz; B2 measured lower deepen-only; dual L/R same Z.
+    """
+    eps = _NEAR_ZERO_LEN
+    idxs = [
+        i
+        for i, p in enumerate(parts)
+        if p.role == "breast_soft"
+        and p.kind == "ellipsoid"
+        and p.center is not None
+        and len(p.center) >= 3
+        and p.rz_m is not None
+        and math.isfinite(float(p.rz_m))
+        and float(p.rz_m) > 0.0
+    ]
+    if not idxs:
+        messages.append("breast_hang_z_applied: false")
+        return
+
+    pre_zs: list[float] = []
+    rzs: list[float] = []
+    for i in idxs:
+        p = parts[i]
+        c = p.center
+        rz = p.rz_m
+        assert c is not None and rz is not None
+        pre_zs.append(float(c[2]))
+        rzs.append(float(rz))
+    anchor_z = sum(pre_zs) / float(len(pre_zs))
+    mean_rz = sum(rzs) / float(len(rzs))
+    b1_drop_m = BREAST_HANG_Z_DROP_FRAC_RZ * mean_rz
+    b1_center_z = anchor_z - b1_drop_m
+
+    chest_ref_z = _chest_ref_z_for_hang(parts, m)
+
+    source = "frac_rz"
+    reason: str | None = None
+    candidate_z = b1_center_z
+
+    z_lower = _resolve_breast_lower_z_m(report)
+    if z_lower is not None:
+        in_band = True
+        h = m.height_m
+        if chest_ref_z is not None and h is not None and math.isfinite(float(h)) and float(h) > 0.0:
+            lo = chest_ref_z - 0.12 * float(h)
+            hi = chest_ref_z + 0.02 * float(h)
+            if not (lo <= z_lower <= hi):
+                in_band = False
+                reason = "lower_out_of_band"
+        if in_band:
+            measured_center_z = z_lower + mean_rz
+            if measured_center_z <= b1_center_z + eps:
+                candidate_z = measured_center_z
+                source = "breast_lower"
+            else:
+                candidate_z = b1_center_z
+                source = "frac_rz"
+                reason = "measured_shallow_using_frac"
+
+    # B5 clamps: B1 floor re-assert + no raise vs pre, then waist/crotch floors.
+    center_z = min(candidate_z, b1_center_z)
+    pre_min = min(pre_zs)
+    center_z = min(center_z, pre_min)
+
+    waist: RecipePart | None = None
+    for p in parts:
+        if (
+            p.name == "RECIPE_torso_oval_waist"
+            and p.center is not None
+            and len(p.center) >= 3
+            and p.rz_m is not None
+            and math.isfinite(float(p.rz_m))
+        ):
+            waist = p
+            break
+    if waist is not None and waist.center is not None:
+        # Axis-aligned lower pole ≥ waist center: center_z - rz ≥ waist.z
+        waist_floor = float(waist.center[2]) + mean_rz
+        if center_z < waist_floor - eps:
+            raised = min(waist_floor, pre_min)
+            d2_min = BREAST_HANG_Z_MIN_DROP_FRAC_RZ * mean_rz
+            # Preserve prior B2 reason (source ladder more informative than waist clamp).
+            if reason is None:
+                reason = (
+                    "clamped_floor_soft" if (anchor_z - raised) + eps < d2_min else "clamped_floor"
+                )
+            center_z = raised
+
+    crotch_z = _crotch_z_quiet(report, m.height_m)
+    if crotch_z is not None and center_z < crotch_z - eps:
+        # Preserve prior reason; emit crotch only when no earlier ladder/clamp reason.
+        if reason is None:
+            reason = "clamped_crotch"
+        center_z = min(max(center_z, crotch_z), pre_min)
+
+    # Dual lock: identical final Z on all gated breast_soft parts.
+    final_z = float(center_z)
+    for i in idxs:
+        p = parts[i]
+        assert p.center is not None
+        new_center = [float(p.center[0]), float(p.center[1]), final_z]
+        parts[i] = p.model_copy(update={"center": new_center})
+
+    drop_m = anchor_z - final_z
+    messages.append(f"breast_hang_z_drop_m={drop_m}")
+    messages.append("breast_hang_z_applied: true")
+    messages.append(f"breast_hang_z_source={source}")
+    messages.append(f"breast_hang_z_anchor_m={anchor_z}")
+    if chest_ref_z is not None:
+        messages.append(f"breast_hang_z_chest_ref_m={chest_ref_z}")
+    if reason is not None:
+        messages.append(f"breast_hang_z_reason={reason}")
 
 
 def _apply_breast_tilt(
