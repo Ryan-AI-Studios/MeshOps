@@ -76,6 +76,17 @@ _LIMB_DIST_SOFT_BANDS: Final[frozenset[str]] = frozenset(
 # 0045 B5: knee soft joint mass.
 KNEE_SOFT_FRAC: Final[float] = 0.55
 KNEE_SOFT_MIN_FRAC_H: Final[float] = 0.018
+# 0046 B1: deltoid scale vs upper_arm half-width (profile + base).
+DELT_ARM_RADIUS_SCALE: Final[float] = 1.35
+DELT_RY_FRAC: Final[float] = 0.90
+DELT_RZ_FRAC: Final[float] = 0.85
+DELT_OUTER_X_FRAC: Final[float] = 0.25  # * rx, sign by side (r:+, l:-); skip if crosses midline
+# 0046 B6: thigh proximal soft at hip (no dist_soft - 0045 B13).
+THIGH_PROX_SOFT_SCALE: Final[float] = 1.18
+_THIGH_PROX_R_FLOOR: Final[float] = 1e-4
+# 0046 B9: template thigh_tilt adduction (medial-shift cap + knee-cluster co-move).
+THIGH_TILT_DEG_CAP: Final[float] = 15.0
+THIGH_ADDUCTION_MAX_MEDIAL_M: Final[float] = 0.030
 _GIRAFFE_FRAC: Final[float] = 0.20
 _GIRAFFE_ABS_NO_H: Final[float] = 0.35
 _MICHELIN_FRAC: Final[float] = 0.45
@@ -1032,6 +1043,26 @@ def _resolve_parent_joint_id(
     return None
 
 
+def _apply_delt_outer_x_bias(
+    center: list[float],
+    side: str,
+    rx: float,
+    messages: list[str] | None = None,
+) -> None:
+    """0046 B4: modest outer X bias on deltoid center; skip if would cross midline."""
+    if side not in ("l", "r") or rx <= 0.0:
+        return
+    sign = 1.0 if side == "r" else -1.0
+    old_x = float(center[0])
+    new_x = old_x + sign * DELT_OUTER_X_FRAC * float(rx)
+    # Cross midline if sign of x flips (or lands exactly on 0 from non-zero).
+    if old_x != 0.0 and new_x * old_x <= 0.0:
+        if messages is not None:
+            messages.append(f"deltoid_{side}: outer_x bias skipped (midline cross)")
+        return
+    center[0] = new_x
+
+
 def _build_deltoids(
     report: ProportionReport,
     m: _ResolvedMetrics,
@@ -1060,8 +1091,8 @@ def _build_deltoids(
         base_r = _half_width_from_diameter(diam) if diam else None
         if base_r is None:
             base_r = 0.08 * m.shoulder_hw if m.shoulder_hw else 0.04
-        # Soft deltoid slightly larger than arm radius
-        measured = base_r * 1.15
+        # 0046 B2: soft deltoid larger than arm half-width (DELT scale).
+        measured = base_r * DELT_ARM_RADIUS_SCALE
         clamped = measured
         if measured >= clamp_max:
             clamped = clamp_max
@@ -1073,6 +1104,7 @@ def _build_deltoids(
             "full3d" if lm.y_m is not None else "front_plane"
         )
         center = [float(lm.x_m), y, float(lm.z_m)]
+        _apply_delt_outer_x_bias(center, side, clamped, messages)
         name = f"RECIPE_deltoid_soft_{side}"
         if _midline_blocked(center, "deltoid_soft", crotch_z):
             messages.append(f"midline below crotch skipped: {name}")
@@ -1084,8 +1116,8 @@ def _build_deltoids(
                 kind="ellipsoid",
                 center=center,
                 rx_m=clamped,
-                ry_m=clamped * 0.9,
-                rz_m=clamped * 0.85,
+                ry_m=clamped * DELT_RY_FRAC,
+                rz_m=clamped * DELT_RZ_FRAC,
                 placement=placement,
                 label=name,
             )
@@ -1776,6 +1808,25 @@ def _build_limbs(
                 label=name,
             )
         )
+        # 0046 B6: thigh proximal soft at hip only (no dist_soft — 0045 B13).
+        if band_id in ("thigh_l", "thigh_r"):
+            side = "l" if band_id.endswith("_l") else "r"
+            soft_r = max(float(radius) * THIGH_PROX_SOFT_SCALE, _THIGH_PROX_R_FLOOR)
+            soft_name = f"RECIPE_prox_soft_thigh_{side}"
+            parts.append(
+                RecipePart(
+                    name=soft_name,
+                    role="limb_segment",
+                    kind="ellipsoid",
+                    center=[float(p0[0]), float(p0[1]), float(p0[2])],
+                    rx_m=soft_r,
+                    ry_m=soft_r,
+                    rz_m=soft_r,
+                    placement=placement,
+                    label=soft_name,
+                )
+            )
+            messages.append(f"thigh_{side}: prox_soft r={soft_r:.4f}")
         # 0045 B3-B4: arm distal soft only (not thigh — P2-1 / B13).
         if band_id in _LIMB_DIST_SOFT_BANDS:
             soft_r = max(float(radius) * LIMB_DISTAL_SOFT_SCALE, 1e-4)
@@ -1969,12 +2020,51 @@ def _resolve_profile_axes(
     side: str,
     template_applied: TemplateAppliedPackage | None,
     messages: list[str],
+    role: str | None = None,
 ) -> tuple[float, float, float]:
-    """B8 scale precedence → (rx, ry, rz) meters."""
+    """B8 scale precedence -> (rx, ry, rz) meters.
+
+    0046 B3: role==deltoid_soft uses arm diameter as *boost* (DELT scale), not x0.55.
+    Breast/glute diameter multipliers stay on the generic path.
+    """
     h = m.height_m
-    rx: float | None = None
-    ry: float | None = None
-    rz: float | None = None
+
+    # --- 0046 B3: deltoid_soft dedicated scale (primary product path) ---
+    if role == "deltoid_soft":
+        rx: float | None = None
+        if scale.use_diameter:
+            band = scale.use_diameter
+            if band == "upper_arm":
+                band = f"upper_arm_{side}" if side in ("l", "r") else band
+            diam = _resolve_diameter(report.diameters, band)
+            hw = _half_width_from_diameter(diam) if diam else None
+            if hw is not None:
+                rx = float(hw) * DELT_ARM_RADIUS_SCALE
+        if rx is None:
+            rx = _scale_from_frac_h(scale.rx_frac_h, h)
+        if rx is None:
+            rx = 0.04 * (h or 1.7)
+            messages.append(f"profile deltoid rx fallback {rx:.4f}m")
+        ry = float(rx) * DELT_RY_FRAC
+        rz = float(rx) * DELT_RZ_FRAC
+        if scale.michelin_cap_frac_h is not None:
+            cap = _michelin_clamp_max(m, michelin_cap_frac_h=scale.michelin_cap_frac_h)
+            if cap is not None:
+                for axis_name, val in (("rx", rx), ("ry", ry), ("rz", rz)):
+                    if val > cap:
+                        messages.append(
+                            f"profile {axis_name} {val:.3f}m clamped to {cap:.3f}m "
+                            f"(michelin_cap_frac_h={scale.michelin_cap_frac_h})"
+                        )
+                rx = min(float(rx), cap)
+                ry = min(float(ry), cap)
+                rz = min(float(rz), cap)
+        _ = template_applied
+        return float(rx), float(ry), float(rz)
+
+    rx = None
+    ry = None
+    rz = None
 
     # 1) breast_metrics
     if scale.use_breast_metrics:
@@ -2311,6 +2401,7 @@ def _emit_one_profile_part(
             side=side_tag if side_tag in ("l", "r") else "none",
             template_applied=template_applied,
             messages=messages,
+            role=str(role) if role is not None else None,
         )
 
     # Lateral dual gap offsets
@@ -2349,6 +2440,10 @@ def _emit_one_profile_part(
                 if gy is not None:
                     mag = abs(float(gy))
             center[1] = abs(mag) if mag != 0.0 else abs(ry) * 0.35
+
+    # 0046 B4: deltoid outer X bias after placement + axes (uses post-cap rx).
+    if center is not None and role == "deltoid_soft" and side_tag in ("l", "r"):
+        _apply_delt_outer_x_bias(center, side_tag, float(rx), messages)
 
     if (
         center is not None
@@ -2686,6 +2781,9 @@ def build_blockout_recipe(
     # 0033 B3/B8: attach breast hang tilt to breast_soft ellipsoids after all emitters
     _apply_breast_tilt(parts, tilt_val=tilt_val, messages=messages)
 
+    # 0046 B9: thigh adduction after limbs+knee+calf exist; before glute outer + join_ready
+    _apply_thigh_adduction(parts, template_applied, messages)
+
     # 0036: glute outer tip X = hip_bridge outer X (same formula as constraints opt clamp)
     _align_glute_outer_to_hip_bridge(parts, messages)
 
@@ -2980,6 +3078,128 @@ def _apply_join_ready_overlaps(
     ):
         st = class_status.get(class_id, "skipped")
         messages.append(f"join_ready.{class_id}: {st}")
+
+
+def _apply_thigh_adduction(
+    parts: list[RecipePart],
+    template_applied: TemplateAppliedPackage | None,
+    messages: list[str],
+) -> None:
+    """0046 B9: apply template thigh_tilt_deg with medial-shift cap + knee co-move.
+
+    Keep hip p0 fixed; rotate thigh p1 in frontal plane (X-Z) toward midline;
+    co-move knee_soft / calf_a / calf_cyl.p0 by the same world delta. Does not move
+    ankle / foot / calf_b.
+    """
+    if template_applied is None:
+        return
+    raw_tilt = getattr(template_applied.constants, "thigh_tilt_deg", 0.0)
+    try:
+        tilt_f = float(raw_tilt)
+    except (TypeError, ValueError):
+        return
+    if tilt_f != tilt_f or abs(tilt_f) <= 1e-6:  # NaN or ~0
+        return
+    tilt_req = max(-THIGH_TILT_DEG_CAP, min(THIGH_TILT_DEG_CAP, tilt_f))
+    by_name = {p.name: p for p in parts}
+
+    for side in ("l", "r"):
+        thigh = by_name.get(f"RECIPE_limb_thigh_{side}")
+        if (
+            thigh is None
+            or thigh.p0 is None
+            or thigh.p1 is None
+            or len(thigh.p0) < 3
+            or len(thigh.p1) < 3
+        ):
+            continue
+        p0 = [float(thigh.p0[0]), float(thigh.p0[1]), float(thigh.p0[2])]
+        p1_old = [float(thigh.p1[0]), float(thigh.p1[1]), float(thigh.p1[2])]
+        vx = p1_old[0] - p0[0]
+        vy = p1_old[1] - p0[1]
+        vz = p1_old[2] - p0[2]
+        length = math.sqrt(vx * vx + vy * vy + vz * vz)
+        if length <= _NEAR_ZERO_LEN:
+            continue
+
+        # Frontal-plane (X-Z) rotation toward midline: +tilt for left, -tilt for right
+        # so p1.x moves medial (l: +, r: -) when the segment points roughly down.
+        alpha = math.radians(tilt_req if side == "l" else -tilt_req)
+        ca = math.cos(alpha)
+        sa = math.sin(alpha)
+        vx_i = vx * ca - vz * sa
+        vz_i = vx * sa + vz * ca
+        # Preserve full 3d length after XZ rotation.
+        scale_len = length / math.sqrt(vx_i * vx_i + vy * vy + vz_i * vz_i)
+        p1_ideal = [
+            p0[0] + vx_i * scale_len,
+            p0[1] + vy * scale_len,
+            p0[2] + vz_i * scale_len,
+        ]
+        delta = [p1_ideal[i] - p1_old[i] for i in range(3)]
+        # Medial component of delta-x (positive = toward midline).
+        medial_x = -delta[0] if side == "r" else delta[0]
+        capped = False
+        if abs(medial_x) > THIGH_ADDUCTION_MAX_MEDIAL_M + 1e-12 and abs(medial_x) > 1e-12:
+            s = THIGH_ADDUCTION_MAX_MEDIAL_M / abs(medial_x)
+            delta = [d * s for d in delta]
+            capped = True
+        p1_new = [p1_old[i] + delta[i] for i in range(3)]
+        # Reproject onto length sphere about p0 (may slightly adjust medial).
+        nvx = p1_new[0] - p0[0]
+        nvy = p1_new[1] - p0[1]
+        nvz = p1_new[2] - p0[2]
+        nlen = math.sqrt(nvx * nvx + nvy * nvy + nvz * nvz)
+        if nlen > _NEAR_ZERO_LEN:
+            s_len = length / nlen
+            p1_new = [p0[0] + nvx * s_len, p0[1] + nvy * s_len, p0[2] + nvz * s_len]
+        delta_capped = [p1_new[i] - p1_old[i] for i in range(3)]
+        medial_shift = abs(delta_capped[0])
+        # Hard medial cap wins over tiny reproject overshoot (scale full world delta).
+        if medial_shift > THIGH_ADDUCTION_MAX_MEDIAL_M + 1e-12:
+            s = THIGH_ADDUCTION_MAX_MEDIAL_M / medial_shift
+            delta_capped = [d * s for d in delta_capped]
+            p1_new = [p1_old[i] + delta_capped[i] for i in range(3)]
+            # Re-length after scale (length first); if X still exceeds, scale again once.
+            nvx = p1_new[0] - p0[0]
+            nvy = p1_new[1] - p0[1]
+            nvz = p1_new[2] - p0[2]
+            nlen = math.sqrt(nvx * nvx + nvy * nvy + nvz * nvz)
+            if nlen > _NEAR_ZERO_LEN:
+                s_len = length / nlen
+                p1_new = [p0[0] + nvx * s_len, p0[1] + nvy * s_len, p0[2] + nvz * s_len]
+            delta_capped = [p1_new[i] - p1_old[i] for i in range(3)]
+            medial_shift = abs(delta_capped[0])
+            if medial_shift > THIGH_ADDUCTION_MAX_MEDIAL_M + 1e-12:
+                s = THIGH_ADDUCTION_MAX_MEDIAL_M / medial_shift
+                delta_capped = [d * s for d in delta_capped]
+                p1_new = [p1_old[i] + delta_capped[i] for i in range(3)]
+                medial_shift = abs(delta_capped[0])
+            capped = True
+
+        thigh.p1 = p1_new
+
+        # Knee-cluster co-move: same world delta_capped.
+        for soft_name in (f"RECIPE_knee_soft_{side}", f"RECIPE_calf_a_{side}"):
+            soft = by_name.get(soft_name)
+            if soft is not None and soft.center is not None and len(soft.center) >= 3:
+                soft.center = [
+                    float(soft.center[0]) + delta_capped[0],
+                    float(soft.center[1]) + delta_capped[1],
+                    float(soft.center[2]) + delta_capped[2],
+                ]
+        cyl = by_name.get(f"RECIPE_calf_cyl_{side}")
+        if cyl is not None and cyl.p0 is not None and len(cyl.p0) >= 3:
+            cyl.p0 = [
+                float(cyl.p0[0]) + delta_capped[0],
+                float(cyl.p0[1]) + delta_capped[1],
+                float(cyl.p0[2]) + delta_capped[2],
+            ]
+
+        msg = f"thigh_{side}: adduction_tilt_deg={tilt_req:.1f} medial_shift_m={medial_shift:.4f}"
+        if capped:
+            msg += " (capped from ideal)"
+        messages.append(msg)
 
 
 def _align_glute_outer_to_hip_bridge(
@@ -3662,6 +3882,10 @@ __all__ = [
     "CALF_DIST_END_SCALE",
     "CALF_PROX_END_SCALE",
     "CROTCH_Z_FRAC_FALLBACK",
+    "DELT_ARM_RADIUS_SCALE",
+    "DELT_OUTER_X_FRAC",
+    "DELT_RY_FRAC",
+    "DELT_RZ_FRAC",
     "JSON_BASENAME",
     "KNEE_SOFT_FRAC",
     "KNEE_SOFT_MIN_FRAC_H",
@@ -3670,12 +3894,16 @@ __all__ = [
     "RECIPE_HONESTY",
     "RECIPE_ID",
     "RECIPE_SCHEMA_VERSION",
+    "THIGH_ADDUCTION_MAX_MEDIAL_M",
+    "THIGH_PROX_SOFT_SCALE",
+    "THIGH_TILT_DEG_CAP",
     "_BASELINE_ROLES_NO_PROFILE",
     "_MICHELIN_FRAC",
     "BlockoutRecipePackage",
     "RecipeMetrics",
     "RecipePart",
     "_apply_join_ready_overlaps",
+    "_apply_thigh_adduction",
     "_midpoint_of_joints",
     "build_blockout_recipe",
     "emit_bpy_script",

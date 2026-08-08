@@ -180,9 +180,21 @@ def test_classify__t0b_knee_soft_unknown() -> None:
 
 
 def test_classify__t0c_thigh_still_thigh() -> None:
-    """0045 T0c: RECIPE_limb_thigh_* still classifies as thigh."""
+    """0045/0046 T0c: RECIPE_limb_thigh_* still classifies as thigh."""
     assert classify_part_name("RECIPE_limb_thigh_l") == ("thigh", "l")
     assert classify_part_name("RECIPE_limb_thigh_r") == ("thigh", "r")
+
+
+def test_classify__t0_prox_soft_unknown() -> None:
+    """0046 T0: RECIPE_prox_soft_thigh_* → unknown (not thigh)."""
+    assert classify_part_name("RECIPE_prox_soft_thigh_l") == ("unknown", "l")
+    assert classify_part_name("RECIPE_prox_soft_thigh_r") == ("unknown", "r")
+
+
+def test_classify__t0b_0046_dist_knee_still_unknown() -> None:
+    """0046 T0b: dist_soft / knee_soft remain unknown after prox_soft branch."""
+    assert classify_part_name("RECIPE_dist_soft_upper_arm_l") == ("unknown", "l")
+    assert classify_part_name("RECIPE_knee_soft_r") == ("unknown", "r")
 
 
 def test_constants_and_honesty_tokens() -> None:
@@ -1482,6 +1494,183 @@ def test_constraints__t6_calf_slant_and_no_dup_with_limb_mass() -> None:
     assert classify_part_name("RECIPE_knee_soft_l") == ("unknown", "l")
 
 
+def test_constraints__t9_no_dup_calf_slant_with_prox_soft() -> None:
+    """0046 T9: prox_soft + limb mass package → C_no_dup_limb + C_calf_slant pass."""
+    pkg = _pkg(
+        [
+            _part(
+                "RECIPE_calf_a_l",
+                kind="ellipsoid",
+                center=[0.12, 0.0, 0.50],
+                rx_m=0.044,
+                ry_m=0.044,
+                rz_m=0.044,
+            ),
+            _part(
+                "RECIPE_calf_cyl_l",
+                kind="capsule",
+                center=None,
+                rx_m=None,
+                ry_m=None,
+                rz_m=None,
+                radius_m=0.054,
+                p0=[0.12, 0.0, 0.50],
+                p1=[0.12, 0.04, 0.12],
+            ),
+            _part(
+                "RECIPE_calf_b_l",
+                kind="ellipsoid",
+                center=[0.12, 0.04, 0.12],
+                rx_m=0.036,
+                ry_m=0.036,
+                rz_m=0.036,
+            ),
+            _part(
+                "RECIPE_limb_thigh_l",
+                kind="capsule",
+                center=None,
+                rx_m=None,
+                ry_m=None,
+                rz_m=None,
+                radius_m=0.06,
+                p0=[0.12, 0.0, 0.95],
+                p1=[0.12, 0.0, 0.50],
+            ),
+            _part(
+                "RECIPE_prox_soft_thigh_l",
+                kind="ellipsoid",
+                center=[0.12, 0.0, 0.95],
+                rx_m=0.0708,
+                ry_m=0.0708,
+                rz_m=0.0708,
+            ),
+            _part(
+                "RECIPE_knee_soft_l",
+                kind="ellipsoid",
+                center=[0.12, 0.0, 0.50],
+                rx_m=0.033,
+                ry_m=0.033,
+                rz_m=0.033,
+            ),
+            _part(
+                "RECIPE_dist_soft_upper_arm_l",
+                kind="ellipsoid",
+                center=[-0.25, 0.0, 1.10],
+                rx_m=0.0312,
+                ry_m=0.0312,
+                rz_m=0.0312,
+            ),
+            _part(
+                "RECIPE_limb_upper_arm_l",
+                kind="capsule",
+                center=None,
+                rx_m=None,
+                ry_m=None,
+                rz_m=None,
+                radius_m=0.04,
+                p0=[-0.20, 0.0, 1.38],
+                p1=[-0.25, 0.0, 1.10],
+            ),
+        ]
+    )
+    result = validate_constraints(pkg)
+    by_id = {r.id: r for r in result.rules}
+    assert by_id["C_calf_slant"].status == "pass", by_id["C_calf_slant"].message
+    assert by_id["C_no_dup_limb"].status == "pass", by_id["C_no_dup_limb"].message
+    assert classify_part_name("RECIPE_prox_soft_thigh_l") == ("unknown", "l")
+
+
+def test_constraints__t13_thigh_outer_present_after_adduction_geometry() -> None:
+    """0046 T13/P3-1: C_thigh_outer evaluated after live adduction — never omit."""
+    from meshops.proportion.blockout_recipe import _apply_thigh_adduction
+    from meshops.proportion.body_template import AppliedConstants, TemplateAppliedPackage
+
+    # Pre-aligned hip_bridge outer ≈ thigh outer; then apply product adduction path.
+    # hip outer = 0 + 0.15; thigh mid_x + r ≈ 0.10 + 0.05 = 0.15.
+    parts = [
+        _part(
+            "RECIPE_hip_bridge",
+            role="hip_bridge",
+            kind="ellipsoid",
+            center=[0.0, 0.0, 0.95],
+            rx_m=0.15,
+            ry_m=0.06,
+            rz_m=0.05,
+        ),
+        _part(
+            "RECIPE_limb_thigh_r",
+            kind="capsule",
+            center=None,
+            rx_m=None,
+            ry_m=None,
+            rz_m=None,
+            radius_m=0.05,
+            p0=[0.10, 0.0, 0.95],
+            p1=[0.10, 0.0, 0.50],
+        ),
+        _part(
+            "RECIPE_prox_soft_thigh_r",
+            kind="ellipsoid",
+            center=[0.10, 0.0, 0.95],
+            rx_m=0.059,
+            ry_m=0.059,
+            rz_m=0.059,
+        ),
+        _part(
+            "RECIPE_knee_soft_r",
+            kind="ellipsoid",
+            center=[0.10, 0.0, 0.50],
+            rx_m=0.033,
+            ry_m=0.033,
+            rz_m=0.033,
+        ),
+        _part(
+            "RECIPE_calf_a_r",
+            kind="ellipsoid",
+            center=[0.10, 0.0, 0.50],
+            rx_m=0.044,
+            ry_m=0.044,
+            rz_m=0.044,
+        ),
+        _part(
+            "RECIPE_calf_cyl_r",
+            kind="capsule",
+            center=None,
+            rx_m=None,
+            ry_m=None,
+            rz_m=None,
+            radius_m=0.054,
+            p0=[0.10, 0.0, 0.50],
+            p1=[0.10, 0.0, 0.12],
+        ),
+    ]
+    tpl = TemplateAppliedPackage(
+        template_id="female_adult_athletic",
+        sex="female",
+        archetype="adult_athletic",
+        source_report="test",
+        height_m=1.72,
+        constants=AppliedConstants(
+            breast_mode="dual_tilted",
+            glute_mode_default="oval",
+            torso_mode_default="trap",
+            thigh_tilt_deg=10.0,
+        ),
+    )
+    messages: list[str] = []
+    _apply_thigh_adduction(parts, tpl, messages)
+    assert any("adduction_tilt_deg=" in m for m in messages)
+    thigh = next(p for p in parts if p.name == "RECIPE_limb_thigh_r")
+    assert thigh.p1 is not None
+    # Right side adduction moves p1 medially (x decreases)
+    assert float(thigh.p1[0]) < 0.10 - 1e-6
+
+    result = validate_constraints(_pkg(parts))
+    by_id = {r.id: r for r in result.rules}
+    assert "C_thigh_outer" in by_id
+    assert by_id["C_thigh_outer"].status in ("pass", "skip"), by_id["C_thigh_outer"].message
+
+
 def test_constraints__t7_freeze_feet_knee_soft_not_frozen() -> None:
     """0045 T7: freeze-feet freezes calf_distal; knee_soft not in FREEZE_FEET."""
     assert "calf_distal" in FREEZE_FEET_ROLES
@@ -1540,6 +1729,48 @@ def test_hip_pair__t11_excludes_dist_soft_decoy() -> None:
     assert child.name == "RECIPE_custom_thigh_l"
     assert parent.name == "RECIPE_pelvis_oval"
     assert "dist_soft" not in child.name
+
+
+def test_hip_pair__t11_excludes_prox_soft_decoy() -> None:
+    """0046 T11/B8: _hip_pair proximal fallback skips prox_soft decoy."""
+    from meshops.proportion.connection_metrics import _hip_pair
+
+    thigh = _part(
+        "RECIPE_custom_thigh_l",
+        kind="capsule",
+        center=None,
+        rx_m=None,
+        ry_m=None,
+        rz_m=None,
+        radius_m=0.06,
+        p0=[0.12, 0.0, 0.95],
+        p1=[0.12, 0.0, 0.50],
+    )
+    decoy = _part(
+        "RECIPE_prox_soft_thigh_l",
+        kind="ellipsoid",
+        center=[0.12, 0.0, 0.95],
+        rx_m=0.07,
+        ry_m=0.07,
+        rz_m=0.07,
+    )
+    pelvis = _part(
+        "RECIPE_pelvis_oval",
+        role="pelvis",
+        kind="ellipsoid",
+        center=[0.0, 0.0, 0.90],
+        rx_m=0.12,
+        ry_m=0.08,
+        rz_m=0.06,
+    )
+    parts = [decoy, thigh, pelvis]
+    by_name = {p.name: p for p in parts}
+    pair = _hip_pair(parts, by_name, "l")
+    assert pair is not None
+    child, parent = pair
+    assert child.name == "RECIPE_custom_thigh_l"
+    assert parent.name == "RECIPE_pelvis_oval"
+    assert "prox_soft" not in child.name
 
 
 def test_band_weighted_free_dof_score_ranks_glute_y() -> None:

@@ -666,7 +666,7 @@ def _limb_mass_report(
 
 
 def test_recipe__t3_thigh_no_dist_soft() -> None:
-    """0045 T3/B13: thigh emits capsule only — no dist_soft / no thigh soft at knee."""
+    """0045 T3/B13 + 0046: thigh capsule + prox_soft; still no dist_soft thigh."""
     report = _limb_mass_report()
     pkg = build_blockout_recipe(report, limbs=True)
     by_name = {p.name: p for p in pkg.parts}
@@ -679,6 +679,9 @@ def test_recipe__t3_thigh_no_dist_soft() -> None:
     assert not any("thigh" in n for n in soft_names)
     assert "RECIPE_dist_soft_thigh_l" not in by_name
     assert "RECIPE_dist_soft_thigh_r" not in by_name
+    # 0046: prox soft present
+    assert "RECIPE_prox_soft_thigh_l" in by_name
+    assert "RECIPE_prox_soft_thigh_r" in by_name
 
 
 def test_recipe__t4_arm_dist_soft_scale() -> None:
@@ -815,6 +818,281 @@ def test_recipe__t10_join_ready_preserves_calf_taper() -> None:
         assert b.rx_m is not None and cyl.radius_m is not None
         # Worst-case: calf_b may grow <=1.08x; dist*1.08 still < belly (0.72*1.08=0.7776 < 1.08)
         assert float(b.rx_m) < float(cyl.radius_m)
+
+
+# ---------------------------------------------------------------------------
+# 0046 — Shoulder + Thigh Mass
+# ---------------------------------------------------------------------------
+
+
+def _template_applied_tilt(
+    *,
+    thigh_tilt_deg: float = 10.0,
+    height_m: float = 1.72,
+) -> object:
+    from meshops.proportion.body_template import AppliedConstants, TemplateAppliedPackage
+
+    return TemplateAppliedPackage(
+        template_id="female_adult_athletic",
+        sex="female",
+        archetype="adult_athletic",
+        source_report="test",
+        height_m=height_m,
+        constants=AppliedConstants(
+            breast_mode="dual_tilted",
+            glute_mode_default="oval",
+            torso_mode_default="trap",
+            thigh_tilt_deg=thigh_tilt_deg,
+        ),
+    )
+
+
+def test_recipe__t1_profile_deltoid_arm_scale() -> None:
+    """0046 T1: profile deltoid with upper_arm diam -> rx >= arm_hw * DELT scale (pre-cap)."""
+    from meshops.proportion.anatomy_profile import load_anatomy_profile
+    from meshops.proportion.blockout_recipe import DELT_ARM_RADIUS_SCALE
+
+    arm_hw = 0.04
+    # Use small michelin by keeping arm modest so pre-cap is visible; F cap = 0.045*H
+    # arm_hw*1.35 = 0.054 < 0.045*1.72~0.0774 -> no clamp
+    report = _full_torso_report(
+        diameters=[
+            _diam("bust", half_width_m=0.16),
+            _diam("waist", half_width_m=0.13),
+            _diam("neck", half_width_m=0.05),
+            _diam("upper_arm_l", half_width_m=arm_hw),
+            _diam("upper_arm_r", half_width_m=arm_hw),
+        ],
+    )
+    profile = load_anatomy_profile("torso_limb_f_athletic_v1")
+    pkg = build_blockout_recipe(report, limbs=False, profile=profile)
+    delts = [p for p in pkg.parts if p.role == "deltoid_soft"]
+    assert len(delts) == 2
+    expected = arm_hw * DELT_ARM_RADIUS_SCALE
+    for d in delts:
+        assert d.rx_m is not None
+        # Not the old x0.55 shrink path
+        assert float(d.rx_m) >= expected - 1e-6
+        assert float(d.rx_m) > arm_hw * 0.55 + 1e-6
+
+
+def test_recipe__t2_base_deltoid_scale() -> None:
+    """0046 T2: base path deltoid uses DELT_ARM_RADIUS_SCALE (not 1.15)."""
+    from meshops.proportion.blockout_recipe import (
+        DELT_ARM_RADIUS_SCALE,
+        DELT_RY_FRAC,
+        DELT_RZ_FRAC,
+    )
+
+    arm_hw = 0.04
+    report = _full_torso_report(
+        shoulder_x=0.20,
+        diameters=[
+            _diam("bust", half_width_m=0.16),
+            _diam("waist", half_width_m=0.13),
+            _diam("neck", half_width_m=0.05),
+            _diam("upper_arm_l", half_width_m=arm_hw),
+            _diam("upper_arm_r", half_width_m=arm_hw),
+        ],
+    )
+    pkg = build_blockout_recipe(report, limbs=False)
+    delts = [p for p in pkg.parts if p.role == "deltoid_soft"]
+    assert len(delts) == 2
+    expected = arm_hw * DELT_ARM_RADIUS_SCALE
+    # Michelin: 0.45 * shoulder_hw = 0.45*0.20 = 0.09 > 0.054 → no clamp
+    for d in delts:
+        assert d.rx_m == pytest.approx(expected, abs=1e-9)
+        assert d.ry_m == pytest.approx(expected * DELT_RY_FRAC, abs=1e-9)
+        assert d.rz_m == pytest.approx(expected * DELT_RZ_FRAC, abs=1e-9)
+
+
+def test_recipe__t4_thigh_prox_soft_emit() -> None:
+    """0046 T4: thigh emits capsule + prox_soft; no dist_soft thigh."""
+    report = _limb_mass_report()
+    pkg = build_blockout_recipe(report, limbs=True)
+    by_name = {p.name: p for p in pkg.parts}
+    for side in ("l", "r"):
+        assert f"RECIPE_limb_thigh_{side}" in by_name
+        soft = by_name[f"RECIPE_prox_soft_thigh_{side}"]
+        thigh = by_name[f"RECIPE_limb_thigh_{side}"]
+        assert soft.kind == "ellipsoid"
+        assert soft.role == "limb_segment"
+        assert soft.center is not None and thigh.p0 is not None
+        assert float(soft.center[0]) == pytest.approx(float(thigh.p0[0]))
+        assert float(soft.center[1]) == pytest.approx(float(thigh.p0[1]))
+        assert float(soft.center[2]) == pytest.approx(float(thigh.p0[2]))
+        assert any(f"thigh_{side}: prox_soft r=" in m for m in pkg.messages)
+    assert "RECIPE_dist_soft_thigh_l" not in by_name
+    assert "RECIPE_dist_soft_thigh_r" not in by_name
+
+
+def test_recipe__t5_thigh_prox_soft_scale() -> None:
+    """0046 T5: prox soft r ~ shaft_r * THIGH_PROX_SOFT_SCALE."""
+    from meshops.proportion.blockout_recipe import THIGH_PROX_SOFT_SCALE
+
+    thigh_hw = 0.06
+    report = _limb_mass_report(thigh_hw=thigh_hw)
+    pkg = build_blockout_recipe(report, limbs=True)
+    by_name = {p.name: p for p in pkg.parts}
+    expected = max(thigh_hw * THIGH_PROX_SOFT_SCALE, 1e-4)
+    for side in ("l", "r"):
+        soft = by_name[f"RECIPE_prox_soft_thigh_{side}"]
+        assert soft.rx_m == pytest.approx(expected, abs=1e-9)
+        assert soft.ry_m == pytest.approx(expected, abs=1e-9)
+        assert soft.rz_m == pytest.approx(expected, abs=1e-9)
+
+
+def test_recipe__t6_thigh_adduction_engagement() -> None:
+    """0046 T6: template tilt → medial p1, length preserve, knee engagement, medial cap.
+
+    Also locks calf-cluster co-move (P3-2): knee_soft, calf_a, calf_cyl.p0 share
+    thigh p1 Δ; calf_b / calf_cyl.p1 stay at zero-tilt baseline.
+    """
+    import math
+
+    from meshops.proportion.blockout_recipe import THIGH_ADDUCTION_MAX_MEDIAL_M
+
+    report = _limb_mass_report()
+    tpl = _template_applied_tilt(thigh_tilt_deg=10.0)
+    # Baseline without template (identity reference for length + side signs)
+    pkg0 = build_blockout_recipe(report, limbs=True)
+    pkg = build_blockout_recipe(report, limbs=True, template_applied=tpl)  # type: ignore[arg-type]
+    by0 = {p.name: p for p in pkg0.parts}
+    by = {p.name: p for p in pkg.parts}
+    for side in ("l", "r"):
+        t0 = by0[f"RECIPE_limb_thigh_{side}"]
+        t1 = by[f"RECIPE_limb_thigh_{side}"]
+        assert t0.p0 is not None and t0.p1 is not None
+        assert t1.p0 is not None and t1.p1 is not None
+        # p0 fixed
+        assert float(t1.p0[0]) == pytest.approx(float(t0.p0[0]), abs=1e-9)
+        assert float(t1.p0[1]) == pytest.approx(float(t0.p0[1]), abs=1e-9)
+        assert float(t1.p0[2]) == pytest.approx(float(t0.p0[2]), abs=1e-9)
+        len0 = math.dist(t0.p0, t0.p1)
+        len1 = math.dist(t1.p0, t1.p1)
+        assert len1 == pytest.approx(len0, abs=1e-6)
+        # Medial: r → p1.x decreases; l → p1.x increases
+        if side == "r":
+            assert float(t1.p1[0]) < float(t0.p1[0]) - 1e-6
+        else:
+            assert float(t1.p1[0]) > float(t0.p1[0]) + 1e-6
+        medial = abs(float(t1.p1[0]) - float(t0.p1[0]))
+        assert medial <= THIGH_ADDUCTION_MAX_MEDIAL_M + 1e-5
+        # Engagement: thigh p1 within knee_soft radius of knee center
+        knee = by[f"RECIPE_knee_soft_{side}"]
+        assert knee.center is not None and knee.rx_m is not None
+        dist = math.dist(t1.p1, knee.center)
+        assert dist <= float(knee.rx_m) + 1e-5
+        assert any(f"thigh_{side}: adduction_tilt_deg=" in m for m in pkg.messages)
+
+        # P3-2: co-move cluster shares thigh p1 world Δ; distal calf stays fixed.
+        delta = [float(t1.p1[i]) - float(t0.p1[i]) for i in range(3)]
+        assert abs(delta[0]) > 1e-6
+
+        knee0 = by0[f"RECIPE_knee_soft_{side}"]
+        assert knee0.center is not None
+        for i in range(3):
+            assert float(knee.center[i]) == pytest.approx(
+                float(knee0.center[i]) + delta[i], abs=1e-5
+            )
+
+        calf_a0 = by0[f"RECIPE_calf_a_{side}"]
+        calf_a1 = by[f"RECIPE_calf_a_{side}"]
+        assert calf_a0.center is not None and calf_a1.center is not None
+        for i in range(3):
+            assert float(calf_a1.center[i]) == pytest.approx(
+                float(calf_a0.center[i]) + delta[i], abs=1e-5
+            )
+
+        cyl0 = by0[f"RECIPE_calf_cyl_{side}"]
+        cyl1 = by[f"RECIPE_calf_cyl_{side}"]
+        assert cyl0.p0 is not None and cyl1.p0 is not None
+        assert cyl0.p1 is not None and cyl1.p1 is not None
+        for i in range(3):
+            assert float(cyl1.p0[i]) == pytest.approx(float(cyl0.p0[i]) + delta[i], abs=1e-5)
+            # Distal cylinder end not co-moved
+            assert float(cyl1.p1[i]) == pytest.approx(float(cyl0.p1[i]), abs=1e-5)
+
+        calf_b0 = by0[f"RECIPE_calf_b_{side}"]
+        calf_b1 = by[f"RECIPE_calf_b_{side}"]
+        assert calf_b0.center is not None and calf_b1.center is not None
+        for i in range(3):
+            assert float(calf_b1.center[i]) == pytest.approx(float(calf_b0.center[i]), abs=1e-5)
+
+
+def test_recipe__t7_no_template_adduction_identity() -> None:
+    """0046 T7: no template / tilt 0 → no adduction geometry change."""
+    report = _limb_mass_report()
+    pkg_none = build_blockout_recipe(report, limbs=True)
+    pkg_zero = build_blockout_recipe(
+        report,
+        limbs=True,
+        template_applied=_template_applied_tilt(thigh_tilt_deg=0.0),  # type: ignore[arg-type]
+    )
+    by_n = {p.name: p for p in pkg_none.parts}
+    by_z = {p.name: p for p in pkg_zero.parts}
+    for side in ("l", "r"):
+        a = by_n[f"RECIPE_limb_thigh_{side}"]
+        b = by_z[f"RECIPE_limb_thigh_{side}"]
+        assert a.p1 is not None and b.p1 is not None
+        assert float(a.p1[0]) == pytest.approx(float(b.p1[0]), abs=1e-9)
+        assert float(a.p1[1]) == pytest.approx(float(b.p1[1]), abs=1e-9)
+        assert float(a.p1[2]) == pytest.approx(float(b.p1[2]), abs=1e-9)
+    assert not any("adduction_tilt_deg=" in m for m in pkg_none.messages)
+    assert not any("adduction_tilt_deg=" in m for m in pkg_zero.messages)
+
+
+def test_recipe__t8_0045_fences_after_adduction() -> None:
+    """0046 T8: arm dist_soft + calf belly + knee_soft; no thigh dist_soft; knee attached."""
+    import math
+
+    from meshops.proportion.blockout_recipe import CALF_BELLY_SCALE
+
+    report = _limb_mass_report(thigh_hw=0.06, calf_hw=0.05, arm_hw=0.04)
+    tpl = _template_applied_tilt(thigh_tilt_deg=10.0)
+    pkg = build_blockout_recipe(report, limbs=True, template_applied=tpl)  # type: ignore[arg-type]
+    by = {p.name: p for p in pkg.parts}
+    # Arm dist_soft present
+    for band in ("upper_arm_l", "upper_arm_r", "forearm_l", "forearm_r"):
+        assert f"RECIPE_dist_soft_{band}" in by
+    # Calf belly
+    for side in ("l", "r"):
+        cyl = by[f"RECIPE_calf_cyl_{side}"]
+        assert cyl.radius_m == pytest.approx(0.05 * CALF_BELLY_SCALE, abs=1e-9)
+        assert f"RECIPE_knee_soft_{side}" in by
+        assert f"RECIPE_prox_soft_thigh_{side}" in by
+        assert f"RECIPE_dist_soft_thigh_{side}" not in by
+        # Knee cluster still attached after adduction
+        thigh = by[f"RECIPE_limb_thigh_{side}"]
+        knee = by[f"RECIPE_knee_soft_{side}"]
+        assert thigh.p1 is not None and knee.center is not None and knee.rx_m is not None
+        assert math.dist(thigh.p1, knee.center) <= float(knee.rx_m) + 1e-5
+
+
+def test_recipe__t12_m_profile_deltoid_scale() -> None:
+    """0046 T12: M profile deltoid path uses same DELT scale law as F."""
+    from meshops.proportion.anatomy_profile import load_anatomy_profile
+    from meshops.proportion.blockout_recipe import DELT_ARM_RADIUS_SCALE
+
+    arm_hw = 0.04
+    report = _full_torso_report(
+        diameters=[
+            _diam("bust", half_width_m=0.16),
+            _diam("waist", half_width_m=0.13),
+            _diam("neck", half_width_m=0.05),
+            _diam("upper_arm_l", half_width_m=arm_hw),
+            _diam("upper_arm_r", half_width_m=arm_hw),
+        ],
+    )
+    profile = load_anatomy_profile("torso_limb_m_athletic_v1")
+    pkg = build_blockout_recipe(report, limbs=False, profile=profile)
+    delts = [p for p in pkg.parts if p.role == "deltoid_soft"]
+    assert len(delts) == 2
+    expected = arm_hw * DELT_ARM_RADIUS_SCALE
+    for d in delts:
+        assert d.rx_m is not None
+        assert float(d.rx_m) >= expected - 1e-6
+        assert float(d.rx_m) > arm_hw * 0.55 + 1e-6
 
 
 def test_recipe__depth_at_landmarks_override(tmp_path: Path) -> None:
