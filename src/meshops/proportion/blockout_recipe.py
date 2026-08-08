@@ -18,6 +18,7 @@ can pass; B6 distal/cyl p1 Y sync to ank_foot after feet emit.
 0036: post-pass aligns glute_soft outer X to hip_bridge outer (pre-optimize C_glute_outer).
 0039: opt-in --join-ready socket overlaps (shoulder/hip/neck/ankle); mutually exclusive with
 --nofuse; setup re-emit via run_blockout_emit_setup; schema stay 1.4.0 + join_ready bool.
+0047: torso oval ry depth taper (anti-snowman chest/waist/hip); schema stay 1.4.0.
 """
 
 from __future__ import annotations
@@ -87,6 +88,12 @@ _THIGH_PROX_R_FLOOR: Final[float] = 1e-4
 # 0046 B9: template thigh_tilt adduction (medial-shift cap + knee-cluster co-move).
 THIGH_TILT_DEG_CAP: Final[float] = 15.0
 THIGH_ADDUCTION_MAX_MEDIAL_M: Final[float] = 0.030
+# 0047 B1: torso oval anteroposterior depth taper (anti-snowman); keep 0040 rz law.
+TORSO_OVAL_RY_CHEST_FRAC: Final[float] = 0.95
+TORSO_OVAL_RY_WAIST_FRAC: Final[float] = 0.72
+TORSO_OVAL_RY_HIP_FRAC: Final[float] = 0.80  # ≠ pelvis hardcoded 0.85
+TORSO_OVAL_RZ_SPAN_FRAC: Final[float] = 0.22
+TORSO_OVAL_RZ_FLOOR_M: Final[float] = 0.025
 _GIRAFFE_FRAC: Final[float] = 0.20
 _GIRAFFE_ABS_NO_H: Final[float] = 0.35
 _MICHELIN_FRAC: Final[float] = 0.45
@@ -1542,10 +1549,11 @@ def _build_torso_ovals(
     if z_top <= z_bottom:
         messages.append("torso ovals skipped: z_top <= z_bottom")
         return parts
-    half_depth = m.chest_half_depth
-    if half_depth is None:
+    half_chest = m.chest_half_depth
+    if half_chest is None:
         messages.append("torso ovals skipped: need chest half_depth")
         return parts
+    half_hip = m.hip_half_depth if m.hip_half_depth is not None else half_chest
     y = m.chest_y if m.chest_y is not None else 0.0
     placement: Literal["full3d", "front_plane"] = (
         "full3d" if m.chest_y is not None else "front_plane"
@@ -1564,13 +1572,24 @@ def _build_torso_ovals(
         ("RECIPE_torso_oval_waist", 0.50),
         ("RECIPE_torso_oval_hip", 0.85),
     ]
+    ry_chest: float | None = None
+    ry_waist: float | None = None
+    ry_hip: float | None = None
     for name, z_norm in layers:
         z_m = z_top - z_norm * span
         hw = _waist_width_at(z_norm, w_s, w_h, taper)
         # Vertical radius must exceed half layer spacing (0.35*span/2) so chest/waist/hip
         # ovals overlap. 0.12 left a belly gap; 0.18 barely kissed; 0.22 ≈ 4cm overlap.
-        rz = max(0.025, span * 0.22)
-        ry = half_depth * 0.9
+        rz = max(TORSO_OVAL_RZ_FLOOR_M, span * TORSO_OVAL_RZ_SPAN_FRAC)
+        if name.endswith("_chest"):
+            ry = half_chest * TORSO_OVAL_RY_CHEST_FRAC
+            ry_chest = ry
+        elif name.endswith("_waist"):
+            ry = half_chest * TORSO_OVAL_RY_WAIST_FRAC
+            ry_waist = ry
+        else:  # hip
+            ry = half_hip * TORSO_OVAL_RY_HIP_FRAC
+            ry_hip = ry
         parts.append(
             RecipePart(
                 name=name,
@@ -1584,9 +1603,13 @@ def _build_torso_ovals(
                 label=name,
             )
         )
+    if ry_chest is not None and ry_waist is not None and ry_hip is not None:
+        messages.append(
+            "torso depth taper: chest/waist/hip "
+            f"ry={ry_chest:.4f}/{ry_waist:.4f}/{ry_hip:.4f} (anti-snowman)"
+        )
 
-    # Pelvis oval below hip
-    hip_half = m.hip_half_depth if m.hip_half_depth is not None else half_depth
+    # Pelvis oval below hip (B10: ry = hip_half * 0.85 unchanged)
     if m.height_m is not None:
         h = m.height_m
         z_pelvis = m.hip_z - 0.04 * h
@@ -1601,7 +1624,7 @@ def _build_torso_ovals(
                 kind="ellipsoid",
                 center=[0.0, y_pelvis, z_pelvis],
                 rx_m=w_h * 1.05,
-                ry_m=hip_half * 0.85,
+                ry_m=half_hip * 0.85,
                 rz_m=max(0.03, 0.06 * h),
                 placement=p_place,
                 label="RECIPE_pelvis_oval",

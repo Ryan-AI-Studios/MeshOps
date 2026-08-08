@@ -1508,11 +1508,16 @@ def _torso_oval_span_from_report(report: ProportionReport) -> float:
 
 
 def test_recipe__torso_oval_rz_span_022() -> None:
-    """T7 / B6: each torso oval rz >= span*0.20 and == max(0.025, span*0.22)."""
+    """T7 / B6 / 0047 B4: each torso oval rz == max(floor, span*span_frac)."""
+    from meshops.proportion.blockout_recipe import (
+        TORSO_OVAL_RZ_FLOOR_M,
+        TORSO_OVAL_RZ_SPAN_FRAC,
+    )
+
     report = _full_torso_report()
     pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
     span = _torso_oval_span_from_report(report)
-    expected_rz = max(0.025, span * 0.22)
+    expected_rz = max(TORSO_OVAL_RZ_FLOOR_M, span * TORSO_OVAL_RZ_SPAN_FRAC)
     for name in (
         "RECIPE_torso_oval_chest",
         "RECIPE_torso_oval_waist",
@@ -1544,6 +1549,131 @@ def test_recipe__torso_oval_layer_overlap() -> None:
         rz_i = float(a.rz_m)
         rz_j = float(b.rz_m)
         assert abs(z_i - z_j) <= rz_i + rz_j
+
+
+def _part_ry(by: dict[str, RecipePart], name: str) -> float:
+    """Assert ry_m present and return float (basedpyright-safe)."""
+    part = by[name]
+    assert part.ry_m is not None
+    return float(part.ry_m)
+
+
+def _part_rx(by: dict[str, RecipePart], name: str) -> float:
+    """Assert rx_m present and return float (basedpyright-safe)."""
+    part = by[name]
+    assert part.rx_m is not None
+    return float(part.rx_m)
+
+
+def test_recipe__torso_oval_ry_depth_taper_order() -> None:
+    """0047 T2/B3: ry_waist < ry_chest; ry_hip >= ry_waist; ry_hip < ry_pelvis."""
+    report = _full_torso_report()  # chest depth 0.24 → half 0.12; hip 0.26 → half 0.13
+    pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
+    by = {p.name: p for p in pkg.parts}
+    ry_c = _part_ry(by, "RECIPE_torso_oval_chest")
+    ry_w = _part_ry(by, "RECIPE_torso_oval_waist")
+    ry_h = _part_ry(by, "RECIPE_torso_oval_hip")
+    ry_p = _part_ry(by, "RECIPE_pelvis_oval")
+    eps = 1e-9
+    assert ry_w < ry_c - eps
+    assert ry_h >= ry_w - eps
+    assert ry_h < ry_p - eps
+
+
+def test_recipe__torso_oval_ry_depth_taper_magnitudes() -> None:
+    """0047 T3: chest/waist/hip/pelvis ry magnitudes from named fracs * half-depths."""
+    from meshops.proportion.blockout_recipe import (
+        TORSO_OVAL_RY_CHEST_FRAC,
+        TORSO_OVAL_RY_HIP_FRAC,
+        TORSO_OVAL_RY_WAIST_FRAC,
+    )
+
+    report = _full_torso_report()
+    pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
+    by = {p.name: p for p in pkg.parts}
+    half_chest = 0.12  # depth_m 0.24
+    half_hip = 0.13  # depth_m 0.26
+    assert _part_ry(by, "RECIPE_torso_oval_chest") == pytest.approx(
+        half_chest * TORSO_OVAL_RY_CHEST_FRAC, abs=1e-9
+    )
+    assert _part_ry(by, "RECIPE_torso_oval_waist") == pytest.approx(
+        half_chest * TORSO_OVAL_RY_WAIST_FRAC, abs=1e-9
+    )
+    assert _part_ry(by, "RECIPE_torso_oval_hip") == pytest.approx(
+        half_hip * TORSO_OVAL_RY_HIP_FRAC, abs=1e-9
+    )
+    assert _part_ry(by, "RECIPE_pelvis_oval") == pytest.approx(half_hip * 0.85, abs=1e-9)
+
+
+def test_recipe__torso_oval_hip_depth_preference() -> None:
+    """0047 T6: hip oval ry uses hip half-depth, not chest half-depth."""
+    from meshops.proportion.blockout_recipe import TORSO_OVAL_RY_HIP_FRAC
+
+    report = _full_torso_report()
+    pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
+    by = {p.name: p for p in pkg.parts}
+    ry_h = _part_ry(by, "RECIPE_torso_oval_hip")
+    assert ry_h == pytest.approx(0.13 * TORSO_OVAL_RY_HIP_FRAC, abs=1e-9)
+    assert ry_h != pytest.approx(0.12 * TORSO_OVAL_RY_HIP_FRAC, abs=1e-9)
+
+
+def test_recipe__torso_oval_width_taper_rx_only() -> None:
+    """0047 T8/B6: default waist taper still narrows rx; depth taper is ry-only."""
+    report = _full_torso_report()
+    pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
+    by = {p.name: p for p in pkg.parts}
+    rx_c = _part_rx(by, "RECIPE_torso_oval_chest")
+    rx_w = _part_rx(by, "RECIPE_torso_oval_waist")
+    assert rx_w < rx_c
+
+
+def test_recipe__torso_oval_ry_anti_equal_depth_regression() -> None:
+    """0047 T9: torso oval ry must not be equal; hip ry ≠ pelvis ry."""
+    report = _full_torso_report()
+    pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
+    by = {p.name: p for p in pkg.parts}
+    ry_c = _part_ry(by, "RECIPE_torso_oval_chest")
+    ry_w = _part_ry(by, "RECIPE_torso_oval_waist")
+    ry_h = _part_ry(by, "RECIPE_torso_oval_hip")
+    ry_p = _part_ry(by, "RECIPE_pelvis_oval")
+    eps = 1e-9
+    assert not (abs(ry_c - ry_w) < eps and abs(ry_w - ry_h) < eps)
+    assert abs(ry_h - ry_p) > eps
+
+
+def test_recipe__torso_oval_depth_taper_message() -> None:
+    """0047 B8: one anti-snowman ry message when ovals emit."""
+    report = _full_torso_report()
+    pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
+    by = {p.name: p for p in pkg.parts}
+    ry_c = _part_ry(by, "RECIPE_torso_oval_chest")
+    ry_w = _part_ry(by, "RECIPE_torso_oval_waist")
+    ry_h = _part_ry(by, "RECIPE_torso_oval_hip")
+    matches = [m for m in pkg.messages if m.startswith("torso depth taper:")]
+    assert len(matches) == 1
+    assert "anti-snowman" in matches[0]
+    assert f"ry={ry_c}" in matches[0] or f"{ry_c:.4f}" in matches[0]
+    assert f"{ry_w:.4f}" in matches[0] or f"/{ry_w}" in matches[0]
+    assert f"{ry_h:.4f}" in matches[0] or f"/{ry_h}" in matches[0]
+
+
+def test_recipe__torso_oval_connection_gap_smoke() -> None:
+    """0047 T10b: ovals package still yields finite required connection gaps."""
+    import math
+
+    from meshops.proportion.connection_metrics import (
+        REQUIRED_GAP_KEYS,
+        connection_gap_metrics,
+    )
+
+    report = _full_torso_report()
+    pkg = build_blockout_recipe(report, limbs=True, torso="ovals")
+    gaps = connection_gap_metrics(pkg)
+    assert set(gaps.keys()) >= set(REQUIRED_GAP_KEYS)
+    for key in REQUIRED_GAP_KEYS:
+        val = gaps[key]
+        assert isinstance(val, float)
+        assert math.isfinite(val)
 
 
 def test_recipe__modes_in_messages_not_counts() -> None:
