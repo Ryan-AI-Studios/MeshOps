@@ -2459,11 +2459,38 @@ def _emit_one_profile_part(
         else:
             lm = lms.get(sh_id)
             if lm is not None and lm.x_m is not None and lm.z_m is not None:
-                center = [
-                    float(lm.x_m),
-                    float(lm.y_m) if lm.y_m is not None else 0.0,
-                    float(lm.z_m),
-                ]
+                # 0051 B8: null landmark Y → arm forward prior (not invent-0 mid-plane).
+                if lm.y_m is not None and math.isfinite(float(lm.y_m)):
+                    dy = float(lm.y_m)
+                else:
+                    half_depth = _chest_half_depth_for_arm_prior(lms, report.depth_bands)
+                    front_lm = lms.get("chest_front")
+                    chest_front_y = (
+                        float(front_lm.y_m)
+                        if front_lm is not None
+                        and front_lm.y_m is not None
+                        and math.isfinite(float(front_lm.y_m))
+                        else None
+                    )
+                    mid_lm = lms.get("chest_mid")
+                    chest_mid_y = (
+                        float(mid_lm.y_m)
+                        if mid_lm is not None
+                        and mid_lm.y_m is not None
+                        and math.isfinite(float(mid_lm.y_m))
+                        else None
+                    )
+                    y_plane = float(chest_mid_y) if chest_mid_y is not None else 0.0
+                    dy = _arm_forward_y(
+                        y_plane,
+                        half_depth=half_depth,
+                        height_m=height_m,
+                        chest_front_y=chest_front_y,
+                    )
+                    messages.append(
+                        f"RECIPE_deltoid_soft_{side_tag}: y_m from arm forward prior (profile)"
+                    )
+                center = [float(lm.x_m), dy, float(lm.z_m)]
                 messages.append(f"parent_joint {role} unresolved — using landmark placement")
             else:
                 messages.append(f"{name} skipped: missing joint")
