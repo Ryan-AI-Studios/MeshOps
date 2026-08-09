@@ -377,8 +377,12 @@ def test_t6_adduction_chain_knee_delta() -> None:
 
 
 def test_t7_knee_soft_max_path() -> None:
-    """T7: knee_soft r uses max(prox, dist); with prox scale 1.0 same as pre-taper mid."""
-    from meshops.proportion.blockout_recipe import KNEE_SOFT_FRAC, KNEE_SOFT_MIN_FRAC_H
+    """T7 (0071): knee_soft scale uses SEAM adj, not full-leg max(prox, dist, calf_a)."""
+    from meshops.proportion.blockout_recipe import (
+        KNEE_SOFT_FRAC,
+        KNEE_SOFT_MIN_FRAC_H,
+        _knee_seam_radius_m,
+    )
 
     height_m = 1.72
     thigh_hw = 0.08
@@ -391,20 +395,25 @@ def test_t7_knee_soft_max_path() -> None:
         prox = by_name[f"RECIPE_limb_thigh_{side}"]
         dist = by_name[f"RECIPE_thigh_taper_dist_{side}"]
         calf_a = by_name[f"RECIPE_calf_a_{side}"]
-        adj = max(
+        # Full-leg fence helper still includes prox
+        full_adj = max(
             float(prox.radius_m),  # type: ignore[arg-type]
             float(dist.radius_m),  # type: ignore[arg-type]
             float(calf_a.rx_m),  # type: ignore[arg-type]
         )
-        # prox == mid, dist < prox → max = prox (= mid)
+        # Seam: prefer taper_dist; max(dist, calf_a) — typically dist when prox=0.08
+        seam = max(float(dist.radius_m), float(calf_a.rx_m))  # type: ignore[arg-type]
         assert float(prox.radius_m) == pytest.approx(thigh_hw, abs=1e-9)  # type: ignore[arg-type]
         assert float(dist.radius_m) < float(prox.radius_m)  # type: ignore[arg-type]
-        assert adj == pytest.approx(float(prox.radius_m), abs=1e-9)  # type: ignore[arg-type]
-        expected = max(KNEE_SOFT_FRAC * adj, KNEE_SOFT_MIN_FRAC_H * height_m)
+        assert full_adj == pytest.approx(float(prox.radius_m), abs=1e-9)  # type: ignore[arg-type]
+        assert seam == pytest.approx(float(dist.radius_m), abs=1e-9)  # type: ignore[arg-type]
+        expected = max(KNEE_SOFT_FRAC * seam, KNEE_SOFT_MIN_FRAC_H * height_m)
         assert knee.rx_m == pytest.approx(expected, abs=1e-9)
-        # Helper path
+        # Helpers: full max for fence; seam for scale path
         helper_adj = _knee_adj_radius_m(pkg.parts, side, report)
-        assert helper_adj == pytest.approx(adj, abs=1e-9)
+        assert helper_adj == pytest.approx(full_adj, abs=1e-9)
+        helper_seam = _knee_seam_radius_m(pkg.parts, side, report)
+        assert helper_seam == pytest.approx(seam, abs=1e-9)
 
 
 def test_t8_hip_pair_child_is_limb_thigh() -> None:

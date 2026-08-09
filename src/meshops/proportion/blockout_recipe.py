@@ -71,10 +71,13 @@ MIDLINE_X_TOL_M: Final[float] = 0.05
 CROTCH_Z_FRAC_FALLBACK: Final[float] = 0.5
 _NEAR_ZERO_LEN: Final[float] = 1e-9
 # 0045 B1: calf belly + asymmetric ends (replaces single _CALF_END_SCALE=0.95).
+# 0071 B10-B11: p0-only lateral/rear belly bias (scales kept).
 _CALF_END_R_FLOOR: Final[float] = 1e-4
 CALF_BELLY_SCALE: Final[float] = 1.08
 CALF_PROX_END_SCALE: Final[float] = 0.88
 CALF_DIST_END_SCALE: Final[float] = 0.72
+CALF_BELLY_LAT_FRAC: Final[float] = 0.22  # B10: outer offset on cyl.p0 only (* cyl_r)
+CALF_BELLY_REAR_FRAC: Final[float] = 0.28  # B11: rear offset on cyl.p0 only (* cyl_r, +Y)
 # 0045 B3: arm distal soft beads only (not thigh — P2-1 / B13).
 # 0062 B9: shrink to forearm only (elbow_soft owns UA distal joint; no UA dist_soft).
 LIMB_DISTAL_SOFT_SCALE: Final[float] = 0.78
@@ -90,9 +93,13 @@ _ARM_SHAFT_R_FLOOR: Final[float] = 1e-4
 ELBOW_SOFT_SCALE: Final[float] = 1.10  # B10 — readable bulge, NOT 0.55
 ELBOW_SOFT_MIN_FRAC_H: Final[float] = 0.016
 WRIST_SOFT_PALM_RX_FRAC: Final[float] = 0.85  # B11
-# 0045 B5: knee soft joint mass.
-KNEE_SOFT_FRAC: Final[float] = 0.55
-KNEE_SOFT_MIN_FRAC_H: Final[float] = 0.018
+# --- Knee joint mass (0045 retune → 0071) ---
+KNEE_SOFT_FRAC: Final[float] = 1.10  # B1: scale vs SEAM adj (not full-leg max)
+KNEE_SOFT_MIN_FRAC_H: Final[float] = 0.018  # B2: stature floor
+KNEE_SOFT_RY_FRAC: Final[float] = 0.90  # B3: depth de-sphere
+KNEE_SOFT_RZ_FRAC: Final[float] = 0.75  # B4: vertical de-sphere
+KNEE_SOFT_OUTER_FRAC_RX: Final[float] = 0.06  # B5: outer center bias (* rx, signed)
+KNEE_SOFT_REAR_FRAC_RY: Final[float] = 0.10  # B6: rear +Y center bias (* ry)
 # 0046 B1: deltoid scale vs upper_arm half-width (profile + base).
 DELT_ARM_RADIUS_SCALE: Final[float] = 1.35
 DELT_RY_FRAC: Final[float] = 0.90
@@ -1937,6 +1944,11 @@ def _build_calf_split(
     name_a = f"RECIPE_calf_a_{side}"
     name_cyl = f"RECIPE_calf_cyl_{side}"
     name_b = f"RECIPE_calf_b_{side}"
+    # a/b stay on joint axis; cyl p0 gets 0071 belly bias (p1 unchanged — B6-safe).
+    sign = 1.0 if side == "r" else -1.0
+    dx = sign * CALF_BELLY_LAT_FRAC * cyl_r
+    dy = CALF_BELLY_REAR_FRAC * cyl_r
+    cyl_p0 = [float(p0[0]) + dx, float(p0[1]) + dy, float(p0[2])]
     parts = [
         RecipePart(
             name=name_a,
@@ -1953,7 +1965,7 @@ def _build_calf_split(
             name=name_cyl,
             role="limb_segment",
             kind="capsule",
-            p0=[float(p0[0]), float(p0[1]), float(p0[2])],
+            p0=cyl_p0,
             p1=[float(p1[0]), float(p1[1]), float(p1[2])],
             radius_m=cyl_r,
             placement=placement,
@@ -1975,6 +1987,7 @@ def _build_calf_split(
     if placement == "front_plane":
         note += " (front_plane)"
     messages.append(note)
+    messages.append(f"calf_{side}: belly bias p0 lat={abs(dx):.4f} rear={dy:.4f}")
     return parts
 
 
@@ -2211,10 +2224,10 @@ def _knee_adj_radius_m(
     side: str,
     report: ProportionReport,
 ) -> float | None:
-    """0045 B5 + 0070 B9: adjacent shaft radius for knee soft (name-keyed primary).
+    """0045 B5 + 0070 B9: full-leg adjacent max (no-shrink fence for engagement/0070).
 
-    max(prox, dist if present, calf_a…) so knee does not shrink when shaft tapers.
-    Note (AI2 P3-4): if PROX_SHAFT later >1.0, knee soft grows — intentional no-shrink.
+    max(prox, dist if present, calf_a…) — NOT the product scale source after 0071.
+    Scale path uses `_knee_seam_radius_m` (elbow-class seam).
     """
     by = {p.name: p for p in parts}
     candidates: list[float] = []
@@ -2238,6 +2251,40 @@ def _knee_adj_radius_m(
             if hw is not None:
                 candidates.append(float(hw))
     return max(candidates) if candidates else None
+
+
+def _knee_seam_radius_m(
+    parts: list[RecipePart],
+    side: str,
+    report: ProportionReport,
+) -> float | None:
+    """0071 B12: elbow-class SEAM adj — max(distal thigh end, calf_a), not prox mid.
+
+    Prefer thigh_taper_dist when present; else limb_thigh; always consider calf_a.
+    Diameter ladder fallback only when both shaft ends absent.
+    """
+    by = {p.name: p for p in parts}
+    cands: list[float] = []
+    dist = by.get(f"RECIPE_thigh_taper_dist_{side}")
+    thigh = by.get(f"RECIPE_limb_thigh_{side}")
+    if dist is not None and dist.radius_m is not None:
+        cands.append(float(dist.radius_m))
+    elif thigh is not None and thigh.radius_m is not None:
+        cands.append(float(thigh.radius_m))
+    calf_a = by.get(f"RECIPE_calf_a_{side}")
+    if calf_a is not None and calf_a.rx_m is not None:
+        cands.append(float(calf_a.rx_m))
+    if cands:
+        return max(cands)
+    # Diameter fallback (same spirit as _knee_adj_radius_m when shaft ends absent)
+    th = _resolve_diameter(report.diameters, f"thigh_{side}")
+    ca = _resolve_diameter(report.diameters, f"calf_{side}")
+    for d in (th, ca):
+        if d is not None:
+            hw = _half_width_from_diameter(d)
+            if hw is not None:
+                cands.append(float(hw))
+    return max(cands) if cands else None
 
 
 def _knee_center_and_placement(
@@ -2276,19 +2323,29 @@ def _append_knee_softs(
     height_m: float | None,
     messages: list[str],
 ) -> None:
-    """0045 B5: post-pass knee soft ellipsoids after limbs emit."""
+    """0045 B5 + 0071: seam-scaled anisotropic knee softs after limbs emit (pre-adduction)."""
     for side in ("l", "r"):
         center_place = _knee_center_and_placement(report, side, skeleton)
         if center_place is None:
             continue  # skip missing joint — not fail
         center, placement = center_place
-        adj = _knee_adj_radius_m(parts, side, report)
-        r: float | None = KNEE_SOFT_FRAC * adj if adj is not None else None
+        adj = _knee_seam_radius_m(parts, side, report)
+        base: float | None = KNEE_SOFT_FRAC * adj if adj is not None else None
         if height_m is not None and height_m > 0:
             floor = KNEE_SOFT_MIN_FRAC_H * float(height_m)
-            r = max(r, floor) if r is not None else floor
-        if r is None:
+            base = max(base, floor) if base is not None else floor
+        if base is None:
             continue
+        rx = max(base, 1e-4)
+        ry = max(base * KNEE_SOFT_RY_FRAC, 1e-4)
+        rz = max(base * KNEE_SOFT_RZ_FRAC, 1e-4)
+        sign = 1.0 if side == "r" else -1.0
+        cx = float(center[0]) + sign * KNEE_SOFT_OUTER_FRAC_RX * rx
+        cy = float(center[1]) + KNEE_SOFT_REAR_FRAC_RY * ry
+        cz = float(center[2])
+        # Placement (P3-7b): full3d when |cy| >= 1e-3 after bias; else keep original
+        if abs(cy) >= 1e-3:
+            placement = "full3d"
         name = f"RECIPE_knee_soft_{side}"
         _append_part(
             parts,
@@ -2296,15 +2353,15 @@ def _append_knee_softs(
                 name=name,
                 role="limb_segment",
                 kind="ellipsoid",
-                center=center,
-                rx_m=r,
-                ry_m=r,
-                rz_m=r,
+                center=[cx, cy, cz],
+                rx_m=rx,
+                ry_m=ry,
+                rz_m=rz,
                 placement=placement,
                 label=name,
             ),
         )
-        messages.append(f"knee_soft_{side}: r={r:.4f}")
+        messages.append(f"knee_soft_{side}: rx={rx:.4f} ry={ry:.4f} rz={rz:.4f}")
 
 
 def _append_all_hip_softs(
@@ -5204,6 +5261,8 @@ def run_blockout_emit_setup(
 __all__ = [
     "AXIS_NOTES",
     "BPY_BASENAME",
+    "CALF_BELLY_LAT_FRAC",
+    "CALF_BELLY_REAR_FRAC",
     "CALF_BELLY_SCALE",
     "CALF_DIST_END_SCALE",
     "CALF_PROX_END_SCALE",
@@ -5240,6 +5299,10 @@ __all__ = [
     "JSON_BASENAME",
     "KNEE_SOFT_FRAC",
     "KNEE_SOFT_MIN_FRAC_H",
+    "KNEE_SOFT_OUTER_FRAC_RX",
+    "KNEE_SOFT_REAR_FRAC_RY",
+    "KNEE_SOFT_RY_FRAC",
+    "KNEE_SOFT_RZ_FRAC",
     "LIMB_DISTAL_SOFT_SCALE",
     "MIDLINE_X_TOL_M",
     "NECK_FORWARD_TILT_DEG",
@@ -5291,6 +5354,8 @@ __all__ = [
     "_build_thigh_tapered",
     "_co_shift_thigh_taper_dist",
     "_glute_or_hip_half_depth_m",
+    "_knee_adj_radius_m",
+    "_knee_seam_radius_m",
     "_midpoint_of_joints",
     "_pelvis_ref_rear_y",
     "build_blockout_recipe",
