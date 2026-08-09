@@ -2103,8 +2103,12 @@ def test_recipe__axial_chest_y_prefers_mid_not_front() -> None:
     """0032 pin: shoulders y null + chest_front=-0.13 + mid=0 → axial Y≈0, not front.
 
     0050: neck tip leans -Y by L*sin(tilt); base p0 stays mid.
+    0065: chest oval alone gets full3d rear bias; waist/hip stay mid.
     """
-    from meshops.proportion.blockout_recipe import NECK_FORWARD_TILT_DEG
+    from meshops.proportion.blockout_recipe import (
+        NECK_FORWARD_TILT_DEG,
+        TORSO_CHEST_Y_REAR_BIAS_FRAC_RY,
+    )
 
     report = _axial_pin_report(chest_front_y=-0.13, chest_mid_y=0.0, shoulder_y=None)
     pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
@@ -2118,7 +2122,13 @@ def test_recipe__axial_chest_y_prefers_mid_not_front() -> None:
     assert ovals
     for o in ovals:
         assert o.center is not None
-        assert o.center[1] == pytest.approx(0.0, abs=1e-6)
+        if o.name == "RECIPE_torso_oval_chest":
+            # 0065 B5: full3d chest rear bias (mid=0 → cy = bias * ry)
+            ry = float(o.ry_m or 0.0)
+            expected_cy = 0.0 + TORSO_CHEST_Y_REAR_BIAS_FRAC_RY * ry
+            assert o.center[1] == pytest.approx(expected_cy, abs=1e-6)
+        else:
+            assert o.center[1] == pytest.approx(0.0, abs=1e-6)
         assert o.center[1] != pytest.approx(-0.13, abs=1e-3)
     bridges = [p for p in pkg.parts if p.role == "shoulder_bridge"]
     assert bridges

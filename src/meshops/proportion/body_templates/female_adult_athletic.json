@@ -25,7 +25,7 @@
     "cleft_frac": 0.12
   },
   "pelvis_y_m": 0.027,
-  "torso_waist_taper": 0.14,
+  "torso_waist_taper": 0.22,
   "thigh_tilt_deg": 10.0,
   "neck_thickness_scale": 0.72675,
   "neck_thickness_notes": {
