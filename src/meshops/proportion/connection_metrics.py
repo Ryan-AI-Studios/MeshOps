@@ -212,6 +212,10 @@ def _hip_pair(
     by_name: dict[str, RecipePart],
     side: Literal["l", "r"],
 ) -> tuple[RecipePart, RecipePart] | None:
+    # Primary order intentional (0039/0046): hip_bridge first, then limb_thigh.
+    # 0070 B10 does NOT reorder this — it only keeps thigh_taper_dist out of the
+    # thigh fallback so dist never wins hip_pair / outer. resolve_join_connections
+    # still appends RECIPE_limb_thigh when bridge was primary (B14 join-ready path).
     child = _find_named(
         by_name,
         f"RECIPE_hip_bridge_{side}",

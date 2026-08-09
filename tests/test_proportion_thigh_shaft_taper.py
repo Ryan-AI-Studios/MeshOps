@@ -470,6 +470,58 @@ def test_t8b_hip_pair_fallback_excludes_taper() -> None:
     assert child.name == "RECIPE_custom_thigh_l"
 
 
+def test_t8c_hip_bridge_primary_thigh_still_joined() -> None:
+    """T8c / B10: hip_bridge stays primary; limb_thigh still in join rows for B14.
+
+    Codex misread B10 as requiring limb_thigh over hip_bridge. Product still has
+    both; resolve_join_connections dual-rows thigh when bridge wins hip_pair.
+    """
+    from meshops.proportion.connection_metrics import resolve_join_connections
+
+    parts = [
+        _part(
+            "RECIPE_hip_bridge_l",
+            role="hip_bridge",
+            kind="ellipsoid",
+            center=[-0.16, 0.03, 0.90],
+            rx_m=0.03,
+            ry_m=0.03,
+            rz_m=0.03,
+        ),
+        _part(
+            "RECIPE_limb_thigh_l",
+            radius_m=0.0613,
+            p0=[-0.22, 0.0, 0.95],
+            p1=[-0.15, 0.0, 0.725],
+        ),
+        _part(
+            "RECIPE_thigh_taper_dist_l",
+            radius_m=0.049,
+            p0=[-0.15, 0.0, 0.725],
+            p1=[-0.08, 0.0, 0.50],
+        ),
+        _part(
+            "RECIPE_pelvis_oval",
+            role="pelvis",
+            kind="ellipsoid",
+            center=[0.0, 0.0, 0.90],
+            rx_m=0.12,
+            ry_m=0.08,
+            rz_m=0.06,
+        ),
+    ]
+    by_name = {p.name: p for p in parts}
+    pair = _hip_pair(parts, by_name, "l")
+    assert pair is not None
+    child, _parent = pair
+    assert child.name == "RECIPE_hip_bridge_l"
+    rows = resolve_join_connections(parts)
+    hip_children = {c.name for cid, c, _p, _ax in rows if cid == "hip_l"}
+    assert "RECIPE_hip_bridge_l" in hip_children
+    assert "RECIPE_limb_thigh_l" in hip_children
+    assert "RECIPE_thigh_taper_dist_l" not in hip_children
+
+
 def test_t9_thigh_outer_binds_on_limb_thigh() -> None:
     """T9: C_thigh_outer uses full hip->knee chain mid when split (not prox mid)."""
     from meshops.proportion.blockout_recipe import BlockoutRecipePackage
