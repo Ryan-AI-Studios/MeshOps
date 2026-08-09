@@ -76,15 +76,20 @@ CALF_BELLY_SCALE: Final[float] = 1.08
 CALF_PROX_END_SCALE: Final[float] = 0.88
 CALF_DIST_END_SCALE: Final[float] = 0.72
 # 0045 B3: arm distal soft beads only (not thigh — P2-1 / B13).
+# 0062 B9: shrink to forearm only (elbow_soft owns UA distal joint; no UA dist_soft).
 LIMB_DISTAL_SOFT_SCALE: Final[float] = 0.78
-_LIMB_DIST_SOFT_BANDS: Final[frozenset[str]] = frozenset(
-    {
-        "upper_arm_l",
-        "upper_arm_r",
-        "forearm_l",
-        "forearm_r",
-    }
-)
+_LIMB_DIST_SOFT_BANDS: Final[frozenset[str]] = frozenset({"forearm_l", "forearm_r"})
+# 0062 B1-B6 / B10-B11: arm shaft taper + elbow soft + wrist palm floor.
+UA_PROX_SHAFT_SCALE: Final[float] = 1.00  # B1
+UA_DIST_SHAFT_SCALE: Final[float] = 0.88  # B2
+UA_SPLIT_T: Final[float] = 0.50  # B3 / B15
+FA_PROX_SHAFT_SCALE: Final[float] = 1.00  # B4
+FA_DIST_SHAFT_SCALE: Final[float] = 0.78  # B5
+FA_SPLIT_T: Final[float] = 0.50  # B6 / B15
+_ARM_SHAFT_R_FLOOR: Final[float] = 1e-4
+ELBOW_SOFT_SCALE: Final[float] = 1.10  # B10 — readable bulge, NOT 0.55
+ELBOW_SOFT_MIN_FRAC_H: Final[float] = 0.016
+WRIST_SOFT_PALM_RX_FRAC: Final[float] = 0.85  # B11
 # 0045 B5: knee soft joint mass.
 KNEE_SOFT_FRAC: Final[float] = 0.55
 KNEE_SOFT_MIN_FRAC_H: Final[float] = 0.018
@@ -1838,6 +1843,70 @@ def _build_thigh_tapered(
     return parts
 
 
+def _build_arm_tapered(
+    *,
+    side: str,
+    band: Literal["ua", "fa"],
+    p0: list[float],
+    p1: list[float],
+    radius: float,
+    placement: Literal["full3d", "front_plane"],
+    messages: list[str],
+) -> list[RecipePart]:
+    """0062 B7: prox limb_upper_arm|forearm + dist arm_taper_dist_ua|fa (shaft taper).
+
+    Prox keeps upper_arm/forearm class name; dist uses arm_taper token → unknown.
+    """
+    mid_r = float(radius)
+    if band == "ua":
+        prox_scale = UA_PROX_SHAFT_SCALE
+        dist_scale = UA_DIST_SHAFT_SCALE
+        t = UA_SPLIT_T
+        prox_name = f"RECIPE_limb_upper_arm_{side}"
+        dist_name = f"RECIPE_arm_taper_dist_ua_{side}"
+        msg_prefix = f"upper_arm_{side}"
+    else:
+        prox_scale = FA_PROX_SHAFT_SCALE
+        dist_scale = FA_DIST_SHAFT_SCALE
+        t = FA_SPLIT_T
+        prox_name = f"RECIPE_limb_forearm_{side}"
+        dist_name = f"RECIPE_arm_taper_dist_fa_{side}"
+        msg_prefix = f"forearm_{side}"
+    prox_r = max(mid_r * prox_scale, _ARM_SHAFT_R_FLOOR)
+    dist_r = max(mid_r * dist_scale, _ARM_SHAFT_R_FLOOR)
+    mid = [
+        float(p0[0]) + t * (float(p1[0]) - float(p0[0])),
+        float(p0[1]) + t * (float(p1[1]) - float(p0[1])),
+        float(p0[2]) + t * (float(p1[2]) - float(p0[2])),
+    ]
+    parts = [
+        RecipePart(
+            name=prox_name,
+            role="limb_segment",
+            kind="capsule",
+            p0=[float(p0[0]), float(p0[1]), float(p0[2])],
+            p1=mid,
+            radius_m=prox_r,
+            placement=placement,
+            label=prox_name,
+        ),
+        RecipePart(
+            name=dist_name,
+            role="limb_segment",
+            kind="capsule",
+            p0=list(mid),
+            p1=[float(p1[0]), float(p1[1]), float(p1[2])],
+            radius_m=dist_r,
+            placement=placement,
+            label=dist_name,
+        ),
+    ]
+    messages.append(
+        f"{msg_prefix}: shaft_taper prox={prox_r:.4f} dist={dist_r:.4f} split_t={t:.2f}"
+    )
+    return parts
+
+
 def _build_calf_split(
     *,
     side: str,
@@ -2085,6 +2154,46 @@ def _build_limbs(
             )
             messages.append(f"thigh_{side}: prox_soft r={soft_r:.4f}")
             continue
+        # 0062 B4/B7/B16: arm → prox limb + dist arm_taper (not single tube).
+        if band_id in ("upper_arm_l", "upper_arm_r", "forearm_l", "forearm_r"):
+            side = "l" if band_id.endswith("_l") else "r"
+            arm_band: Literal["ua", "fa"] = "ua" if band_id.startswith("upper_arm") else "fa"
+            arm_parts = _build_arm_tapered(
+                side=side,
+                band=arm_band,
+                p0=p0,
+                p1=p1,
+                radius=float(radius),
+                placement=placement,
+                messages=messages,
+            )
+            parts.extend(arm_parts)
+            # B9/B16: forearm wrist bead only @ arm_taper_dist_fa.p1 (true wrist).
+            # Never emit UA dist_soft (elbow_soft owns joint).
+            if band_id in _LIMB_DIST_SOFT_BANDS:
+                soft_r = max(float(radius) * LIMB_DISTAL_SOFT_SCALE, 1e-4)
+                soft_name = f"RECIPE_dist_soft_{band_id}"
+                # Dist segment is last of the pair; p1 is original wrist endpoint.
+                dist_seg = arm_parts[-1]
+                wrist = (
+                    list(dist_seg.p1)
+                    if dist_seg.p1 is not None
+                    else [float(p1[0]), float(p1[1]), float(p1[2])]
+                )
+                parts.append(
+                    RecipePart(
+                        name=soft_name,
+                        role="limb_segment",
+                        kind="ellipsoid",
+                        center=wrist,
+                        rx_m=soft_r,
+                        ry_m=soft_r,
+                        rz_m=soft_r,
+                        placement=placement,
+                        label=soft_name,
+                    )
+                )
+            continue
         name = f"RECIPE_limb_{band_id}"
         parts.append(
             RecipePart(
@@ -2098,23 +2207,6 @@ def _build_limbs(
                 label=name,
             )
         )
-        # 0045 B3-B4: arm distal soft only (not thigh — P2-1 / B13).
-        if band_id in _LIMB_DIST_SOFT_BANDS:
-            soft_r = max(float(radius) * LIMB_DISTAL_SOFT_SCALE, 1e-4)
-            soft_name = f"RECIPE_dist_soft_{band_id}"
-            parts.append(
-                RecipePart(
-                    name=soft_name,
-                    role="limb_segment",
-                    kind="ellipsoid",
-                    center=[float(p1[0]), float(p1[1]), float(p1[2])],
-                    rx_m=soft_r,
-                    ry_m=soft_r,
-                    rz_m=soft_r,
-                    placement=placement,
-                    label=soft_name,
-                )
-            )
 
     # Cap skip flood: at most 8 segment skip messages already one-per-band
     _ = skip_count  # ≤8 by construction (SEED map size)
@@ -2220,6 +2312,105 @@ def _append_knee_softs(
             ),
         )
         messages.append(f"knee_soft_{side}: r={r:.4f}")
+
+
+def _append_elbow_softs(
+    parts: list[RecipePart],
+    report: ProportionReport,
+    skeleton: BlockoutSkeleton | None,
+    height_m: float | None,
+    messages: list[str],
+) -> None:
+    """0062 B10: post-pass elbow soft ellipsoids (readable joint > adjacent shafts).
+
+    Center from arm seam (ua_dist.p1 / ua.p1 / fa.p0) - not landmark-only front_plane
+    y=0 that can desync from full3d arms (AI2 P2-2). Scale 1.10x max adj (AI2 P2-1).
+    """
+    _ = report, skeleton  # reserved for future landmark fallback; seam-first is binding
+    for side in ("l", "r"):
+        by = {p.name: p for p in parts}
+        ua_dist = by.get(f"RECIPE_arm_taper_dist_ua_{side}")
+        ua = by.get(f"RECIPE_limb_upper_arm_{side}")
+        fa = by.get(f"RECIPE_limb_forearm_{side}")
+        # Seam center (binding): ua_dist.p1 or ua.p1 or fa.p0
+        seam: list[float] | None = None
+        if ua_dist is not None and ua_dist.p1 is not None:
+            seam = list(ua_dist.p1)
+        elif ua is not None and ua.p1 is not None:
+            seam = list(ua.p1)
+        elif fa is not None and fa.p0 is not None:
+            seam = list(fa.p0)
+        if seam is None:
+            continue  # no seam - skip (do not invent y=0 front_plane alone)
+        # B10: adj = max(ua_dist_r, fa_prox_r); fall back to ua when no dist seg.
+        adj_cands: list[float] = []
+        if ua_dist is not None and ua_dist.radius_m is not None:
+            adj_cands.append(float(ua_dist.radius_m))
+        elif ua is not None and ua.radius_m is not None:
+            adj_cands.append(float(ua.radius_m))
+        if fa is not None and fa.radius_m is not None:
+            adj_cands.append(float(fa.radius_m))
+        if not adj_cands:
+            continue
+        adj = max(adj_cands)
+        r = ELBOW_SOFT_SCALE * adj  # 1.10x - must exceed adjacent shafts
+        if height_m is not None and height_m > 0:
+            r = max(r, ELBOW_SOFT_MIN_FRAC_H * float(height_m))
+        placement: Literal["full3d", "front_plane"] = (
+            "full3d" if math.isfinite(float(seam[1])) else "front_plane"
+        )
+        name = f"RECIPE_elbow_soft_{side}"
+        _append_part(
+            parts,
+            RecipePart(
+                name=name,
+                role="limb_segment",
+                kind="ellipsoid",
+                center=seam,
+                rx_m=r,
+                ry_m=r,
+                rz_m=r,
+                placement=placement,
+                label=name,
+            ),
+        )
+        messages.append(f"elbow_soft_{side}: r={r:.4f}")
+
+
+def _apply_wrist_palm_floor(
+    parts: list[RecipePart],
+    messages: list[str],
+) -> None:
+    """0062 B11: raise wrist dist_soft to max(current, fa_dist, 0.85*palm.rx).
+
+    Re-pin soft center to arm_taper_dist_fa.p1 (true wrist) when present.
+    """
+    by = {p.name: p for p in parts}
+    for side in ("l", "r"):
+        soft = by.get(f"RECIPE_dist_soft_forearm_{side}")
+        if soft is None:
+            continue
+        fa_dist = by.get(f"RECIPE_arm_taper_dist_fa_{side}")
+        palm = by.get(f"RECIPE_palm_{side}")
+        r = 0.0
+        if soft.rx_m is not None:
+            r = max(r, float(soft.rx_m))
+        if fa_dist is not None and fa_dist.radius_m is not None:
+            r = max(r, float(fa_dist.radius_m))
+        palm_floor: float | None = None
+        if palm is not None and palm.rx_m is not None:
+            palm_floor = WRIST_SOFT_PALM_RX_FRAC * float(palm.rx_m)
+            r = max(r, palm_floor)
+        if r <= 0.0:
+            continue
+        prev = float(soft.rx_m) if soft.rx_m is not None else 0.0
+        soft.rx_m = r
+        soft.ry_m = r
+        soft.rz_m = r
+        if fa_dist is not None and fa_dist.p1 is not None:
+            soft.center = list(fa_dist.p1)
+        if palm_floor is not None and r >= palm_floor - 1e-12 and r > prev + 1e-12:
+            messages.append(f"wrist_soft_{side}: palm_floor r={r:.4f} (0.85*palm.rx)")
 
 
 # ---------------------------------------------------------------------------
@@ -3028,6 +3219,14 @@ def build_blockout_recipe(
             resolved.height_m,
             messages,
         )
+        # 0062 B10: elbow soft post-pass (seam center + 1.10x adj)
+        _append_elbow_softs(
+            parts,
+            report,
+            skeleton,
+            resolved.height_m,
+            messages,
+        )
     else:
         messages.append("--no-limbs: limb_segment parts omitted")
 
@@ -3043,6 +3242,8 @@ def build_blockout_recipe(
             messages=messages,
         ):
             _append_part(parts, p)
+        # 0062 B11: wrist bead continuous with FA distal + mild palm half-width floor
+        _apply_wrist_palm_floor(parts, messages)
     if feet:
         from meshops.proportion.extremity_recipe import build_foot_parts
 
@@ -4954,6 +5155,11 @@ __all__ = [
     "DELT_OUTER_X_FRAC",
     "DELT_RY_FRAC",
     "DELT_RZ_FRAC",
+    "ELBOW_SOFT_MIN_FRAC_H",
+    "ELBOW_SOFT_SCALE",
+    "FA_DIST_SHAFT_SCALE",
+    "FA_PROX_SHAFT_SCALE",
+    "FA_SPLIT_T",
     "GLUTE_BOTTOM_UNDER_MID_M",
     "GLUTE_SEAT_BEYOND_REF_Y",
     "GLUTE_SEAT_RY_ANISOTROPY_MAX",
@@ -5001,15 +5207,22 @@ __all__ = [
     "TORSO_OVAL_RZ_SPAN_FRAC",
     "TORSO_WAIST_PINCH_TAPER_GATE",
     "TORSO_WAIST_RX_MAX_FRAC_CHEST",
+    "UA_DIST_SHAFT_SCALE",
+    "UA_PROX_SHAFT_SCALE",
+    "UA_SPLIT_T",
+    "WRIST_SOFT_PALM_RX_FRAC",
     "_BASELINE_ROLES_NO_PROFILE",
     "_MICHELIN_FRAC",
     "BlockoutRecipePackage",
     "RecipeMetrics",
     "RecipePart",
+    "_append_elbow_softs",
     "_apply_glute_seat_mass",
     "_apply_join_ready_overlaps",
     "_apply_neck_column_priors",
     "_apply_thigh_adduction",
+    "_apply_wrist_palm_floor",
+    "_build_arm_tapered",
     "_build_thigh_tapered",
     "_co_shift_thigh_taper_dist",
     "_glute_or_hip_half_depth_m",

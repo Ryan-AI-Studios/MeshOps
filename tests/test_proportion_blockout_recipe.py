@@ -714,34 +714,47 @@ def test_recipe__t3_thigh_no_dist_soft() -> None:
 
 
 def test_recipe__t4_arm_dist_soft_scale() -> None:
-    """0045 T4: upper_arm + forearm emit dist_soft; soft_r ~ 0.78 x shaft_r."""
-    from meshops.proportion.blockout_recipe import LIMB_DISTAL_SOFT_SCALE
+    """0045 T4 + 0062: forearm dist_soft only; soft @ arm_taper_dist_fa.p1; mid*0.78."""
+    from meshops.proportion.blockout_recipe import (
+        FA_PROX_SHAFT_SCALE,
+        LIMB_DISTAL_SOFT_SCALE,
+        UA_PROX_SHAFT_SCALE,
+    )
 
     arm_hw = 0.04
     report = _limb_mass_report(arm_hw=arm_hw)
     pkg = build_blockout_recipe(report, limbs=True)
     by_name = {p.name: p for p in pkg.parts}
     expected_soft = max(arm_hw * LIMB_DISTAL_SOFT_SCALE, 1e-4)
-    for band in (
-        "upper_arm_l",
-        "upper_arm_r",
-        "forearm_l",
-        "forearm_r",
-    ):
+    # 0062 B9: no UA dist_soft (elbow owns joint)
+    for side in ("l", "r"):
+        assert f"RECIPE_dist_soft_upper_arm_{side}" not in by_name
+        ua = by_name[f"RECIPE_limb_upper_arm_{side}"]
+        assert ua.kind == "capsule"
+        # Prox only (radius may equal mid*1.0)
+        assert ua.radius_m == pytest.approx(arm_hw * UA_PROX_SHAFT_SCALE, abs=1e-9)
+        assert f"RECIPE_arm_taper_dist_ua_{side}" in by_name
+    # Forearm: soft at true wrist (fa taper p1), not limb mid
+    for side in ("l", "r"):
+        band = f"forearm_{side}"
         shaft = by_name[f"RECIPE_limb_{band}"]
+        fa_dist = by_name[f"RECIPE_arm_taper_dist_fa_{side}"]
         soft = by_name[f"RECIPE_dist_soft_{band}"]
         assert shaft.kind == "capsule"
         assert soft.kind == "ellipsoid"
         assert soft.role == "limb_segment"
-        assert shaft.radius_m == pytest.approx(arm_hw, abs=1e-9)
+        assert shaft.radius_m == pytest.approx(arm_hw * FA_PROX_SHAFT_SCALE, abs=1e-9)
         assert soft.rx_m == pytest.approx(expected_soft, abs=1e-9)
         assert soft.ry_m == pytest.approx(expected_soft, abs=1e-9)
         assert soft.rz_m == pytest.approx(expected_soft, abs=1e-9)
-        # Dist soft centered at shaft p1
-        assert soft.center is not None and shaft.p1 is not None
-        assert float(soft.center[0]) == pytest.approx(float(shaft.p1[0]))
-        assert float(soft.center[1]) == pytest.approx(float(shaft.p1[1]))
-        assert float(soft.center[2]) == pytest.approx(float(shaft.p1[2]))
+        assert soft.center is not None and fa_dist.p1 is not None
+        assert float(soft.center[0]) == pytest.approx(float(fa_dist.p1[0]))
+        assert float(soft.center[1]) == pytest.approx(float(fa_dist.p1[1]))
+        assert float(soft.center[2]) == pytest.approx(float(fa_dist.p1[2]))
+        # Not limb prox mid
+        assert shaft.p1 is not None
+        mid_diff = sum(abs(float(soft.center[i]) - float(shaft.p1[i])) for i in range(3))
+        assert mid_diff > 1e-6
 
 
 def test_recipe__t5_knee_soft_radius_mixed_thigh_calf() -> None:
@@ -1096,7 +1109,7 @@ def test_recipe__t7_no_template_adduction_identity() -> None:
 
 
 def test_recipe__t8_0045_fences_after_adduction() -> None:
-    """0046 T8 + 0070: arm dist_soft + calf belly + knee; engagement vs chain knee."""
+    """0046 T8 + 0070 + 0062: forearm dist_soft only + elbow; calf/knee/thigh fences."""
     import math
 
     from meshops.proportion.blockout_recipe import CALF_BELLY_SCALE
@@ -1105,9 +1118,13 @@ def test_recipe__t8_0045_fences_after_adduction() -> None:
     tpl = _template_applied_tilt(thigh_tilt_deg=10.0)
     pkg = build_blockout_recipe(report, limbs=True, template_applied=tpl)  # type: ignore[arg-type]
     by = {p.name: p for p in pkg.parts}
-    # Arm dist_soft present
-    for band in ("upper_arm_l", "upper_arm_r", "forearm_l", "forearm_r"):
-        assert f"RECIPE_dist_soft_{band}" in by
+    # 0062 B9: forearm dist_soft only; UA dist_soft absent; elbow soft present
+    for side in ("l", "r"):
+        assert f"RECIPE_dist_soft_forearm_{side}" in by
+        assert f"RECIPE_dist_soft_upper_arm_{side}" not in by
+        assert f"RECIPE_elbow_soft_{side}" in by
+        assert f"RECIPE_arm_taper_dist_ua_{side}" in by
+        assert f"RECIPE_arm_taper_dist_fa_{side}" in by
     # Calf belly
     for side in ("l", "r"):
         cyl = by[f"RECIPE_calf_cyl_{side}"]
