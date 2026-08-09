@@ -279,11 +279,14 @@ def classify_part_name(name: str) -> tuple[ConstraintRole, Side]:
     # 0045 limb visual mass softs: before generic thigh/upper_arm/forearm (B6).
     # dist_soft must not label as arm ConstraintRole; knee_soft explicit pin.
     # 0046 B7: prox_soft before generic thigh (C_no_dup safe).
+    # 0070 B5: thigh_taper (dist shaft seg) → unknown before generic thigh (C_no_dup).
     if "knee_soft" in lower:
         return "unknown", side
     if "dist_soft" in lower:
         return "unknown", side
     if "prox_soft" in lower:
+        return "unknown", side
+    if "thigh_taper" in lower:
         return "unknown", side
     if "thigh" in lower or "limb_thigh" in lower:
         return "thigh", side
@@ -435,6 +438,30 @@ def _outer_x(part: RecipePart, side: Side) -> float | None:
     if side == "l":
         return cx - half
     return cx
+
+
+def _thigh_chain_outer_x(
+    indexed: list[tuple[RecipePart, ConstraintRole, Side]],
+    thigh: RecipePart,
+    side: Side,
+) -> float | None:
+    """0070: C_thigh_outer uses full hip->knee chain mid when shaft is split.
+
+    Prox segment mid sits ~0.25x along an adducted chain and falsely reads more
+    lateral than the pre-0070 full capsule mid. Prefer chain ends:
+    limb_thigh.p0 + taper_dist.p1, half-extent from prox shaft radius.
+    """
+    if side not in ("l", "r"):
+        return _outer_x(thigh, side)
+    by_name = {p.name: p for p, _, _ in indexed}
+    dist = by_name.get(f"RECIPE_thigh_taper_dist_{side}")
+    if dist is None or thigh.p0 is None or dist.p1 is None or len(thigh.p0) < 1 or len(dist.p1) < 1:
+        return _outer_x(thigh, side)
+    cx = 0.5 * (float(thigh.p0[0]) + float(dist.p1[0]))
+    half = _half_extent_x(thigh) or 0.0
+    if side == "r":
+        return cx + half
+    return cx - half
 
 
 def _index_parts(
@@ -872,7 +899,11 @@ def _check_outer(
         parts = _find(indexed, role, side)
         if not parts:
             continue
-        outer = _outer_x(parts[0], side)  # type: ignore[arg-type]
+        # 0070: thigh outer measured on full hip→knee chain when split present.
+        if role == "thigh":
+            outer = _thigh_chain_outer_x(indexed, parts[0], side)  # type: ignore[arg-type]
+        else:
+            outer = _outer_x(parts[0], side)  # type: ignore[arg-type]
         hip = _hip_outer_x(indexed, side)  # type: ignore[arg-type]
         if outer is None or hip is None:
             statuses.append("skip")
@@ -1817,6 +1848,8 @@ def _free_parts(
     indexed = _index_parts(package)
     breast_dual = _has_dual_sides(indexed, "breast")
     glute_dual = _has_dual_sides(indexed, "glute")
+    # 0070 B13: freeze split thigh chain when taper_dist sibling present.
+    by_name = {p.name: p for p in package.parts}
     for part, role, side in indexed:
         if role == "unknown":
             continue
@@ -1824,6 +1857,8 @@ def _free_parts(
             continue
         if part_y(part) is None and part_x(part) is None:
             continue
+        if role == "thigh" and side in ("l", "r") and f"RECIPE_thigh_taper_dist_{side}" in by_name:
+            continue  # freeze split chain - do not free-DOF Y walk
         target = _role_target_y(role, side, indexed, report, template_applied)
         if target is not None:
             free.append((part, role, side))
@@ -1865,8 +1900,16 @@ def _project_hard_constraints(
                 set_part_y(ankles[0], py + 0.5 * ext)
 
     # Thigh / glute outer X → hip_bridge outer
+    # 0070 B13: skip outer-X for thigh when taper_dist sibling exists (freeze chain).
+    by_name = {p.name: p for p, _, _ in indexed}
     for role in ("thigh", "glute"):
         for side in ("l", "r"):
+            if (
+                role == "thigh"
+                and side in ("l", "r")
+                and f"RECIPE_thigh_taper_dist_{side}" in by_name
+            ):
+                continue
             parts = _find(indexed, role, side)  # type: ignore[arg-type]
             if not parts:
                 continue

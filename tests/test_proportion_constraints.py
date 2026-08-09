@@ -191,6 +191,14 @@ def test_classify__t0_prox_soft_unknown() -> None:
     assert classify_part_name("RECIPE_prox_soft_thigh_r") == ("unknown", "r")
 
 
+def test_classify__t0_thigh_taper_unknown() -> None:
+    """0070 B5: RECIPE_thigh_taper_dist_* → unknown before generic thigh match."""
+    assert classify_part_name("RECIPE_thigh_taper_dist_l") == ("unknown", "l")
+    assert classify_part_name("RECIPE_thigh_taper_dist_r") == ("unknown", "r")
+    # Still only limb_thigh is thigh-class
+    assert classify_part_name("RECIPE_limb_thigh_l") == ("thigh", "l")
+
+
 def test_classify__t0b_0046_dist_knee_still_unknown() -> None:
     """0046 T0b: dist_soft / knee_soft remain unknown after prox_soft branch."""
     assert classify_part_name("RECIPE_dist_soft_upper_arm_l") == ("unknown", "l")
@@ -1495,7 +1503,7 @@ def test_constraints__t6_calf_slant_and_no_dup_with_limb_mass() -> None:
 
 
 def test_constraints__t9_no_dup_calf_slant_with_prox_soft() -> None:
-    """0046 T9: prox_soft + limb mass package → C_no_dup_limb + C_calf_slant pass."""
+    """0046 T9 + 0070: prox_soft + taper_dist + limb mass → C_no_dup_limb + C_calf_slant."""
     pkg = _pkg(
         [
             _part(
@@ -1534,6 +1542,17 @@ def test_constraints__t9_no_dup_calf_slant_with_prox_soft() -> None:
                 rz_m=None,
                 radius_m=0.06,
                 p0=[0.12, 0.0, 0.95],
+                p1=[0.12, 0.0, 0.725],
+            ),
+            _part(
+                "RECIPE_thigh_taper_dist_l",
+                kind="capsule",
+                center=None,
+                rx_m=None,
+                ry_m=None,
+                rz_m=None,
+                radius_m=0.048,
+                p0=[0.12, 0.0, 0.725],
                 p1=[0.12, 0.0, 0.50],
             ),
             _part(
@@ -1578,6 +1597,7 @@ def test_constraints__t9_no_dup_calf_slant_with_prox_soft() -> None:
     assert by_id["C_calf_slant"].status == "pass", by_id["C_calf_slant"].message
     assert by_id["C_no_dup_limb"].status == "pass", by_id["C_no_dup_limb"].message
     assert classify_part_name("RECIPE_prox_soft_thigh_l") == ("unknown", "l")
+    assert classify_part_name("RECIPE_thigh_taper_dist_l") == ("unknown", "l")
 
 
 def test_constraints__t13_thigh_outer_present_after_adduction_geometry() -> None:
@@ -1771,6 +1791,52 @@ def test_hip_pair__t11_excludes_prox_soft_decoy() -> None:
     assert child.name == "RECIPE_custom_thigh_l"
     assert parent.name == "RECIPE_pelvis_oval"
     assert "prox_soft" not in child.name
+
+
+def test_hip_pair__t11_excludes_thigh_taper_decoy() -> None:
+    """0070 B10: _hip_pair proximal fallback skips thigh_taper dist segment."""
+    from meshops.proportion.connection_metrics import _hip_pair
+
+    thigh = _part(
+        "RECIPE_custom_thigh_l",
+        kind="capsule",
+        center=None,
+        rx_m=None,
+        ry_m=None,
+        rz_m=None,
+        radius_m=0.06,
+        p0=[0.12, 0.0, 0.95],
+        p1=[0.12, 0.0, 0.725],
+    )
+    decoy = _part(
+        "RECIPE_thigh_taper_dist_l",
+        kind="capsule",
+        center=None,
+        rx_m=None,
+        ry_m=None,
+        rz_m=None,
+        radius_m=0.048,
+        p0=[0.12, 0.0, 0.725],
+        p1=[0.12, 0.0, 0.50],
+    )
+    pelvis = _part(
+        "RECIPE_pelvis_oval",
+        role="pelvis",
+        kind="ellipsoid",
+        center=[0.0, 0.0, 0.90],
+        rx_m=0.12,
+        ry_m=0.08,
+        rz_m=0.06,
+    )
+    # Decoy first — substring thigh_l matches taper_dist without B10 guard
+    parts = [decoy, thigh, pelvis]
+    by_name = {p.name: p for p in parts}
+    pair = _hip_pair(parts, by_name, "l")
+    assert pair is not None
+    child, parent = pair
+    assert child.name == "RECIPE_custom_thigh_l"
+    assert parent.name == "RECIPE_pelvis_oval"
+    assert "thigh_taper" not in child.name
 
 
 def test_band_weighted_free_dof_score_ranks_glute_y() -> None:
@@ -2008,7 +2074,11 @@ def test_optimize_thigh_without_ankle_anchor_no_free_dofs() -> None:
 
 
 def test_optimize_thigh_with_anchors_moves_thigh_not_hip_bridge_y() -> None:
-    """P1: thigh mid target from hip+ankle; hip_bridge Y never free-walks."""
+    """P1: single-capsule thigh mid target from hip+ankle; hip_bridge Y never free-walks.
+
+    0070 note: when RECIPE_thigh_taper_dist_* is present, thigh is frozen from free
+    set (B13) — this pin keeps the legacy single-capsule free-DOF path.
+    """
     pkg = _pkg(
         [
             _part(
@@ -2056,6 +2126,62 @@ def test_optimize_thigh_with_anchors_moves_thigh_not_hip_bridge_y() -> None:
     assert thigh_y1 is not None
     # Frozen ankle Y preserved.
     assert part_y(by_name["RECIPE_ank_foot_l"]) == pytest.approx(0.04)
+
+
+def test_optimize_thigh_taper_split_not_in_free_set() -> None:
+    """0070 B13: when taper_dist sibling present, thigh excluded from free set."""
+    from meshops.proportion.constraints import _free_parts
+
+    pkg = _pkg(
+        [
+            _part(
+                "RECIPE_limb_thigh_l",
+                kind="capsule",
+                center=None,
+                rx_m=None,
+                ry_m=None,
+                rz_m=None,
+                radius_m=0.05,
+                p0=[0.1, 0.15, 0.5],
+                p1=[0.1, 0.15, 0.7],
+            ),
+            _part(
+                "RECIPE_thigh_taper_dist_l",
+                kind="capsule",
+                center=None,
+                rx_m=None,
+                ry_m=None,
+                rz_m=None,
+                radius_m=0.04,
+                p0=[0.1, 0.15, 0.7],
+                p1=[0.1, 0.15, 0.9],
+            ),
+            _part(
+                "RECIPE_hip_bridge",
+                role="hip_bridge",
+                kind="ellipsoid",
+                center=[0.0, 0.0, 0.95],
+                rx_m=0.15,
+                ry_m=0.06,
+                rz_m=0.05,
+            ),
+            _part(
+                "RECIPE_ank_foot_l",
+                kind="ellipsoid",
+                center=[0.1, 0.04, 0.06],
+                rx_m=0.03,
+                ry_m=0.03,
+                rz_m=0.03,
+            ),
+        ]
+    )
+    free = _free_parts(pkg, freeze_feet=True)
+    free_names = {p.name for p, _, _ in free}
+    assert "RECIPE_limb_thigh_l" not in free_names
+    # Optimize refuses or keeps split closed (no free thigh DOF).
+    with pytest.raises(ProportionError) as ei:
+        optimize_package(pkg, mode="fast", freeze_feet=True)
+    assert ei.value.code == "optimize_no_free_dofs"
 
 
 def test_optimize_glute_duals_with_gap_template_still_runs() -> None:

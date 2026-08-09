@@ -212,6 +212,10 @@ def _hip_pair(
     by_name: dict[str, RecipePart],
     side: Literal["l", "r"],
 ) -> tuple[RecipePart, RecipePart] | None:
+    # Primary order intentional (0039/0046): hip_bridge first, then limb_thigh.
+    # 0070 B10 does NOT reorder this — it only keeps thigh_taper_dist out of the
+    # thigh fallback so dist never wins hip_pair / outer. resolve_join_connections
+    # still appends RECIPE_limb_thigh when bridge was primary (B14 join-ready path).
     child = _find_named(
         by_name,
         f"RECIPE_hip_bridge_{side}",
@@ -221,13 +225,15 @@ def _hip_pair(
         child = _find_role(parts, "hip_bridge", side=side)
     if child is None:
         # Proximal thigh capsule fallback (0045 B11/P3-2: exclude dist_soft decoys;
-        # 0046 B8: also exclude prox_soft hip beads).
+        # 0046 B8: also exclude prox_soft hip beads;
+        # 0070 B10: exclude thigh_taper dist segment — never wins outer/hip_pair).
         for p in parts:
             if (
                 p.role == "limb_segment"
                 and f"thigh_{side}" in p.name
                 and "dist_soft" not in p.name
                 and "prox_soft" not in p.name
+                and "thigh_taper" not in p.name
             ):
                 child = p
                 break
