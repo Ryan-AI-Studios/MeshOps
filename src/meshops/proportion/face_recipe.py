@@ -36,7 +36,13 @@ _NOSE_BASE_Z_FRAC: Final[float] = 0.33
 _LIP_Z_FRAC: Final[float] = 0.20  # authoring choice, not Loomis third
 _NOSE_TIP_Y_FRAC_RY: Final[float] = 0.15
 _EYE_RADIUS_FRAC_H: Final[float] = 0.08
-_JAW_HALF_WIDTH_FRAC_RX: Final[float] = 0.85
+# 0055 — jaw soft mass ellipsoid freezes (public; use HeadBounds.H for Z fracs)
+JAW_RX_FRAC_HEAD_RX: Final[float] = 0.85
+JAW_RY_FRAC_HEAD_RY: Final[float] = 0.55
+JAW_RZ_FRAC_H: Final[float] = 0.15
+JAW_Z_CENTER_FRAC_H: Final[float] = 0.13
+JAW_Y_BIAS_FRAC_RY: Final[float] = 0.05
+JAW_X_BULGE_ALLOW_M: Final[float] = 0.015
 _HAIR_SHORT_RZ_FRAC: Final[float] = 0.25
 _BUN_R_FRAC_H: Final[float] = 0.12
 _LONG_PROXY_LEN_FRAC_H: Final[float] = 0.45
@@ -322,36 +328,6 @@ def _capsule(
     )
 
 
-def _box(
-    name: str,
-    role: str,
-    center: list[float],
-    *,
-    half_width: float,
-    half_depth: float,
-    z_bottom: float,
-    z_top: float,
-    placement: HeadPlacement,
-    parent_joint: str | None = None,
-) -> RecipePart:
-    from meshops.proportion.blockout_recipe import RecipePart
-
-    return RecipePart(
-        name=name,
-        role=role,  # type: ignore[arg-type]
-        kind="box",
-        center=center,
-        top_half_width_m=half_width,
-        bottom_half_width_m=half_width * 0.85,
-        half_depth_m=half_depth,
-        z_bottom_m=z_bottom,
-        z_top_m=z_top,
-        placement=placement,
-        label=name,
-        parent_joint=parent_joint,
-    )
-
-
 def _build_face_features(
     bounds: HeadBounds,
     *,
@@ -392,24 +368,33 @@ def _build_face_features(
 
     parts: list[RecipePart] = []
 
-    # Jaw wedge (box) below mid-face
-    jaw_half_w = _JAW_HALF_WIDTH_FRAC_RX * rx
-    jaw_z_top = z_chin + 0.28 * h
-    jaw_z_bot = z_chin - 0.02 * h
-    jaw_z_c = (jaw_z_top + jaw_z_bot) / 2.0
+    # 0055: jaw soft mass ellipsoid (not world-axis box); Z fracs use HeadBounds.H
+    jaw_rx = JAW_RX_FRAC_HEAD_RX * rx
+    jaw_ry = JAW_RY_FRAC_HEAD_RY * ry
+    jaw_rz = JAW_RZ_FRAC_H * h
+    jaw_z_c = z_chin + JAW_Z_CENTER_FRAC_H * h
+    jaw_y = face_y + JAW_Y_BIAS_FRAC_RY * ry
     parts.append(
-        _box(
+        _ellipsoid(
             "RECIPE_jaw",
             "jaw",
-            [0.0, face_y + 0.05 * ry, jaw_z_c],
-            half_width=jaw_half_w,
-            half_depth=0.55 * ry,
-            z_bottom=jaw_z_bot,
-            z_top=jaw_z_top,
+            [0.0, jaw_y, jaw_z_c],
+            jaw_rx,
+            jaw_ry,
+            jaw_rz,
             placement=placement,
             parent_joint=pj_jaw,
         )
     )
+    messages.append(
+        f"face: jaw soft mass ellipsoid rx={jaw_rx:.4f} ry={jaw_ry:.4f} rz={jaw_rz:.4f}"
+    )
+    # Product X-bulge vs head ellipsoid surface at jaw center Z (AI2 P2-1 / B13)
+    if math.isfinite(rx) and math.isfinite(bounds.rz) and abs(float(bounds.rz)) > 1e-12:
+        t = (jaw_z_c - bounds.z_c) / float(bounds.rz)
+        head_x = float(rx) * math.sqrt(max(0.0, 1.0 - t * t))
+        bulge = float(jaw_rx) - head_x
+        messages.append(f"face: jaw_vs_head_x_bulge_m={bulge:.4f} (allow={JAW_X_BULGE_ALLOW_M})")
 
     # Brows L/R - thin horizontal capsules
     brow_half_len = 1.1 * eye_r
@@ -817,6 +802,12 @@ def build_face_parts(
 __all__ = [
     "FACE_KIT_SKIP_BOUNDS",
     "HAIR_TIERS",
+    "JAW_RX_FRAC_HEAD_RX",
+    "JAW_RY_FRAC_HEAD_RY",
+    "JAW_RZ_FRAC_H",
+    "JAW_X_BULGE_ALLOW_M",
+    "JAW_Y_BIAS_FRAC_RY",
+    "JAW_Z_CENTER_FRAC_H",
     "NECKLINE_TIERS",
     "HeadBounds",
     "build_face_parts",
