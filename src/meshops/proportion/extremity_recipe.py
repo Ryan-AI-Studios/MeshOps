@@ -76,6 +76,14 @@ HEEL_REAR_Y_BIAS_FRAC_DEPTH: Final[float] = 0.12
 HEEL_Z_FRAC_ANK: Final[float] = 0.42
 HEEL_RZ_CAP_FRAC_ANK: Final[float] = 0.48
 HEEL_RY_MIN_FRAC_DEPTH: Final[float] = 0.42
+# 0056 ank/heel contact mass freezes (B1-B7, B13)
+ANK_RY_FRAC_HALF_W: Final[float] = 1.45  # AI2 P2-3
+ANK_RY_FLOOR_M: Final[float] = 0.036
+ANK_RZ_FRAC_HALF_W: Final[float] = 2.00
+ANK_RZ_FLOOR_M: Final[float] = 0.048
+ANK_RZ_MIN_VS_CALF_B: Final[float] = 1.35
+ANK_RZ_MAX_FRAC_ANK_Z: Final[float] = 0.60  # AI2 P2-2 ceiling
+HEEL_CONTACT_OVERLAP_TARGET_M: Final[float] = 0.005  # B7 all three sites
 _FINGER_Y_BIAS_FRAC: Final[float] = 0.10  # secondary only when no tip
 _NEAR_ZERO: Final[float] = 1e-9
 _FINGER_NAMES: Final[tuple[str, ...]] = ("index", "middle", "ring", "pinky")
@@ -496,8 +504,6 @@ def _build_foot_side(
     messages: list[str],
     existing_parts: list[RecipePart] | None = None,
 ) -> list[RecipePart]:
-    from meshops.proportion.constraints import HEEL_REACH_GAP_TOL_M
-
     ankle = _joint_or_lm(report, skeleton, f"ankle_{side}")
     heel = _joint_or_lm(report, skeleton, f"heel_{side}")
     toe = _joint_or_lm(report, skeleton, f"toe_{side}")
@@ -597,29 +603,34 @@ def _build_foot_side(
     else:
         ank_z = z_top + half_width * 2.2  # rest above plate top
 
-    # Ankle mass: keep rx = half_width for C_foot_width; grow ry/rz so it reads as a
-    # joint and meets the heel pad + calf distal (not a pea on the plate).
+    # 0056: ank contact mass — rx stays half_width (C_foot_width);
+    # ry/rz freezes + calf floor + ceiling
     ank_rx = half_width
-    ank_ry = max(half_width * 1.05, 0.028)
-    ank_rz = max(half_width * 1.35, 0.034)
+    ank_ry = max(half_width * ANK_RY_FRAC_HALF_W, ANK_RY_FLOOR_M)
+    ank_rz = max(half_width * ANK_RZ_FRAC_HALF_W, ANK_RZ_FLOOR_M)
+    if calf_r is not None and calf_r > 0:
+        ank_rz = max(ank_rz, float(calf_r) * ANK_RZ_MIN_VS_CALF_B)
+    ank_rz = min(ank_rz, ANK_RZ_MAX_FRAC_ANK_Z * float(ank_z))  # B13 after floors
+    messages.append(
+        f"foot_{side}: ank contact mass ry={ank_ry:.4f} rz={ank_rz:.4f} "
+        f"(frac_rz={ANK_RZ_FRAC_HALF_W})"
+    )
 
-    # Heel rear pad (B6-B8): lower center, +Y bias, rz capped — still reaches ank_foot.
+    # Heel rear pad (0044 B6-B8 + 0056 B7 contact): emit overlap on ALL three sites
+    ov = HEEL_CONTACT_OVERLAP_TARGET_M
     heel_z = HEEL_Z_FRAC_ANK * ank_z
-    reach_need = (ank_z - ank_rz) - HEEL_REACH_GAP_TOL_M - heel_z
+    reach_need = (ank_z - ank_rz) + ov - heel_z
     heel_rz = max(reach_need, _HEEL_R_FRAC_FOOT * foot_len * 0.55, half_width * 0.9)
     rz_cap = HEEL_RZ_CAP_FRAC_ANK * ank_z
     if heel_rz > rz_cap + _NEAR_ZERO:
-        # Prefer lower center so min rz can still meet reach under the cap
-        heel_z = min(heel_z, (ank_z - ank_rz) - HEEL_REACH_GAP_TOL_M - rz_cap)
+        heel_z = min(heel_z, (ank_z - ank_rz) + ov - rz_cap)
         heel_z = max(heel_z, z_top * 0.35)
         heel_rz = min(heel_rz, rz_cap)
-        still_need = (ank_z - ank_rz) - HEEL_REACH_GAP_TOL_M - heel_z
+        still_need = (ank_z - ank_rz) + ov - heel_z
         if still_need > heel_rz + _NEAR_ZERO:
-            # Rare: cap loses to reach — grow rz and message (R4c fail-safe)
             heel_rz = still_need
             messages.append(
-                f"foot_{side}: heel_rz cap lose for C_heel_reaches "
-                f"(rz={heel_rz:.4f} > cap={rz_cap:.4f})"
+                f"foot_{side}: heel_rz cap lose for contact (rz={heel_rz:.4f} > cap={rz_cap:.4f})"
             )
     heel_ry = max(
         HEEL_RY_MIN_FRAC_DEPTH * half_depth,
@@ -1063,11 +1074,18 @@ def _build_hand_side(
 
 
 __all__ = [
+    "ANK_RY_FLOOR_M",
+    "ANK_RY_FRAC_HALF_W",
+    "ANK_RZ_FLOOR_M",
+    "ANK_RZ_FRAC_HALF_W",
+    "ANK_RZ_MAX_FRAC_ANK_Z",
+    "ANK_RZ_MIN_VS_CALF_B",
     "FINGER_TIERS",
     "FOOT_LEN_BASE_FRAC_H",
     "FOOT_LEN_MIN_VS_ANK_HW",
     "FOOT_LEN_MIN_VS_CALF_DIAM",
     "FOOT_LEN_VISUAL_MIN_FRAC_H",
+    "HEEL_CONTACT_OVERLAP_TARGET_M",
     "HEEL_REAR_Y_BIAS_FRAC_DEPTH",
     "HEEL_RY_MIN_FRAC_DEPTH",
     "HEEL_RZ_CAP_FRAC_ANK",
