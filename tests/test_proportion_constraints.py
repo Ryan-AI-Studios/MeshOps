@@ -1774,7 +1774,12 @@ def test_hip_pair__t11_excludes_prox_soft_decoy() -> None:
 
 
 def test_band_weighted_free_dof_score_ranks_glute_y() -> None:
-    """Free-DOF band score differs without mesh when free soft Y differs."""
+    """Free-DOF band score differs without mesh when free soft Y differs.
+
+    0052 B11 sticky: target = max(template_y, dual mean |y|). Ranking uses
+    under-seated duals (below template) vs on-target; over-seat duals stick at
+    their mean and score ~0 (seat not re-buried).
+    """
 
     class _C:
         glute_y_m = 0.08
@@ -1817,13 +1822,14 @@ def test_band_weighted_free_dof_score_ranks_glute_y() -> None:
             ),
         ]
     )
+    # Under-seated vs template (mean 0.02 < 0.08) → residual toward template.
     far = _pkg(
         [
             _part(
                 "RECIPE_glute_l",
                 role="glute_soft",
                 kind="ellipsoid",
-                center=[-0.08, 0.20, 0.9],
+                center=[-0.08, 0.02, 0.9],
                 rx_m=0.05,
                 ry_m=0.05,
                 rz_m=0.05,
@@ -1832,7 +1838,7 @@ def test_band_weighted_free_dof_score_ranks_glute_y() -> None:
                 "RECIPE_glute_r",
                 role="glute_soft",
                 kind="ellipsoid",
-                center=[0.08, 0.20, 0.9],
+                center=[0.08, 0.02, 0.9],
                 rx_m=0.05,
                 ry_m=0.05,
                 rz_m=0.05,
@@ -1856,8 +1862,8 @@ def test_band_weighted_free_dof_score_ranks_glute_y() -> None:
     s_far = _band_weighted_free_dof_score(far, freeze_feet=True, report=None, template_applied=_T())
     assert s_near < s_far
     assert s_near == pytest.approx(0.0)
-    # weight 1.5 * |0.20-0.08| * 2 glutes
-    assert s_far == pytest.approx(1.5 * 0.12 * 2)
+    # weight 1.5 * |0.02-0.08| * 2 glutes (target max(0.08, 0.02)=0.08)
+    assert s_far == pytest.approx(1.5 * 0.06 * 2)
 
 
 def test_slow_without_mesh_raises() -> None:
@@ -2053,7 +2059,11 @@ def test_optimize_thigh_with_anchors_moves_thigh_not_hip_bridge_y() -> None:
 
 
 def test_optimize_glute_duals_with_gap_template_still_runs() -> None:
-    """P1: dual glutes + gap/Y template remain free and optimizable."""
+    """P1: dual glutes + gap/Y template remain free and optimizable.
+
+    0052 B11: sticky target = max(template_y, dual mean |y|). When dual y is
+    already above template, seat Y is sticky (no pull down toward bare template).
+    """
 
     class _C:
         glute_y_m = 0.08
@@ -2091,12 +2101,12 @@ def test_optimize_glute_duals_with_gap_template_still_runs() -> None:
         template_applied=_T(),
     )
     assert result.score_after <= result.score_before + 1e-12
-    # Initial pull toward glute_y_m=0.08 should move at least one glute off 0.20.
     by_name = {p.name: p for p in optimized.parts}
     yl = part_y(by_name["RECIPE_glute_l"])
     yr = part_y(by_name["RECIPE_glute_r"])
     assert yl is not None and yr is not None
-    assert yl < 0.20 or yr < 0.20 or result.score_after < result.score_before
+    # B11 sticky: dual mean 0.20 > template 0.08 → keep seat plane (no re-bury).
+    assert abs(float(yl) - 0.20) <= 0.02 or abs(float(yr) - 0.20) <= 0.02
     assert result.n_trials is not None and result.n_trials > 0
 
 

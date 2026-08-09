@@ -13,6 +13,7 @@ Freezes (session bugs — do not re-learn):
 from __future__ import annotations
 
 import json
+import math
 import random
 import re
 from pathlib import Path
@@ -1636,14 +1637,32 @@ def _role_target_y(
             return -abs(y)  # breast -Y (B1 0022)
         return _lm_y(report, "chest_front")
     if role == "glute":
-        gy = None
+        # 0052 B11: sticky seat Y = max(template |y|, dual mean |y|) so optimize
+        # does not re-bury emit seat toward bare template glute_y_m.
+        template_y: float | None = None
         if template_applied is not None:
             constants = getattr(template_applied, "constants", None)
             if constants is not None:
                 gy = getattr(constants, "glute_y_m", None)
-        if gy is not None:
-            return abs(float(gy))  # glute +Y
-        return None
+                if gy is not None:
+                    try:
+                        gy_f = abs(float(gy))
+                    except (TypeError, ValueError):
+                        gy_f = float("nan")
+                    if math.isfinite(gy_f):
+                        template_y = gy_f
+        dual_ys: list[float] = []
+        for part, r, _s in indexed:
+            if r != "glute":
+                continue
+            py = part_y(part)
+            if py is not None and math.isfinite(float(py)):
+                dual_ys.append(abs(float(py)))
+        mean_y = sum(dual_ys) / float(len(dual_ys)) if dual_ys else None
+        candidates = [x for x in (template_y, mean_y) if x is not None]
+        if not candidates:
+            return None
+        return max(candidates)
     if role in ("neck", "head", "torso", "shoulder_bridge"):
         # B9 (0032): bare `or` treats mid y_m=0.0 as falsy → wrong front target
         mid = _lm_y(report, "chest_mid")
