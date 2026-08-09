@@ -99,8 +99,17 @@ DELT_RY_FRAC: Final[float] = 0.90
 DELT_RZ_FRAC: Final[float] = 0.85
 DELT_OUTER_X_FRAC: Final[float] = 0.25  # * rx, sign by side (r:+, l:-); skip if crosses midline
 # 0046 B6: thigh proximal soft at hip (no dist_soft - 0045 B13).
+# 0069: THIGH_PROX_SOFT_SCALE kept for fence/import smoke; superseded for product emit
+# (isotropic RECIPE_prox_soft_thigh_* replaced by anisotropic RECIPE_hip_soft_*).
 THIGH_PROX_SOFT_SCALE: Final[float] = 1.18
-_THIGH_PROX_R_FLOOR: Final[float] = 1e-4
+# 0069 B1-B6: anisotropic hip soft at joint (replaces prox_soft sphere emit)
+HIP_SOFT_RX_SCALE: Final[float] = 1.15
+HIP_SOFT_RY_FRAC_RX: Final[float] = 0.88
+HIP_SOFT_RZ_FRAC_RX: Final[float] = 0.70
+HIP_SOFT_CENTER: Final[str] = "hip_joint"
+HIP_SOFT_Z_DROP_FRAC_H: Final[float] = 0.010
+HIP_SOFT_Y_REAR_FRAC_RX: Final[float] = 0.12
+_HIP_SOFT_R_FLOOR: Final[float] = 1e-4
 # 0070 B1-B3: thigh shaft prox > distal taper (two capsules; no dual-radius schema).
 THIGH_PROX_SHAFT_SCALE: Final[float] = 1.00  # B1: prox segment r vs measured mid half-width
 THIGH_DIST_SHAFT_SCALE: Final[float] = 0.80  # B2: dist segment r vs mid; must be < B1
@@ -2124,6 +2133,7 @@ def _build_limbs(
             )
             continue
         # 0070 B4: thigh → prox limb_thigh + dist thigh_taper_dist (not single tube).
+        # 0069 B8: no prox_soft sphere emit; hip soft post-pass after adduction.
         if band_id in ("thigh_l", "thigh_r"):
             side = "l" if band_id.endswith("_l") else "r"
             parts.extend(
@@ -2136,23 +2146,6 @@ def _build_limbs(
                     messages=messages,
                 )
             )
-            # 0046 B6: prox soft at hip only vs measured mid_r (B6); no dist_soft (B7).
-            soft_r = max(float(radius) * THIGH_PROX_SOFT_SCALE, _THIGH_PROX_R_FLOOR)
-            soft_name = f"RECIPE_prox_soft_thigh_{side}"
-            parts.append(
-                RecipePart(
-                    name=soft_name,
-                    role="limb_segment",
-                    kind="ellipsoid",
-                    center=[float(p0[0]), float(p0[1]), float(p0[2])],
-                    rx_m=soft_r,
-                    ry_m=soft_r,
-                    rz_m=soft_r,
-                    placement=placement,
-                    label=soft_name,
-                )
-            )
-            messages.append(f"thigh_{side}: prox_soft r={soft_r:.4f}")
             continue
         # 0062 B4/B7/B16: arm → prox limb + dist arm_taper (not single tube).
         if band_id in ("upper_arm_l", "upper_arm_r", "forearm_l", "forearm_r"):
@@ -2312,6 +2305,64 @@ def _append_knee_softs(
             ),
         )
         messages.append(f"knee_soft_{side}: r={r:.4f}")
+
+
+def _append_all_hip_softs(
+    parts: list[RecipePart],
+    *,
+    height_m: float | None,
+    messages: list[str],
+) -> None:
+    """0069: one anisotropic trochanter soft per side at hip joint; past thigh cap."""
+    for side in ("l", "r"):
+        thigh = next(
+            (p for p in parts if p.name == f"RECIPE_limb_thigh_{side}"),
+            None,
+        )
+        if thigh is None or thigh.p0 is None or thigh.radius_m is None:
+            messages.append(f"hip_soft_{side}: skipped (no limb_thigh p0/r)")
+            continue
+        hip = [float(thigh.p0[0]), float(thigh.p0[1]), float(thigh.p0[2])]
+        mid_r = float(thigh.radius_m)
+        rx = max(mid_r * HIP_SOFT_RX_SCALE, _HIP_SOFT_R_FLOOR)
+        ry = max(rx * HIP_SOFT_RY_FRAC_RX, _HIP_SOFT_R_FLOOR)
+        rz = max(rx * HIP_SOFT_RZ_FRAC_RX, _HIP_SOFT_R_FLOOR)
+        sign = 1.0 if side == "r" else -1.0
+
+        # B4: center at hip joint (p0 X/Z); Y = p0 y + mild rear (AI1 P3-6)
+        cx = float(hip[0])
+        cy = float(hip[1]) + HIP_SOFT_Y_REAR_FRAC_RX * rx
+        if height_m is not None:
+            cz = float(hip[2]) - HIP_SOFT_Z_DROP_FRAC_H * float(height_m)
+        else:
+            cz = float(hip[2])
+
+        outer = cx + sign * rx
+        thigh_cap_outer = float(hip[0]) + sign * mid_r
+        # Visibility is a unit lock (T3), not a silent grow here
+
+        name = f"RECIPE_hip_soft_{side}"
+        # Placement: follow limb placement spirit — if p0 y ~0 and no rear, front_plane OK
+        placement: Literal["full3d", "front_plane"] = "front_plane" if abs(cy) < 1e-6 else "full3d"
+        parts.append(
+            RecipePart(
+                name=name,
+                role="limb_segment",
+                kind="ellipsoid",
+                center=[cx, cy, cz],
+                rx_m=rx,
+                ry_m=ry,
+                rz_m=rz,
+                placement=placement,
+                label=name,
+            )
+        )
+        # B14 / AI1 P3-5: always include rx= (bridge absence is N/A under joint model)
+        messages.append(
+            f"hip_soft_{side}: rx={rx:.4f} ry={ry:.4f} rz={rz:.4f} "
+            f"outer={outer:.4f} thigh_cap={thigh_cap_outer:.4f} "
+            f"past_cap={outer - thigh_cap_outer:.4f}"
+        )
 
 
 def _append_elbow_softs(
@@ -3295,6 +3346,13 @@ def build_blockout_recipe(
 
     # 0046 B9: thigh adduction after limbs+knee+calf exist; before glute outer + join_ready
     _apply_thigh_adduction(parts, template_applied, messages)
+
+    # 0069 B8: anisotropic hip soft at joint (post-adduction; uses final thigh p0 + mid_r)
+    _append_all_hip_softs(
+        parts,
+        height_m=resolved.height_m,
+        messages=messages,
+    )
 
     # 0052: glute seat ry floor + rear +Y (before 0036 outer so rx stays outer-correct)
     _apply_glute_seat_mass(parts, report, resolved, messages)
@@ -5173,6 +5231,12 @@ __all__ = [
     "GLUTE_SEAT_Y_FLOOR_M",
     "GLUTE_SEAT_Z_DROP_FRAC_H",
     "GLUTE_TOP_OVER_PELVIS_ALLOW_M",
+    "HIP_SOFT_CENTER",
+    "HIP_SOFT_RX_SCALE",
+    "HIP_SOFT_RY_FRAC_RX",
+    "HIP_SOFT_RZ_FRAC_RX",
+    "HIP_SOFT_Y_REAR_FRAC_RX",
+    "HIP_SOFT_Z_DROP_FRAC_H",
     "JSON_BASENAME",
     "KNEE_SOFT_FRAC",
     "KNEE_SOFT_MIN_FRAC_H",
@@ -5216,6 +5280,7 @@ __all__ = [
     "BlockoutRecipePackage",
     "RecipeMetrics",
     "RecipePart",
+    "_append_all_hip_softs",
     "_append_elbow_softs",
     "_apply_glute_seat_mass",
     "_apply_join_ready_overlaps",

@@ -191,6 +191,12 @@ def test_classify__t0_prox_soft_unknown() -> None:
     assert classify_part_name("RECIPE_prox_soft_thigh_r") == ("unknown", "r")
 
 
+def test_classify__t0_hip_soft_unknown() -> None:
+    """0069 B9: RECIPE_hip_soft_* → unknown (not thigh)."""
+    assert classify_part_name("RECIPE_hip_soft_l") == ("unknown", "l")
+    assert classify_part_name("RECIPE_hip_soft_r") == ("unknown", "r")
+
+
 def test_classify__t0_thigh_taper_unknown() -> None:
     """0070 B5: RECIPE_thigh_taper_dist_* → unknown before generic thigh match."""
     assert classify_part_name("RECIPE_thigh_taper_dist_l") == ("unknown", "l")
@@ -1763,7 +1769,7 @@ def test_hip_pair__t11_excludes_dist_soft_decoy() -> None:
 
 
 def test_hip_pair__t11_excludes_prox_soft_decoy() -> None:
-    """0046 T11/B8: _hip_pair proximal fallback skips prox_soft decoy."""
+    """0046 T11/B8 + 0069 B10: _hip_pair proximal fallback skips prox_soft + hip_soft decoys."""
     from meshops.proportion.connection_metrics import _hip_pair
 
     thigh = _part(
@@ -1785,6 +1791,14 @@ def test_hip_pair__t11_excludes_prox_soft_decoy() -> None:
         ry_m=0.07,
         rz_m=0.07,
     )
+    hip_soft_decoy = _part(
+        "RECIPE_hip_soft_l",
+        kind="ellipsoid",
+        center=[0.12, 0.0, 0.95],
+        rx_m=0.07,
+        ry_m=0.06,
+        rz_m=0.05,
+    )
     pelvis = _part(
         "RECIPE_pelvis_oval",
         role="pelvis",
@@ -1794,7 +1808,7 @@ def test_hip_pair__t11_excludes_prox_soft_decoy() -> None:
         ry_m=0.08,
         rz_m=0.06,
     )
-    parts = [decoy, thigh, pelvis]
+    parts = [decoy, hip_soft_decoy, thigh, pelvis]
     by_name = {p.name: p for p in parts}
     pair = _hip_pair(parts, by_name, "l")
     assert pair is not None
@@ -1802,6 +1816,7 @@ def test_hip_pair__t11_excludes_prox_soft_decoy() -> None:
     assert child.name == "RECIPE_custom_thigh_l"
     assert parent.name == "RECIPE_pelvis_oval"
     assert "prox_soft" not in child.name
+    assert "hip_soft" not in child.name
 
 
 def test_hip_pair__t11_excludes_thigh_taper_decoy() -> None:
