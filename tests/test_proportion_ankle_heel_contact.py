@@ -270,14 +270,16 @@ def test_t6_0054_sole_toe_fence() -> None:
 
 
 def test_t7_0044_length_heel_fence() -> None:
-    """T7: FOOT_LEN_* / HEEL_REAR_Y_* / HEEL_Z_FRAC / HEEL_RZ_CAP / HEEL_RY_MIN unchanged."""
-    assert pytest.approx(0.12) == FOOT_LEN_VISUAL_MIN_FRAC_H
+    """T7: 0056 true freezes + 0072 retargets for length/heel ry/bias."""
+    # 0072 B10 / B2 / B1 retargets (value changes by design)
+    assert pytest.approx(0.13) == FOOT_LEN_VISUAL_MIN_FRAC_H
     assert pytest.approx(4.8) == FOOT_LEN_MIN_VS_ANK_HW
     assert pytest.approx(1.55) == FOOT_LEN_MIN_VS_CALF_DIAM
-    assert pytest.approx(0.12) == HEEL_REAR_Y_BIAS_FRAC_DEPTH
+    assert pytest.approx(0.06) == HEEL_REAR_Y_BIAS_FRAC_DEPTH
+    # 0056 true freezes — HEEL_Z_FRAC_ANK is Z (not ry)
     assert pytest.approx(0.42) == HEEL_Z_FRAC_ANK
     assert pytest.approx(0.48) == HEEL_RZ_CAP_FRAC_ANK
-    assert pytest.approx(0.42) == HEEL_RY_MIN_FRAC_DEPTH
+    assert pytest.approx(0.30) == HEEL_RY_MIN_FRAC_DEPTH
 
 
 # ---------------------------------------------------------------------------

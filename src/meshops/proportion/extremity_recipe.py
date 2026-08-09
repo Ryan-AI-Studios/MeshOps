@@ -59,23 +59,31 @@ TOE_R_FRAC_HALF_W: Final[float] = 0.36  # AI2 P2-1 must win on product hw~0.0263
 TOE_R_FLOOR_M: Final[float] = 0.009
 TOE_R_CAP_FRAC_HALF_W: Final[float] = 0.45
 TOE_BIG_SCALE: Final[float] = 1.20
-TOE_FULL_LEN_FRAC: Final[float] = 0.26  # was _TOE_FULL_LEN_FRAC 0.22
+TOE_FULL_LEN_FRAC: Final[float] = 0.16  # 0072 B5 (was 0.26 stick-class)
+TOE_BASE_NEST_FRAC: Final[float] = 0.35  # 0072 B6 nest INTO plate (+Y from front)
+TOE_TIP_PAST_FRAC: Final[float] = 0.90  # 0072 B6 tip past plate front
+TOE_TIP_MAX_PAST_M: Final[float] = 0.038  # 0072 B12 absolute tip budget
+TOE_TIP_MAX_PAST_FRAC: Final[float] = 0.15  # 0072 B12 proportional tip budget
 TOE_SPLAY_FRAC_HALF_W: Final[float] = 1.25
 TOE_MIN_CENTER_SPACING_VS_R: Final[float] = 1.0  # soft B15
 TOE_WEDGE_RZ_FRAC_SOLE: Final[float] = 0.85
 _BALL_SOFT_R_FRAC_FOOT: Final[float] = 0.14
+BALL_SOFT_RY_FRAC_HALF_DEPTH: Final[float] = 0.32  # 0072 B8 (was bare 0.28)
 # Rounded sole: ellipsoid foot_plate (not world-axis square box).
 # Heel min-floor inside max(...) — rear pad primary (0044 B6-B8), not tower.
 _HEEL_R_FRAC_FOOT: Final[float] = 0.18
 _HEEL_BRIDGE_OVERLAP_FRAC: Final[float] = 0.35  # 0040 reuse (reach overlap concept)
-# 0044 B1-B3 / B6-B8 visual mass freezes
-FOOT_LEN_VISUAL_MIN_FRAC_H: Final[float] = 0.12
+# 0044 B1-B3 / B6-B8 visual mass freezes (+ 0072 B1-B3 / B10-B11)
+FOOT_LEN_VISUAL_MIN_FRAC_H: Final[float] = 0.13  # 0072 B10 (was 0.12)
 FOOT_LEN_MIN_VS_ANK_HW: Final[float] = 4.8
 FOOT_LEN_MIN_VS_CALF_DIAM: Final[float] = 1.55
-HEEL_REAR_Y_BIAS_FRAC_DEPTH: Final[float] = 0.12
+HEEL_REAR_Y_BIAS_FRAC_DEPTH: Final[float] = 0.06  # 0072 B2 (was 0.12)
+HEEL_REAR_OVERHANG_M: Final[float] = 0.012  # 0072 B3 rear tip clamp budget
 HEEL_Z_FRAC_ANK: Final[float] = 0.42
 HEEL_RZ_CAP_FRAC_ANK: Final[float] = 0.48
-HEEL_RY_MIN_FRAC_DEPTH: Final[float] = 0.42
+HEEL_RY_MIN_FRAC_DEPTH: Final[float] = 0.30  # 0072 B1 (was 0.42)
+HEEL_RY_MIN_VS_RZ_FRAC: Final[float] = 0.70  # 0072 B1c (was bare 0.70)
+HEEL_RY_MAX_FRAC_HALF_DEPTH: Final[float] = 0.34  # 0072 B11 composition accept
 # 0056 ank/heel contact mass freezes (B1-B7, B13)
 ANK_RY_FRAC_HALF_W: Final[float] = 1.45  # AI2 P2-3
 ANK_RY_FLOOR_M: Final[float] = 0.036
@@ -365,9 +373,9 @@ def apply_foot_length_visual_floor(
 ) -> float:
     """0044 B1-B5: mannequin visual length floor; never shrinks measured/template.
 
-    Floor sources (skip when unavailable): stature 0.12·H, ank half-width 4.8·hw,
-    calf distal diam 1.55·(2·calf_r). Template length is not a floor when measured
-    exists (B18).
+    Floor sources (skip when unavailable): stature FOOT_LEN_VISUAL_MIN_FRAC_H·H
+    (0.13·H), ank half-width 4.8·hw, calf distal diam 1.55·(2·calf_r). Template
+    length is not a floor when measured exists (B18).
     """
     floors: list[tuple[str, float]] = []
     if height_m is not None and height_m > 0:
@@ -632,10 +640,10 @@ def _build_foot_side(
             messages.append(
                 f"foot_{side}: heel_rz cap lose for contact (rz={heel_rz:.4f} > cap={rz_cap:.4f})"
             )
+    # 0072 B1/B1b/B1c: min floors only — no half_depth*0.38 (defeats B1)
     heel_ry = max(
         HEEL_RY_MIN_FRAC_DEPTH * half_depth,
-        half_depth * 0.38,
-        heel_rz * 0.70,
+        heel_rz * HEEL_RY_MIN_VS_RZ_FRAC,
     )
     heel_rx = max(half_width * 1.05, ank_rx * 0.95)
     # Strict heel_z < ank_z
@@ -643,6 +651,15 @@ def _build_foot_side(
         heel_z = min(ank_z * 0.55, ank_z - _NEAR_ZERO)
         if heel_z < z_top * 0.35:
             heel_z = min(max(z_top * 0.35, ank_z * 0.35), ank_z - _NEAR_ZERO)
+
+    # 0072 B3: clamp heel rear tip so pad does not hang past plate rear + overhang
+    plate_rear_y = plate_y + half_depth
+    heel_y = min(heel_y, plate_rear_y + HEEL_REAR_OVERHANG_M - heel_ry)
+    heel_rear_tip = heel_y + heel_ry
+    messages.append(
+        f"foot_{side}: heel proportion ry={heel_ry:.4f} rear_tip={heel_rear_tip:.4f} "
+        f"(plate_rear={plate_rear_y:.4f} overhang={HEEL_REAR_OVERHANG_M})"
+    )
 
     # Toe wedge: **in front of** the plate (-Y past front edge), elongated + flat on sole.
     # Skeleton heel/toe often inherit ankle Z (estimated) — never use that for sole masses.
@@ -764,7 +781,10 @@ def _build_foot_side(
     # Ball of foot (forefoot pad) — toes ≠ none; in sole, not stacked on top
     ball_y = plate_y - (1.0 / 3.0) * half_depth
     ball_rx = half_width * 0.95
-    ball_ry = max(_BALL_SOFT_R_FRAC_FOOT * foot_len * 1.1, half_depth * 0.28)
+    ball_ry = max(
+        _BALL_SOFT_R_FRAC_FOOT * foot_len * 1.1,
+        BALL_SOFT_RY_FRAC_HALF_DEPTH * half_depth,
+    )
     ball_rz = max(sole_rz * 1.1, half_width * 0.22)
     ball_z = sole_cz + sole_rz * 0.2
     out.append(
@@ -794,16 +814,23 @@ def _build_foot_side(
         )
         return out
 
-    # toes == full: 5 toe capsules past front edge (0054 B5-B10 / B15 bulk freezes)
+    # toes == full: 5 toe capsules (0054 radius freezes + 0072 B5-B6 nest)
     toe_len = TOE_FULL_LEN_FRAC * foot_len
     base_r = min(
         max(TOE_R_FRAC_HALF_W * half_width, TOE_R_FLOOR_M),
         TOE_R_CAP_FRAC_HALF_W * half_width,
     )
     splay = half_width * TOE_SPLAY_FRAC_HALF_W
+    # B6: base nests INTO plate (+Y from front); tip past front (-Y)
+    base_y = plate_front_y + TOE_BASE_NEST_FRAC * toe_len
+    tip_y = plate_front_y - TOE_TIP_PAST_FRAC * toe_len
+    tip_past = plate_front_y - tip_y
     messages.append(
         f"foot_{side}: toe bulk full r={base_r:.4f} "
         f"(frac_hw={TOE_R_FRAC_HALF_W} floor={TOE_R_FLOOR_M})"
+    )
+    messages.append(
+        f"foot_{side}: toe nest tip_past={tip_past:.4f} base_y={base_y:.4f} (toe_len={toe_len:.4f})"
     )
     for i in range(1, 6):
         # 1=medial ... 5=lateral; sign by side
@@ -813,9 +840,8 @@ def _build_foot_side(
             dx = -dx  # mirror splay
         r_i = base_r * (TOE_BIG_SCALE if i == 1 else 1.0)
         r_i = min(r_i, TOE_R_CAP_FRAC_HALF_W * half_width)  # cap big toe too
-        # Past plate front (-Y)
-        base = [plate_x + dx, plate_front_y - toe_len * 0.05, toe_z]
-        tip = [plate_x + dx, plate_front_y - toe_len * 0.95, toe_z * 0.85]
+        base = [plate_x + dx, base_y, toe_z]
+        tip = [plate_x + dx, tip_y, toe_z * 0.85]
         out.append(
             _capsule(
                 f"RECIPE_toe_{i}_{side}",
@@ -1080,20 +1106,25 @@ __all__ = [
     "ANK_RZ_FRAC_HALF_W",
     "ANK_RZ_MAX_FRAC_ANK_Z",
     "ANK_RZ_MIN_VS_CALF_B",
+    "BALL_SOFT_RY_FRAC_HALF_DEPTH",
     "FINGER_TIERS",
     "FOOT_LEN_BASE_FRAC_H",
     "FOOT_LEN_MIN_VS_ANK_HW",
     "FOOT_LEN_MIN_VS_CALF_DIAM",
     "FOOT_LEN_VISUAL_MIN_FRAC_H",
     "HEEL_CONTACT_OVERLAP_TARGET_M",
+    "HEEL_REAR_OVERHANG_M",
     "HEEL_REAR_Y_BIAS_FRAC_DEPTH",
+    "HEEL_RY_MAX_FRAC_HALF_DEPTH",
     "HEEL_RY_MIN_FRAC_DEPTH",
+    "HEEL_RY_MIN_VS_RZ_FRAC",
     "HEEL_RZ_CAP_FRAC_ANK",
     "HEEL_Z_FRAC_ANK",
     "PARENT_UNRESOLVED_MSG",
     "SOLE_RZ_FLOOR_M",
     "SOLE_RZ_FRAC_OF_THICKNESS",
     "SOLE_THICKNESS_FRAC_H",
+    "TOE_BASE_NEST_FRAC",
     "TOE_BIG_SCALE",
     "TOE_FULL_LEN_FRAC",
     "TOE_MIN_CENTER_SPACING_VS_R",
@@ -1102,6 +1133,9 @@ __all__ = [
     "TOE_R_FRAC_HALF_W",
     "TOE_SPLAY_FRAC_HALF_W",
     "TOE_TIERS",
+    "TOE_TIP_MAX_PAST_FRAC",
+    "TOE_TIP_MAX_PAST_M",
+    "TOE_TIP_PAST_FRAC",
     "TOE_WEDGE_RZ_FRAC_SOLE",
     "FingerTier",
     "ToeTier",

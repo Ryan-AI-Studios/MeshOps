@@ -289,7 +289,7 @@ def test_t7_constraints_full_toes_green() -> None:
 
 def test_t8_foot_len_freezes_importable_and_floor() -> None:
     """T8: FOOT_LEN_* freezes importable; length floor still applies."""
-    assert pytest.approx(0.12) == FOOT_LEN_VISUAL_MIN_FRAC_H
+    assert pytest.approx(0.13) == FOOT_LEN_VISUAL_MIN_FRAC_H
     assert FOOT_LEN_MIN_VS_ANK_HW > 0
     assert FOOT_LEN_MIN_VS_CALF_DIAM > 0
     msgs: list[str] = []
@@ -396,7 +396,7 @@ def test_exports_named_freezes() -> None:
     assert 0.62 <= SOLE_RZ_FRAC_OF_THICKNESS <= 0.78
     assert 0.014 <= SOLE_RZ_FLOOR_M <= 0.020
     assert 0.35 <= TOE_R_FRAC_HALF_W <= 0.40
-    assert pytest.approx(0.26) == TOE_FULL_LEN_FRAC
+    assert pytest.approx(0.16) == TOE_FULL_LEN_FRAC
     assert pytest.approx(1.25) == TOE_SPLAY_FRAC_HALF_W
     assert pytest.approx(1.20) == TOE_BIG_SCALE
     assert pytest.approx(0.85) == TOE_WEDGE_RZ_FRAC_SOLE
