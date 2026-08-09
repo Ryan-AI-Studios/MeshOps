@@ -199,6 +199,17 @@ def test_classify__t0_thigh_taper_unknown() -> None:
     assert classify_part_name("RECIPE_limb_thigh_l") == ("thigh", "l")
 
 
+def test_classify__t0_arm_taper_elbow_soft_unknown() -> None:
+    """0062 B8: arm_taper + elbow_soft → unknown before generic upper_arm/forearm."""
+    assert classify_part_name("RECIPE_arm_taper_dist_ua_l") == ("unknown", "l")
+    assert classify_part_name("RECIPE_arm_taper_dist_fa_r") == ("unknown", "r")
+    assert classify_part_name("RECIPE_elbow_soft_l") == ("unknown", "l")
+    assert classify_part_name("RECIPE_elbow_soft_r") == ("unknown", "r")
+    # Still only limb_* are arm-class
+    assert classify_part_name("RECIPE_limb_upper_arm_l") == ("upper_arm", "l")
+    assert classify_part_name("RECIPE_limb_forearm_r") == ("forearm", "r")
+
+
 def test_classify__t0b_0046_dist_knee_still_unknown() -> None:
     """0046 T0b: dist_soft / knee_soft remain unknown after prox_soft branch."""
     assert classify_part_name("RECIPE_dist_soft_upper_arm_l") == ("unknown", "l")
