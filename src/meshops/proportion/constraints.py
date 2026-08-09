@@ -279,11 +279,14 @@ def classify_part_name(name: str) -> tuple[ConstraintRole, Side]:
     # 0045 limb visual mass softs: before generic thigh/upper_arm/forearm (B6).
     # dist_soft must not label as arm ConstraintRole; knee_soft explicit pin.
     # 0046 B7: prox_soft before generic thigh (C_no_dup safe).
+    # 0069 B9: hip_soft → unknown (defensive; free-set skip); keep legacy prox_soft.
     # 0070 B5: thigh_taper (dist shaft seg) → unknown before generic thigh (C_no_dup).
     # 0062 B8: arm_taper + elbow_soft → unknown before generic upper_arm/forearm.
     if "knee_soft" in lower:
         return "unknown", side
     if "dist_soft" in lower:
+        return "unknown", side
+    if "hip_soft" in lower:
         return "unknown", side
     if "prox_soft" in lower:
         return "unknown", side

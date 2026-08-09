@@ -693,7 +693,7 @@ def _limb_mass_report(
 
 
 def test_recipe__t3_thigh_no_dist_soft() -> None:
-    """0045 T3/B13 + 0046 + 0070: prox + taper_dist + prox_soft; no dist_soft thigh."""
+    """0045 T3/B13 + 0046 + 0070 + 0069: prox + taper_dist + hip_soft; no dist_soft thigh."""
     report = _limb_mass_report()
     pkg = build_blockout_recipe(report, limbs=True)
     by_name = {p.name: p for p in pkg.parts}
@@ -708,9 +708,11 @@ def test_recipe__t3_thigh_no_dist_soft() -> None:
     assert not any("thigh" in n for n in soft_names)
     assert "RECIPE_dist_soft_thigh_l" not in by_name
     assert "RECIPE_dist_soft_thigh_r" not in by_name
-    # 0046: prox soft present
-    assert "RECIPE_prox_soft_thigh_l" in by_name
-    assert "RECIPE_prox_soft_thigh_r" in by_name
+    # 0069: anisotropic hip soft present; legacy prox_soft gone
+    assert "RECIPE_hip_soft_l" in by_name
+    assert "RECIPE_hip_soft_r" in by_name
+    assert "RECIPE_prox_soft_thigh_l" not in by_name
+    assert "RECIPE_prox_soft_thigh_r" not in by_name
 
 
 def test_recipe__t4_arm_dist_soft_scale() -> None:
@@ -949,45 +951,61 @@ def test_recipe__t2_base_deltoid_scale() -> None:
 
 
 def test_recipe__t4_thigh_prox_soft_emit() -> None:
-    """0046 T4 + 0070: thigh emits prox + taper_dist + prox_soft; no dist_soft thigh."""
+    """0046 T4 + 0070 + 0069: thigh emits prox + taper_dist + hip_soft; no dist_soft thigh."""
+    from meshops.proportion.blockout_recipe import HIP_SOFT_Y_REAR_FRAC_RX, HIP_SOFT_Z_DROP_FRAC_H
+
     report = _limb_mass_report()
     pkg = build_blockout_recipe(report, limbs=True)
     by_name = {p.name: p for p in pkg.parts}
+    h = float(report.height_m) if report.height_m is not None else None
     for side in ("l", "r"):
         assert f"RECIPE_limb_thigh_{side}" in by_name
         assert f"RECIPE_thigh_taper_dist_{side}" in by_name
-        soft = by_name[f"RECIPE_prox_soft_thigh_{side}"]
+        soft = by_name[f"RECIPE_hip_soft_{side}"]
         thigh = by_name[f"RECIPE_limb_thigh_{side}"]
         assert soft.kind == "ellipsoid"
         assert soft.role == "limb_segment"
         assert soft.center is not None and thigh.p0 is not None
+        # Joint-anchor X; Y may have mild rear; Z may drop when H known
         assert float(soft.center[0]) == pytest.approx(float(thigh.p0[0]))
-        assert float(soft.center[1]) == pytest.approx(float(thigh.p0[1]))
-        assert float(soft.center[2]) == pytest.approx(float(thigh.p0[2]))
-        # soft r > prox shaft r (1.18x mid; prox shaft = 1.00x mid)
         assert soft.rx_m is not None and thigh.radius_m is not None
+        expected_cy = float(thigh.p0[1]) + HIP_SOFT_Y_REAR_FRAC_RX * float(soft.rx_m)
+        assert float(soft.center[1]) == pytest.approx(expected_cy, abs=1e-9)
+        if h is not None:
+            expected_cz = float(thigh.p0[2]) - HIP_SOFT_Z_DROP_FRAC_H * h
+            assert float(soft.center[2]) == pytest.approx(expected_cz, abs=1e-9)
+        # past-cap: soft rx > prox shaft r (anisotropic, not sphere)
         assert float(soft.rx_m) > float(thigh.radius_m)
-        assert any(f"thigh_{side}: prox_soft r=" in m for m in pkg.messages)
+        assert soft.ry_m is not None and soft.rz_m is not None
+        assert float(soft.ry_m) < float(soft.rx_m)
+        assert float(soft.rz_m) < float(soft.rx_m)
+        assert any(f"hip_soft_{side}: rx=" in m for m in pkg.messages)
+    assert "RECIPE_prox_soft_thigh_l" not in by_name
+    assert "RECIPE_prox_soft_thigh_r" not in by_name
     assert "RECIPE_dist_soft_thigh_l" not in by_name
     assert "RECIPE_dist_soft_thigh_r" not in by_name
 
 
 def test_recipe__t5_thigh_prox_soft_scale() -> None:
-    """0046 T5 + 0070: prox soft r ~ measured mid_r * THIGH_PROX_SOFT_SCALE (not shaft alone)."""
-    from meshops.proportion.blockout_recipe import THIGH_PROX_SOFT_SCALE
+    """0046 T5 + 0070 + 0069: hip_soft rx ~ mid*1.15; ry/rz anisotropic fracs."""
+    from meshops.proportion.blockout_recipe import (
+        HIP_SOFT_RX_SCALE,
+        HIP_SOFT_RY_FRAC_RX,
+        HIP_SOFT_RZ_FRAC_RX,
+    )
 
     thigh_hw = 0.06
     report = _limb_mass_report(thigh_hw=thigh_hw)
     pkg = build_blockout_recipe(report, limbs=True)
     by_name = {p.name: p for p in pkg.parts}
-    expected = max(thigh_hw * THIGH_PROX_SOFT_SCALE, 1e-4)
+    expected_rx = max(thigh_hw * HIP_SOFT_RX_SCALE, 1e-4)
     for side in ("l", "r"):
-        soft = by_name[f"RECIPE_prox_soft_thigh_{side}"]
+        soft = by_name[f"RECIPE_hip_soft_{side}"]
         prox = by_name[f"RECIPE_limb_thigh_{side}"]
-        assert soft.rx_m == pytest.approx(expected, abs=1e-9)
-        assert soft.ry_m == pytest.approx(expected, abs=1e-9)
-        assert soft.rz_m == pytest.approx(expected, abs=1e-9)
-        # Prox shaft scale 1.0 → prox r == mid; soft still vs measured mid
+        assert soft.rx_m == pytest.approx(expected_rx, abs=1e-9)
+        assert soft.ry_m == pytest.approx(expected_rx * HIP_SOFT_RY_FRAC_RX, abs=1e-9)
+        assert soft.rz_m == pytest.approx(expected_rx * HIP_SOFT_RZ_FRAC_RX, abs=1e-9)
+        # Prox shaft scale 1.0 → prox r == mid; soft rx vs measured mid * 1.15
         assert float(prox.radius_m) == pytest.approx(thigh_hw, abs=1e-9)  # type: ignore[arg-type]
 
 
@@ -1130,7 +1148,8 @@ def test_recipe__t8_0045_fences_after_adduction() -> None:
         cyl = by[f"RECIPE_calf_cyl_{side}"]
         assert cyl.radius_m == pytest.approx(0.05 * CALF_BELLY_SCALE, abs=1e-9)
         assert f"RECIPE_knee_soft_{side}" in by
-        assert f"RECIPE_prox_soft_thigh_{side}" in by
+        assert f"RECIPE_hip_soft_{side}" in by
+        assert f"RECIPE_prox_soft_thigh_{side}" not in by
         assert f"RECIPE_dist_soft_thigh_{side}" not in by
         assert f"RECIPE_thigh_taper_dist_{side}" in by
         # Knee cluster still attached to chain end after adduction

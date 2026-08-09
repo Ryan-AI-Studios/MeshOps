@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from meshops.proportion.blockout_recipe import (
+    HIP_SOFT_RX_SCALE,
     THIGH_ADDUCTION_MAX_MEDIAL_M,
     THIGH_DIST_SHAFT_SCALE,
     THIGH_PROX_SHAFT_SCALE,
@@ -237,7 +238,9 @@ def test_t4_no_dist_soft_thigh() -> None:
     by_name = {p.name: p for p in pkg.parts}
     assert "RECIPE_dist_soft_thigh_l" not in by_name
     assert "RECIPE_dist_soft_thigh_r" not in by_name
-    assert "RECIPE_prox_soft_thigh_l" in by_name
+    # 0069: product path emits hip_soft (not prox_soft)
+    assert "RECIPE_hip_soft_l" in by_name
+    assert "RECIPE_prox_soft_thigh_l" not in by_name
 
 
 def test_t5_no_dup_with_both_segments() -> None:
@@ -593,9 +596,9 @@ def test_t10_product_width_mid() -> None:
     assert float(dist.radius_m) == pytest.approx(0.04904, abs=1e-5)  # type: ignore[arg-type]
     prox = by_name["RECIPE_limb_thigh_l"]
     assert float(prox.radius_m) == pytest.approx(0.0613, abs=1e-5)  # type: ignore[arg-type]
-    soft = by_name["RECIPE_prox_soft_thigh_l"]
+    soft = by_name["RECIPE_hip_soft_l"]
     assert float(soft.rx_m) == pytest.approx(  # type: ignore[arg-type]
-        mid_r * THIGH_PROX_SOFT_SCALE, abs=1e-5
+        mid_r * HIP_SOFT_RX_SCALE, abs=1e-5
     )
 
 

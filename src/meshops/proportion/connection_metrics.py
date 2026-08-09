@@ -226,6 +226,7 @@ def _hip_pair(
     if child is None:
         # Proximal thigh capsule fallback (0045 B11/P3-2: exclude dist_soft decoys;
         # 0046 B8: also exclude prox_soft hip beads;
+        # 0069 B10: exclude hip_soft trochanter mass;
         # 0070 B10: exclude thigh_taper dist segment — never wins outer/hip_pair).
         for p in parts:
             if (
@@ -233,6 +234,7 @@ def _hip_pair(
                 and f"thigh_{side}" in p.name
                 and "dist_soft" not in p.name
                 and "prox_soft" not in p.name
+                and "hip_soft" not in p.name
                 and "thigh_taper" not in p.name
             ):
                 child = p
