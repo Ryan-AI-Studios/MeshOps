@@ -29,7 +29,10 @@ TOE_TIERS: Final[frozenset[str]] = frozenset({"none", "wedge", "full"})
 FOOT_LEN_BASE_FRAC_H: Final[float] = 1.0 / 7.5
 _FOOT_LEN_NO_TEMPLATE_FRAC: Final[float] = 0.15
 _FOOT_WIDTH_FALLBACK_FRAC_H: Final[float] = 0.02
-_PLATE_THICKNESS_FRAC_H: Final[float] = 0.02
+# 0054 sole thickness freezes (B1-B4)
+SOLE_THICKNESS_FRAC_H: Final[float] = 0.025  # was _PLATE_THICKNESS_FRAC_H 0.02
+SOLE_RZ_FRAC_OF_THICKNESS: Final[float] = 0.70  # was bare 0.55
+SOLE_RZ_FLOOR_M: Final[float] = 0.016  # was 0.012
 _HAND_LEN_FALLBACK_FRAC_H: Final[float] = 0.11
 # Hand constants — 0048 bulk priors (anti-stick full digits; mitten fence unchanged)
 _PALM_WIDTH_FRAC_HAND: Final[float] = 0.62
@@ -51,7 +54,15 @@ _THUMB_OPPOSE_LATERAL: Final[float] = 0.45
 _THUMB_PALM_PITCH: Final[float] = 0.55
 # Foot-friendly toe / sole fracs (0044 Phase 0 organic sole)
 _TOE_WEDGE_LEN_FRAC: Final[float] = 0.42  # elongated front mass (not a ball on plate)
-_TOE_FULL_LEN_FRAC: Final[float] = 0.22
+# 0054 full-toe bulk freezes (B5-B10, B15, B11)
+TOE_R_FRAC_HALF_W: Final[float] = 0.36  # AI2 P2-1 must win on product hw~0.0263
+TOE_R_FLOOR_M: Final[float] = 0.009
+TOE_R_CAP_FRAC_HALF_W: Final[float] = 0.45
+TOE_BIG_SCALE: Final[float] = 1.20
+TOE_FULL_LEN_FRAC: Final[float] = 0.26  # was _TOE_FULL_LEN_FRAC 0.22
+TOE_SPLAY_FRAC_HALF_W: Final[float] = 1.25
+TOE_MIN_CENTER_SPACING_VS_R: Final[float] = 1.0  # soft B15
+TOE_WEDGE_RZ_FRAC_SOLE: Final[float] = 0.85
 _BALL_SOFT_R_FRAC_FOOT: Final[float] = 0.14
 # Rounded sole: ellipsoid foot_plate (not world-axis square box).
 # Heel min-floor inside max(...) — rear pad primary (0044 B6-B8), not tower.
@@ -529,7 +540,9 @@ def _build_foot_side(
     # B17: start from floored length; max with measured heel↔toe half-span
     half_depth = foot_len / 2.0
     thickness = (
-        _PLATE_THICKNESS_FRAC_H * float(height_m) if height_m is not None and height_m > 0 else 0.03
+        SOLE_THICKNESS_FRAC_H * float(height_m)
+        if height_m is not None and height_m > 0
+        else 0.035  # slight bump vs old 0.03 no-H fallback
     )
 
     # Plate center X from ankle (else mean heel/toe, else 0 with side offset)
@@ -562,11 +575,15 @@ def _build_foot_side(
     else:
         plate_y = 0.0
 
-    # Organic sole ellipsoid: center_z = sole_rz, z_bottom=0 -> z_top = 2xsole_rz (R5a2)
-    sole_rz = max(thickness * 0.55, 0.012)
+    # Organic sole ellipsoid: center_z = sole_rz, z_bottom=0 -> z_top = 2xsole_rz (R5a2 / B4)
+    sole_rz = max(thickness * SOLE_RZ_FRAC_OF_THICKNESS, SOLE_RZ_FLOOR_M)
     z_bottom = 0.0
     z_top = 2.0 * sole_rz
     sole_cz = sole_rz
+    messages.append(
+        f"foot_{side}: sole thickness scale sole_rz={sole_rz:.4f} "
+        f"z_top={z_top:.4f} (frac_h={SOLE_THICKNESS_FRAC_H})"
+    )
 
     # Heel mass + ankle: rear-third stack; heel rear-biased pad (0044 B6)
     # Mid of rear third: plate_y + (2/3)*half_depth (toward heel +Y).
@@ -619,8 +636,8 @@ def _build_foot_side(
     # Toe wedge: **in front of** the plate (-Y past front edge), elongated + flat on sole.
     # Skeleton heel/toe often inherit ankle Z (estimated) — never use that for sole masses.
     toe_ry = max(_TOE_WEDGE_LEN_FRAC * foot_len * 0.5, half_depth * 0.45)
-    toe_rx = half_width * 0.95
-    toe_rz = max(thickness * 0.55, half_width * 0.28, 0.010)  # flatter sole wedge
+    toe_rx = half_width * 1.00  # was 0.95
+    toe_rz = max(sole_rz * TOE_WEDGE_RZ_FRAC_SOLE, half_width * 0.32, 0.012)
     toe_z = sole_cz + sole_rz * 0.1  # sole-class Z (not perched mid-ball)
     plate_front_y = plate_y - half_depth  # toes -Y edge of foot_plate
     # Center past the front edge so the bulk of the ellipsoid is *ahead* of the plate.
@@ -766,16 +783,25 @@ def _build_foot_side(
         )
         return out
 
-    # toes == full: 5 toe capsules past front edge
-    toe_len = _TOE_FULL_LEN_FRAC * foot_len
-    toe_radius = max(half_width * 0.16, 0.006)
-    splay = half_width * 0.85
+    # toes == full: 5 toe capsules past front edge (0054 B5-B10 / B15 bulk freezes)
+    toe_len = TOE_FULL_LEN_FRAC * foot_len
+    base_r = min(
+        max(TOE_R_FRAC_HALF_W * half_width, TOE_R_FLOOR_M),
+        TOE_R_CAP_FRAC_HALF_W * half_width,
+    )
+    splay = half_width * TOE_SPLAY_FRAC_HALF_W
+    messages.append(
+        f"foot_{side}: toe bulk full r={base_r:.4f} "
+        f"(frac_hw={TOE_R_FRAC_HALF_W} floor={TOE_R_FLOOR_M})"
+    )
     for i in range(1, 6):
         # 1=medial ... 5=lateral; sign by side
         t = (i - 3) / 3.0  # -2/3 ... +2/3
         dx = t * splay
         if side == "l":
             dx = -dx  # mirror splay
+        r_i = base_r * (TOE_BIG_SCALE if i == 1 else 1.0)
+        r_i = min(r_i, TOE_R_CAP_FRAC_HALF_W * half_width)  # cap big toe too
         # Past plate front (-Y)
         base = [plate_x + dx, plate_front_y - toe_len * 0.05, toe_z]
         tip = [plate_x + dx, plate_front_y - toe_len * 0.95, toe_z * 0.85]
@@ -785,7 +811,7 @@ def _build_foot_side(
                 "toe_soft",
                 base,
                 tip,
-                toe_radius * (1.15 if i == 1 else 1.0),  # big toe slightly thicker
+                r_i,
                 parent_joint=pj_toe,
             )
         )
@@ -1047,7 +1073,18 @@ __all__ = [
     "HEEL_RZ_CAP_FRAC_ANK",
     "HEEL_Z_FRAC_ANK",
     "PARENT_UNRESOLVED_MSG",
+    "SOLE_RZ_FLOOR_M",
+    "SOLE_RZ_FRAC_OF_THICKNESS",
+    "SOLE_THICKNESS_FRAC_H",
+    "TOE_BIG_SCALE",
+    "TOE_FULL_LEN_FRAC",
+    "TOE_MIN_CENTER_SPACING_VS_R",
+    "TOE_R_CAP_FRAC_HALF_W",
+    "TOE_R_FLOOR_M",
+    "TOE_R_FRAC_HALF_W",
+    "TOE_SPLAY_FRAC_HALF_W",
     "TOE_TIERS",
+    "TOE_WEDGE_RZ_FRAC_SOLE",
     "FingerTier",
     "ToeTier",
     "apply_foot_length_visual_floor",
