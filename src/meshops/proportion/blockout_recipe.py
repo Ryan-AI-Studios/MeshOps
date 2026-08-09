@@ -19,6 +19,8 @@ can pass; B6 distal/cyl p1 Y sync to ank_foot after feet emit.
 0039: opt-in --join-ready socket overlaps (shoulder/hip/neck/ankle); mutually exclusive with
 --nofuse; setup re-emit via run_blockout_emit_setup; schema stay 1.4.0 + join_ready bool.
 0047: torso oval ry depth taper (anti-snowman chest/waist/hip); schema stay 1.4.0.
+0065: torso front snowman — waist rx pinch + chest ry/front flatten (full3d rear bias);
+schema stay 1.4.0.
 0049: breast_soft center Z hang drop (before 0033 tilt); B1 floor 0.55*rz; schema stay 1.4.0.
 0050: neck column forward tilt (p0/p1) + head/face co-move + radius ceiling vs head.rx;
 schema stay 1.4.0.
@@ -97,12 +99,15 @@ _THIGH_PROX_R_FLOOR: Final[float] = 1e-4
 # 0046 B9: template thigh_tilt adduction (medial-shift cap + knee-cluster co-move).
 THIGH_TILT_DEG_CAP: Final[float] = 15.0
 THIGH_ADDUCTION_MAX_MEDIAL_M: Final[float] = 0.030
-# 0047 B1: torso oval anteroposterior depth taper (anti-snowman); keep 0040 rz law.
-TORSO_OVAL_RY_CHEST_FRAC: Final[float] = 0.95
-TORSO_OVAL_RY_WAIST_FRAC: Final[float] = 0.72
+# 0047 B1 + 0065: torso oval depth + front pinch freezes
+TORSO_OVAL_RY_CHEST_FRAC: Final[float] = 0.85  # was 0.95
+TORSO_OVAL_RY_WAIST_FRAC: Final[float] = 0.58  # was 0.72
 TORSO_OVAL_RY_HIP_FRAC: Final[float] = 0.80  # ≠ PELVIS_OVAL_RY_FRAC_HALF_HIP (0.60)
-TORSO_OVAL_RZ_SPAN_FRAC: Final[float] = 0.22
+TORSO_OVAL_RZ_SPAN_FRAC: Final[float] = 0.22  # fence 0040
 TORSO_OVAL_RZ_FLOOR_M: Final[float] = 0.025
+TORSO_WAIST_RX_MAX_FRAC_CHEST: Final[float] = 0.80
+TORSO_WAIST_PINCH_TAPER_GATE: Final[float] = 0.10
+TORSO_CHEST_Y_REAR_BIAS_FRAC_RY: Final[float] = 0.28
 # 0049 B1: breast_soft vertical hang floor (center Z drop as fraction of rz).
 BREAST_HANG_Z_DROP_FRAC_RZ: Final[float] = 0.55
 # 0049 D2: unit min hang drop vs pre-anchor (softer than B1; waist soft-clamp threshold).
@@ -1668,21 +1673,43 @@ def _build_torso_ovals(
         ("RECIPE_torso_oval_waist", 0.50),
         ("RECIPE_torso_oval_hip", 0.85),
     ]
+    # 0065 two-pass: precompute post-taper rx, then B1 waist cap vs post-taper chest.
+    rx_by: dict[str, float] = {
+        name: _waist_width_at(z_norm, w_s, w_h, taper) for name, z_norm in layers
+    }
+    chest_key = "RECIPE_torso_oval_chest"
+    waist_key = "RECIPE_torso_oval_waist"
+    if taper >= TORSO_WAIST_PINCH_TAPER_GATE:
+        rx_by[waist_key] = min(
+            rx_by[waist_key],
+            TORSO_WAIST_RX_MAX_FRAC_CHEST * rx_by[chest_key],
+        )
+
     ry_chest: float | None = None
     ry_waist: float | None = None
     ry_hip: float | None = None
+    chest_cy: float | None = None
+    rx_chest_emit: float | None = None
+    rx_waist_emit: float | None = None
     for name, z_norm in layers:
         z_m = z_top - z_norm * span
-        hw = _waist_width_at(z_norm, w_s, w_h, taper)
+        hw = rx_by[name]
         # Vertical radius must exceed half layer spacing (0.35*span/2) so chest/waist/hip
         # ovals overlap. 0.12 left a belly gap; 0.18 barely kissed; 0.22 ≈ 4cm overlap.
         rz = max(TORSO_OVAL_RZ_FLOOR_M, span * TORSO_OVAL_RZ_SPAN_FRAC)
+        center_y = y
         if name.endswith("_chest"):
             ry = half_chest * TORSO_OVAL_RY_CHEST_FRAC
             ry_chest = ry
+            # B5: rear bias only when full3d (chest_y known); front_plane stays mid.
+            if placement == "full3d":
+                center_y = y + TORSO_CHEST_Y_REAR_BIAS_FRAC_RY * ry
+            chest_cy = center_y
+            rx_chest_emit = hw
         elif name.endswith("_waist"):
             ry = half_chest * TORSO_OVAL_RY_WAIST_FRAC
             ry_waist = ry
+            rx_waist_emit = hw
         else:  # hip
             ry = half_hip * TORSO_OVAL_RY_HIP_FRAC
             ry_hip = ry
@@ -1691,7 +1718,7 @@ def _build_torso_ovals(
                 name=name,
                 role="torso",
                 kind="ellipsoid",
-                center=[0.0, y, z_m],
+                center=[0.0, center_y, z_m],
                 rx_m=hw,
                 ry_m=ry,
                 rz_m=rz,
@@ -1703,6 +1730,21 @@ def _build_torso_ovals(
         messages.append(
             "torso depth taper: chest/waist/hip "
             f"ry={ry_chest:.4f}/{ry_waist:.4f}/{ry_hip:.4f} (anti-snowman)"
+        )
+    # 0065 B12: front pinch inventory (waist/chest rx + chest front/rear poles).
+    if (
+        rx_chest_emit is not None
+        and rx_waist_emit is not None
+        and chest_cy is not None
+        and ry_chest is not None
+    ):
+        frac = rx_waist_emit / rx_chest_emit if abs(rx_chest_emit) > 1e-12 else float("nan")
+        front_y = chest_cy - ry_chest
+        rear_y = chest_cy + ry_chest
+        messages.append(
+            "torso front pinch: "
+            f"waist_rx/chest_rx={rx_waist_emit:.4f}/{rx_chest_emit:.4f} "
+            f"({frac:.3f}) chest_front_y={front_y:.4f} chest_rear_y={rear_y:.4f}"
         )
 
     # 0053 pelvis shelf freezes (was B10: ry = hip_half * 0.85)
@@ -4805,6 +4847,14 @@ __all__ = [
     "THIGH_ADDUCTION_MAX_MEDIAL_M",
     "THIGH_PROX_SOFT_SCALE",
     "THIGH_TILT_DEG_CAP",
+    "TORSO_CHEST_Y_REAR_BIAS_FRAC_RY",
+    "TORSO_OVAL_RY_CHEST_FRAC",
+    "TORSO_OVAL_RY_HIP_FRAC",
+    "TORSO_OVAL_RY_WAIST_FRAC",
+    "TORSO_OVAL_RZ_FLOOR_M",
+    "TORSO_OVAL_RZ_SPAN_FRAC",
+    "TORSO_WAIST_PINCH_TAPER_GATE",
+    "TORSO_WAIST_RX_MAX_FRAC_CHEST",
     "_BASELINE_ROLES_NO_PROFILE",
     "_MICHELIN_FRAC",
     "BlockoutRecipePackage",

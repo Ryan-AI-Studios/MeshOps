@@ -314,9 +314,9 @@ def test_t8_0052_glute_seat_constants_still_exist() -> None:
 
 
 def test_t9_torso_oval_fracs_unchanged_0047() -> None:
-    """T9: torso chest/waist/hip ry fracs unchanged (0047 magnitudes)."""
-    assert TORSO_OVAL_RY_CHEST_FRAC == 0.95
-    assert TORSO_OVAL_RY_WAIST_FRAC == 0.72
+    """T9: torso chest/waist/hip ry fracs (0047 + 0065 retarget 0.85/0.58/0.80)."""
+    assert TORSO_OVAL_RY_CHEST_FRAC == 0.85
+    assert TORSO_OVAL_RY_WAIST_FRAC == 0.58
     assert TORSO_OVAL_RY_HIP_FRAC == 0.80
     report = _full_torso_report()
     pkg = build_blockout_recipe(report, limbs=False, torso="ovals")

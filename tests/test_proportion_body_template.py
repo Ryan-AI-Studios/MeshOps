@@ -223,7 +223,7 @@ def test_female_seeds__neck_and_breast() -> None:
     assert doc.breast.rz_scale == pytest.approx(2.1)
     assert doc.neck_thickness_scale == pytest.approx(0.72675)
     assert doc.neck_thickness_notes.stages == [0.95, 0.9, 0.85]
-    assert doc.torso_waist_taper == pytest.approx(0.14)
+    assert doc.torso_waist_taper == pytest.approx(0.22)
     assert doc.thigh_tilt_deg == pytest.approx(10.0)
     assert doc.glute.y_frac is not None
     assert doc.glute.y_frac > 0
