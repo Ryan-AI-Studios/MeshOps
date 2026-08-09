@@ -305,7 +305,7 @@ def test_t8_0052_glute_seat_constants_still_exist() -> None:
     """T8: import smoke — 0052 glute seat freezes unchanged."""
     assert GLUTE_SEAT_RY_FRAC_HALF_DEPTH == 0.90
     assert GLUTE_SEAT_RY_FROM_RX == 1.05
-    assert GLUTE_SEAT_BEYOND_REF_Y == 0.020
+    assert GLUTE_SEAT_BEYOND_REF_Y == 0.035
     assert GLUTE_SEAT_RY_CAP_FRAC_H == 0.10
     assert GLUTE_SEAT_Y_CAP_FRAC_H == 0.15
     assert GLUTE_SEAT_RY_ANISOTROPY_MAX == 2.0

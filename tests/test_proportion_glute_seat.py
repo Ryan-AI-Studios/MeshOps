@@ -671,7 +671,7 @@ def test_half_depth_measured_landmarks() -> None:
 def test_constants_frozen() -> None:
     assert GLUTE_SEAT_RY_FRAC_HALF_DEPTH == 0.90
     assert GLUTE_SEAT_RY_FROM_RX == 1.05
-    assert GLUTE_SEAT_BEYOND_REF_Y == 0.020
+    assert GLUTE_SEAT_BEYOND_REF_Y == 0.035
     assert GLUTE_SEAT_RY_CAP_FRAC_H == 0.10
     assert GLUTE_SEAT_Y_CAP_FRAC_H == 0.15
     assert GLUTE_SEAT_RY_ANISOTROPY_MAX == 2.0

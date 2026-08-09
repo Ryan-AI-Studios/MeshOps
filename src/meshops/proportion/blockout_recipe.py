@@ -123,10 +123,22 @@ _NECK_HEAD_ATTACHED_TOKENS: Final[tuple[str, ...]] = (
 # 0052 B1-B13: glute_soft seat depth (ry) + rear projection (+Y) before 0036 outer.
 GLUTE_SEAT_RY_FRAC_HALF_DEPTH: Final[float] = 0.90
 GLUTE_SEAT_RY_FROM_RX: Final[float] = 1.05
-GLUTE_SEAT_BEYOND_REF_Y: Final[float] = 0.020  # meters beyond pelvis/hip ref rear
+GLUTE_SEAT_BEYOND_REF_Y: Final[float] = 0.035  # 0068: was 0.020; meters beyond pelvis/hip ref rear
 GLUTE_SEAT_RY_CAP_FRAC_H: Final[float] = 0.10
 GLUTE_SEAT_Y_CAP_FRAC_H: Final[float] = 0.15
 GLUTE_SEAT_RY_ANISOTROPY_MAX: Final[float] = 2.0  # ry/rx after seat
+# 0068: glute vs pelvis balance — Z drop, Y floor, rz mass (not bead / not tall football).
+GLUTE_SEAT_Z_DROP_FRAC_H: Final[float] = 0.035
+# Bottom floor = crotch_z - slack. Draft 0.03 fought product crotch_pubic (~0.88)
+# vs sit-bone hang under pelvis mid — retuned so drop+composition can land (B15).
+CROTCH_SEAT_SLACK_M: Final[float] = 0.15
+GLUTE_SEAT_Y_FLOOR_M: Final[float] = 0.045
+GLUTE_SEAT_Y_FLOOR_FRAC_H: Final[float] = 0.026
+GLUTE_SEAT_RZ_FRAC_RY: Final[float] = 0.72
+GLUTE_SEAT_RZ_OVER_H_MAX: Final[float] = 0.065
+# 0068 B15: composition accept allows (unit/product asserts; not hard mutator clamp).
+GLUTE_TOP_OVER_PELVIS_ALLOW_M: Final[float] = 0.025
+GLUTE_BOTTOM_UNDER_MID_M: Final[float] = 0.020
 # 0053: pelvis bucket scale (shelf, not mid-blob)
 PELVIS_OVAL_RY_FRAC_HALF_HIP: Final[float] = 0.60
 PELVIS_OVAL_RX_FRAC_HIP_HW: Final[float] = 1.00
@@ -3588,11 +3600,17 @@ def _apply_glute_seat_mass(
     m: _ResolvedMetrics,
     messages: list[str],
 ) -> None:
-    """0052: floor glute_soft seat ry + push +Y so rear tip clears pelvis/hip ref.
+    """0052+0068: floor glute_soft seat ry/rz + rear +Y + Z under shelf (balance).
 
-    Mutates *parts* in place. Order: B1/B2 floors → B7 ry cap → B13 anisotropy →
-    B3 beyond-ref Y → B12 y cap → B4 dual lock. Quiet when no glute_soft candidates.
-    Never invents ry=0 when floors are missing (B5 skip). Leaves rx unchanged (B8).
+    Mutates *parts* in place. Binding pipeline order (0068 plan section 3):
+      1-2 ry floors + stature/anisotropy caps (0052)
+      3   rz floor 0.72*ry then rz H ceiling 0.065*H
+      4-6 center_y composite floor -> beyond-ref -> y stature cap
+      7-8 center_z drop 0.035*H (never raise; skip if H missing) + crotch clamp
+      9   dual lock ry + center_y + center_z
+      10  messages incl. top/bottom vs pelvis composition
+    Quiet when no glute_soft. Never invents ry=0 when floors missing. Leaves rx unchanged.
+    Authoring RECIPE only - never claims mesh/print success.
     """
     idxs = [i for i, p in enumerate(parts) if _is_glute_soft_ellipsoid(p)]
     if not idxs:
@@ -3600,6 +3618,7 @@ def _apply_glute_seat_mass(
 
     half = _glute_or_hip_half_depth_m(report)
     ref_rear, ref_name = _pelvis_ref_rear_y(parts)
+    crotch_z = _crotch_z_quiet(report, m.height_m)
     h_raw = m.height_m
     h_f: float | None = None
     if h_raw is not None:
@@ -3619,6 +3638,13 @@ def _apply_glute_seat_mass(
     beyond_applied = False
     beyond_dy = 0.0
     target_rear_msg: float | None = None
+    y_floor_applied = False
+    y_floor_m: float | None = None
+    rz_floor_applied = False
+    rz_h_capped = False
+    z_drop_applied = False
+    z_drop_m = 0.0
+    crotch_clamp_applied = False
     seated_idxs: list[int] = []
 
     for i in idxs:
@@ -3640,6 +3666,7 @@ def _apply_glute_seat_mass(
             if math.isfinite(rx_cand) and rx_cand > 0.0:
                 rx = rx_cand
 
+        # 1. ry depth-primary & rx-derived floors (0052)
         floored = False
         ry_work = ry_opt if ry_opt is not None else 0.0
         if half is not None and half > 0.0:
@@ -3657,6 +3684,7 @@ def _apply_glute_seat_mass(
             messages.append(f"glute_seat: skip {p.name} (no ry floor source)")
             continue
 
+        # 2. ry stature & anisotropy caps (0052)
         ry_final = float(ry_work)
         if h_f is not None:
             ry_cap = GLUTE_SEAT_RY_CAP_FRAC_H * h_f
@@ -3670,11 +3698,42 @@ def _apply_glute_seat_mass(
 
         p.ry_m = ry_final
 
-        # B3: rear tip beyond ref (+Y only; never face-ward).
+        # 3. rz vertical floor (0.72*ry) then rz H ceiling (0.065*H)
+        rz_work = 0.0
+        if p.rz_m is not None:
+            try:
+                rz_cand = float(p.rz_m)
+            except (TypeError, ValueError):
+                rz_cand = float("nan")
+            if math.isfinite(rz_cand):
+                rz_work = max(0.0, rz_cand)
+        rz_floor = GLUTE_SEAT_RZ_FRAC_RY * ry_final
+        if rz_work < rz_floor:
+            rz_work = rz_floor
+            rz_floor_applied = True
+        if h_f is not None:
+            rz_h_cap = GLUTE_SEAT_RZ_OVER_H_MAX * h_f
+            if rz_work > rz_h_cap:
+                rz_work = rz_h_cap
+                rz_h_capped = True
+        p.rz_m = float(rz_work)
+
         center = p.center
         if center is None or len(center) < 3:
             continue
         cy = float(center[1])
+        cz = float(center[2])
+
+        # 4. center_y floor composite max(0.045, 0.026*H when H known)
+        floor_y = GLUTE_SEAT_Y_FLOOR_M
+        if h_f is not None:
+            floor_y = max(floor_y, GLUTE_SEAT_Y_FLOOR_FRAC_H * h_f)
+        if cy < floor_y:
+            cy = floor_y
+            y_floor_applied = True
+            y_floor_m = floor_y
+
+        # 5. beyond-ref rear margin (+Y only; never face-ward)
         if ref_rear is not None:
             target_rear = float(ref_rear) + GLUTE_SEAT_BEYOND_REF_Y
             need_y = target_rear - ry_final
@@ -3684,12 +3743,28 @@ def _apply_glute_seat_mass(
                 beyond_applied = True
                 target_rear_msg = target_rear
 
-        # B12: center_y soft stature cap.
+        # 6. center_y stature cap 0.15*H
         if h_f is not None and cy > GLUTE_SEAT_Y_CAP_FRAC_H * h_f:
             cy = GLUTE_SEAT_Y_CAP_FRAC_H * h_f
             y_capped = True
 
-        p.center = [float(center[0]), float(cy), float(center[2])]
+        # 7. center_z drop 0.035*H; never raise Z; skip drop if H missing
+        if h_f is not None:
+            drop = GLUTE_SEAT_Z_DROP_FRAC_H * h_f
+            z_new = cz - drop
+            if z_new < cz:
+                z_drop_m = max(z_drop_m, drop)
+                z_drop_applied = True
+            cz = z_new  # never increases relative to pre-drop cz
+
+        # 8. crotch clamp if crotch_z known
+        if crotch_z is not None:
+            bottom_min = float(crotch_z) - CROTCH_SEAT_SLACK_M
+            if (cz - rz_work) < bottom_min:
+                cz = bottom_min + rz_work
+                crotch_clamp_applied = True
+
+        p.center = [float(center[0]), float(cy), float(cz)]
         any_seated = True
         seated_idxs.append(i)
 
@@ -3711,6 +3786,23 @@ def _apply_glute_seat_mass(
     if anisotropy_capped:
         messages.append("glute_seat: ry_anisotropy_cap")
 
+    if rz_floor_applied:
+        messages.append(
+            f"glute_seat: rz_floor frac_ry={GLUTE_SEAT_RZ_FRAC_RY:.2f} "
+            f"(rz >= {GLUTE_SEAT_RZ_FRAC_RY:.2f} x ry)"
+        )
+    if rz_h_capped and h_f is not None:
+        messages.append(
+            f"glute_seat: rz_cap rz_m<={GLUTE_SEAT_RZ_OVER_H_MAX * h_f:.4f} "
+            f"({GLUTE_SEAT_RZ_OVER_H_MAX:.3f}xH)"
+        )
+
+    if y_floor_applied and y_floor_m is not None:
+        messages.append(
+            f"glute_seat: y_floor center_y>={y_floor_m:.4f} "
+            f"(max({GLUTE_SEAT_Y_FLOOR_M:.3f}, {GLUTE_SEAT_Y_FLOOR_FRAC_H:.3f}xH))"
+        )
+
     if beyond_applied and ref_rear is not None and target_rear_msg is not None:
         messages.append(
             f"glute_seat: beyond_ref dy={beyond_dy:+.4f} "
@@ -3726,10 +3818,22 @@ def _apply_glute_seat_mass(
             f"glute_seat: y_cap center_y<={y_cap:.4f} ({GLUTE_SEAT_Y_CAP_FRAC_H:.2f}xH)"
         )
 
-    # B4 dual lock: same ry + center_y on all seated L/R (max of pair).
+    if z_drop_applied:
+        messages.append(
+            f"glute_seat: z_drop dz={-z_drop_m:+.4f} "
+            f"({GLUTE_SEAT_Z_DROP_FRAC_H:.3f}xH; never raise)"
+        )
+    if crotch_clamp_applied and crotch_z is not None:
+        messages.append(
+            f"glute_seat: crotch_clamp bottom>=crotch_z-{CROTCH_SEAT_SLACK_M:.3f} "
+            f"(crotch_z={float(crotch_z):.4f})"
+        )
+
+    # 9. dual lock: same ry + center_y + center_z on all seated L/R (max of pair).
     if len(seated_idxs) >= 2:
         rys: list[float] = []
         cys: list[float] = []
+        czs: list[float] = []
         for i in seated_idxs:
             sp = parts[i]
             if sp.ry_m is not None:
@@ -3737,16 +3841,77 @@ def _apply_glute_seat_mass(
             sc = sp.center
             if sc is not None and len(sc) >= 3:
                 cys.append(float(sc[1]))
-        if rys and cys:
+                czs.append(float(sc[2]))
+        if rys and cys and czs:
             lock_ry = max(rys)
             lock_y = max(cys)
+            lock_z = max(czs)
             for i in seated_idxs:
                 p = parts[i]
                 p.ry_m = lock_ry
                 sc = p.center
                 if sc is not None and len(sc) >= 3:
-                    p.center = [float(sc[0]), lock_y, float(sc[2])]
-            messages.append(f"glute_seat: dual lock ry={lock_ry:.4f} y={lock_y:.4f}")
+                    p.center = [float(sc[0]), lock_y, lock_z]
+            messages.append(f"glute_seat: dual lock ry={lock_ry:.4f} y={lock_y:.4f} z={lock_z:.4f}")
+
+    # 10. composition observability: glute top/bottom vs pelvis mid/top (B12/B15).
+    if any_seated:
+        pelvis_z: float | None = None
+        pelvis_rz: float | None = None
+        for pp in parts:
+            if pp.name != "RECIPE_pelvis_oval":
+                continue
+            if pp.center is not None and len(pp.center) >= 3 and pp.rz_m is not None:
+                try:
+                    pz = float(pp.center[2])
+                    prz = float(pp.rz_m)
+                except (TypeError, ValueError):
+                    break
+                if math.isfinite(pz) and math.isfinite(prz) and prz > 0.0:
+                    pelvis_z = pz
+                    pelvis_rz = prz
+            break
+        if pelvis_z is None:
+            for pp in parts:
+                if pp.role != "pelvis" or pp.kind != "ellipsoid":
+                    continue
+                if pp.center is not None and len(pp.center) >= 3 and pp.rz_m is not None:
+                    try:
+                        pz = float(pp.center[2])
+                        prz = float(pp.rz_m)
+                    except (TypeError, ValueError):
+                        continue
+                    if math.isfinite(pz) and math.isfinite(prz) and prz > 0.0:
+                        pelvis_z = pz
+                        pelvis_rz = prz
+                        break
+        if pelvis_z is not None and pelvis_rz is not None:
+            pelvis_top = pelvis_z + pelvis_rz
+            glute_tops: list[float] = []
+            glute_bots: list[float] = []
+            for i in seated_idxs:
+                sp = parts[i]
+                sc = sp.center
+                if sc is None or len(sc) < 3 or sp.rz_m is None:
+                    continue
+                try:
+                    gz = float(sc[2])
+                    grz = float(sp.rz_m)
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(gz) and math.isfinite(grz):
+                    glute_tops.append(gz + grz)
+                    glute_bots.append(gz - grz)
+            if glute_tops and glute_bots:
+                g_top = max(glute_tops)
+                g_bot = min(glute_bots)
+                messages.append(
+                    f"glute_seat: composition glute_top_z={g_top:.4f} "
+                    f"vs pelvis_top_z={pelvis_top:.4f} "
+                    f"(allow +{GLUTE_TOP_OVER_PELVIS_ALLOW_M:.3f}); "
+                    f"glute_bottom_z={g_bot:.4f} vs pelvis_mid_z={pelvis_z:.4f} "
+                    f"(under -{GLUTE_BOTTOM_UNDER_MID_M:.3f})"
+                )
 
 
 def _align_glute_outer_to_hip_bridge(
@@ -4598,17 +4763,25 @@ __all__ = [
     "CALF_BELLY_SCALE",
     "CALF_DIST_END_SCALE",
     "CALF_PROX_END_SCALE",
+    "CROTCH_SEAT_SLACK_M",
     "CROTCH_Z_FRAC_FALLBACK",
     "DELT_ARM_RADIUS_SCALE",
     "DELT_OUTER_X_FRAC",
     "DELT_RY_FRAC",
     "DELT_RZ_FRAC",
+    "GLUTE_BOTTOM_UNDER_MID_M",
     "GLUTE_SEAT_BEYOND_REF_Y",
     "GLUTE_SEAT_RY_ANISOTROPY_MAX",
     "GLUTE_SEAT_RY_CAP_FRAC_H",
     "GLUTE_SEAT_RY_FRAC_HALF_DEPTH",
     "GLUTE_SEAT_RY_FROM_RX",
+    "GLUTE_SEAT_RZ_FRAC_RY",
+    "GLUTE_SEAT_RZ_OVER_H_MAX",
     "GLUTE_SEAT_Y_CAP_FRAC_H",
+    "GLUTE_SEAT_Y_FLOOR_FRAC_H",
+    "GLUTE_SEAT_Y_FLOOR_M",
+    "GLUTE_SEAT_Z_DROP_FRAC_H",
+    "GLUTE_TOP_OVER_PELVIS_ALLOW_M",
     "JSON_BASENAME",
     "KNEE_SOFT_FRAC",
     "KNEE_SOFT_MIN_FRAC_H",
