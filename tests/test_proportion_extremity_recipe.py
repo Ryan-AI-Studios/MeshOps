@@ -775,7 +775,7 @@ def _report_foot_span(
 
 
 def test_ext__t1_short_measured_plate_ry_visual_floor() -> None:
-    """T1: short heel<->toe (~0.10 m) + H=1.72 -> plate.ry_m >= 0.5x(0.12xH) - eps."""
+    """T1: short measured foot + H uses FOOT_LEN_VISUAL_MIN_FRAC_H half floor."""
     # heel_y - toe_y = 0.10
     report = _report_foot_span(heel_y=0.05, toe_y=-0.05, height_m=1.72)
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="wedge")
