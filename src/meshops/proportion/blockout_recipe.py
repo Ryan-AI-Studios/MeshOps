@@ -96,6 +96,11 @@ DELT_OUTER_X_FRAC: Final[float] = 0.25  # * rx, sign by side (r:+, l:-); skip if
 # 0046 B6: thigh proximal soft at hip (no dist_soft - 0045 B13).
 THIGH_PROX_SOFT_SCALE: Final[float] = 1.18
 _THIGH_PROX_R_FLOOR: Final[float] = 1e-4
+# 0070 B1-B3: thigh shaft prox > distal taper (two capsules; no dual-radius schema).
+THIGH_PROX_SHAFT_SCALE: Final[float] = 1.00  # B1: prox segment r vs measured mid half-width
+THIGH_DIST_SHAFT_SCALE: Final[float] = 0.80  # B2: dist segment r vs mid; must be < B1
+THIGH_SPLIT_T: Final[float] = 0.50  # B3/B15: split fraction along hip→knee
+_THIGH_SHAFT_R_FLOOR: Final[float] = 1e-4
 # 0046 B9: template thigh_tilt adduction (medial-shift cap + knee-cluster co-move).
 THIGH_TILT_DEG_CAP: Final[float] = 15.0
 THIGH_ADDUCTION_MAX_MEDIAL_M: Final[float] = 0.030
@@ -1783,6 +1788,56 @@ def _build_torso_ovals(
     return parts
 
 
+def _build_thigh_tapered(
+    *,
+    side: str,
+    p0: list[float],
+    p1: list[float],
+    radius: float,
+    placement: Literal["full3d", "front_plane"],
+    messages: list[str],
+) -> list[RecipePart]:
+    """0070 B4: prox limb_thigh + dist thigh_taper_dist capsules (shaft taper).
+
+    Prox keeps thigh class name; dist uses thigh_taper token → unknown classifier.
+    """
+    mid_r = float(radius)
+    prox_r = max(mid_r * THIGH_PROX_SHAFT_SCALE, _THIGH_SHAFT_R_FLOOR)
+    dist_r = max(mid_r * THIGH_DIST_SHAFT_SCALE, _THIGH_SHAFT_R_FLOOR)
+    t = THIGH_SPLIT_T
+    mid = [
+        float(p0[0]) + t * (float(p1[0]) - float(p0[0])),
+        float(p0[1]) + t * (float(p1[1]) - float(p0[1])),
+        float(p0[2]) + t * (float(p1[2]) - float(p0[2])),
+    ]
+    parts = [
+        RecipePart(
+            name=f"RECIPE_limb_thigh_{side}",
+            role="limb_segment",
+            kind="capsule",
+            p0=[float(p0[0]), float(p0[1]), float(p0[2])],
+            p1=mid,
+            radius_m=prox_r,
+            placement=placement,
+            label=f"RECIPE_limb_thigh_{side}",
+        ),
+        RecipePart(
+            name=f"RECIPE_thigh_taper_dist_{side}",
+            role="limb_segment",
+            kind="capsule",
+            p0=list(mid),
+            p1=[float(p1[0]), float(p1[1]), float(p1[2])],
+            radius_m=dist_r,
+            placement=placement,
+            label=f"RECIPE_thigh_taper_dist_{side}",
+        ),
+    ]
+    messages.append(
+        f"thigh_{side}: shaft_taper prox={prox_r:.4f} dist={dist_r:.4f} split_t={t:.2f}"
+    )
+    return parts
+
+
 def _build_calf_split(
     *,
     side: str,
@@ -1999,22 +2054,20 @@ def _build_limbs(
                 )
             )
             continue
-        name = f"RECIPE_limb_{band_id}"
-        parts.append(
-            RecipePart(
-                name=name,
-                role="limb_segment",
-                kind="capsule",
-                p0=p0,
-                p1=p1,
-                radius_m=radius,
-                placement=placement,
-                label=name,
-            )
-        )
-        # 0046 B6: thigh proximal soft at hip only (no dist_soft — 0045 B13).
+        # 0070 B4: thigh → prox limb_thigh + dist thigh_taper_dist (not single tube).
         if band_id in ("thigh_l", "thigh_r"):
             side = "l" if band_id.endswith("_l") else "r"
+            parts.extend(
+                _build_thigh_tapered(
+                    side=side,
+                    p0=p0,
+                    p1=p1,
+                    radius=float(radius),
+                    placement=placement,
+                    messages=messages,
+                )
+            )
+            # 0046 B6: prox soft at hip only vs measured mid_r (B6); no dist_soft (B7).
             soft_r = max(float(radius) * THIGH_PROX_SOFT_SCALE, _THIGH_PROX_R_FLOOR)
             soft_name = f"RECIPE_prox_soft_thigh_{side}"
             parts.append(
@@ -2031,6 +2084,20 @@ def _build_limbs(
                 )
             )
             messages.append(f"thigh_{side}: prox_soft r={soft_r:.4f}")
+            continue
+        name = f"RECIPE_limb_{band_id}"
+        parts.append(
+            RecipePart(
+                name=name,
+                role="limb_segment",
+                kind="capsule",
+                p0=p0,
+                p1=p1,
+                radius_m=radius,
+                placement=placement,
+                label=name,
+            )
+        )
         # 0045 B3-B4: arm distal soft only (not thigh — P2-1 / B13).
         if band_id in _LIMB_DIST_SOFT_BANDS:
             soft_r = max(float(radius) * LIMB_DISTAL_SOFT_SCALE, 1e-4)
@@ -2059,12 +2126,19 @@ def _knee_adj_radius_m(
     side: str,
     report: ProportionReport,
 ) -> float | None:
-    """0045 B5: adjacent shaft radius for knee soft (name-keyed primary)."""
+    """0045 B5 + 0070 B9: adjacent shaft radius for knee soft (name-keyed primary).
+
+    max(prox, dist if present, calf_a…) so knee does not shrink when shaft tapers.
+    Note (AI2 P3-4): if PROX_SHAFT later >1.0, knee soft grows — intentional no-shrink.
+    """
     by = {p.name: p for p in parts}
     candidates: list[float] = []
     thigh = by.get(f"RECIPE_limb_thigh_{side}")
     if thigh is not None and thigh.radius_m is not None:
         candidates.append(float(thigh.radius_m))
+    dist = by.get(f"RECIPE_thigh_taper_dist_{side}")
+    if dist is not None and dist.radius_m is not None:
+        candidates.append(float(dist.radius_m))
     calf_a = by.get(f"RECIPE_calf_a_{side}")
     if calf_a is not None and calf_a.rx_m is not None:
         candidates.append(float(calf_a.rx_m))
@@ -3374,6 +3448,30 @@ def _nudge_connection(
     return "partial"
 
 
+def _co_shift_thigh_taper_dist(
+    parts: list[RecipePart],
+    side: str,
+    axis: int,
+    delta: float,
+) -> None:
+    """0070 B14: when limb_thigh shifts, co-shift taper_dist by the same world Δ."""
+    by_name = {p.name: p for p in parts}
+    dist = by_name.get(f"RECIPE_thigh_taper_dist_{side}")
+    if dist is not None:
+        _shift_part_along_axis(dist, axis, delta)
+
+
+def _part_axis_coord(part: RecipePart, axis: int) -> float | None:
+    """Representative world coord on axis 0|1|2 (center or midpoint of p0/p1)."""
+    if part.center is not None and len(part.center) >= 3:
+        return float(part.center[axis])
+    if part.p0 is not None and part.p1 is not None and len(part.p0) >= 3 and len(part.p1) >= 3:
+        return 0.5 * (float(part.p0[axis]) + float(part.p1[axis]))
+    if part.p0 is not None and len(part.p0) >= 3:
+        return float(part.p0[axis])
+    return None
+
+
 def _apply_join_ready_overlaps(
     parts: list[RecipePart],
     messages: list[str],
@@ -3385,7 +3483,19 @@ def _apply_join_ready_overlaps(
     class_status: dict[str, str] = {}
 
     for class_id, child, parent, axis in resolve_join_connections(parts):
+        # 0070 B14: snapshot before nudge so hip row co-shifts taper_dist.
+        before = _part_axis_coord(child, int(axis))
         status = _nudge_connection(child, parent, int(axis), original_scale_cap=scale_cap)
+        after = _part_axis_coord(child, int(axis))
+        if (
+            before is not None
+            and after is not None
+            and child.name in ("RECIPE_limb_thigh_l", "RECIPE_limb_thigh_r")
+        ):
+            d = float(after) - float(before)
+            if abs(d) > 1e-15:
+                side = "l" if child.name.endswith("_l") else "r"
+                _co_shift_thigh_taper_dist(parts, side, int(axis), d)
         # Keep worst status per class: partial > overlapped > skipped
         prev = class_status.get(class_id)
         if prev == "partial" or status == "partial":
@@ -3413,11 +3523,11 @@ def _apply_thigh_adduction(
     template_applied: TemplateAppliedPackage | None,
     messages: list[str],
 ) -> None:
-    """0046 B9: apply template thigh_tilt_deg with medial-shift cap + knee co-move.
+    """0046 B9 + 0070 B8: thigh_tilt with medial cap + knee co-move.
 
-    Keep hip p0 fixed; rotate thigh p1 in frontal plane (X-Z) toward midline;
-    co-move knee_soft / calf_a / calf_cyl.p0 by the same world delta. Does not move
-    ankle / foot / calf_b.
+    Chain hip = limb_thigh.p0; chain knee = taper_dist.p1 if present else limb_thigh.p1.
+    Rotate full hip->knee; co-move delta = knee_new - knee_old (not prox mid delta).
+    No dist segment -> legacy single-capsule path byte-identical (AI2 P3-1).
     """
     if template_applied is None:
         return
@@ -3441,8 +3551,26 @@ def _apply_thigh_adduction(
             or len(thigh.p1) < 3
         ):
             continue
+        dist_seg = by_name.get(f"RECIPE_thigh_taper_dist_{side}")
+        has_dist = (
+            dist_seg is not None
+            and dist_seg.p0 is not None
+            and dist_seg.p1 is not None
+            and len(dist_seg.p0) >= 3
+            and len(dist_seg.p1) >= 3
+        )
+
         p0 = [float(thigh.p0[0]), float(thigh.p0[1]), float(thigh.p0[2])]
-        p1_old = [float(thigh.p1[0]), float(thigh.p1[1]), float(thigh.p1[2])]
+        # B8: chain knee = taper_dist.p1 when split; else legacy limb_thigh.p1.
+        if has_dist:
+            assert dist_seg is not None and dist_seg.p1 is not None
+            p1_old = [
+                float(dist_seg.p1[0]),
+                float(dist_seg.p1[1]),
+                float(dist_seg.p1[2]),
+            ]
+        else:
+            p1_old = [float(thigh.p1[0]), float(thigh.p1[1]), float(thigh.p1[2])]
         vx = p1_old[0] - p0[0]
         vy = p1_old[1] - p0[1]
         vz = p1_old[2] - p0[2]
@@ -3505,9 +3633,24 @@ def _apply_thigh_adduction(
                 medial_shift = abs(delta_capped[0])
             capped = True
 
-        thigh.p1 = p1_new
+        if has_dist:
+            assert dist_seg is not None
+            # Recompute mid split from chain ends; update both segments.
+            t = THIGH_SPLIT_T
+            mid = [
+                p0[0] + t * (p1_new[0] - p0[0]),
+                p0[1] + t * (p1_new[1] - p0[1]),
+                p0[2] + t * (p1_new[2] - p0[2]),
+            ]
+            thigh.p0 = list(p0)
+            thigh.p1 = list(mid)
+            dist_seg.p0 = list(mid)
+            dist_seg.p1 = list(p1_new)
+        else:
+            # Legacy single-capsule: only limb_thigh.p1 (AI2 P3-1 byte-identical).
+            thigh.p1 = p1_new
 
-        # Knee-cluster co-move: same world delta_capped.
+        # Knee-cluster co-move: same world delta_capped from chain knee (B8).
         for soft_name in (f"RECIPE_knee_soft_{side}", f"RECIPE_calf_a_{side}"):
             soft = by_name.get(soft_name)
             if soft is not None and soft.center is not None and len(soft.center) >= 3:
@@ -4845,7 +4988,10 @@ __all__ = [
     "RECIPE_ID",
     "RECIPE_SCHEMA_VERSION",
     "THIGH_ADDUCTION_MAX_MEDIAL_M",
+    "THIGH_DIST_SHAFT_SCALE",
+    "THIGH_PROX_SHAFT_SCALE",
     "THIGH_PROX_SOFT_SCALE",
+    "THIGH_SPLIT_T",
     "THIGH_TILT_DEG_CAP",
     "TORSO_CHEST_Y_REAR_BIAS_FRAC_RY",
     "TORSO_OVAL_RY_CHEST_FRAC",
@@ -4864,6 +5010,8 @@ __all__ = [
     "_apply_join_ready_overlaps",
     "_apply_neck_column_priors",
     "_apply_thigh_adduction",
+    "_build_thigh_tapered",
+    "_co_shift_thigh_taper_dist",
     "_glute_or_hip_half_depth_m",
     "_midpoint_of_joints",
     "_pelvis_ref_rear_y",

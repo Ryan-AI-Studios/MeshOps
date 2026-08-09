@@ -693,12 +693,14 @@ def _limb_mass_report(
 
 
 def test_recipe__t3_thigh_no_dist_soft() -> None:
-    """0045 T3/B13 + 0046: thigh capsule + prox_soft; still no dist_soft thigh."""
+    """0045 T3/B13 + 0046 + 0070: prox + taper_dist + prox_soft; no dist_soft thigh."""
     report = _limb_mass_report()
     pkg = build_blockout_recipe(report, limbs=True)
     by_name = {p.name: p for p in pkg.parts}
     assert "RECIPE_limb_thigh_l" in by_name
     assert "RECIPE_limb_thigh_r" in by_name
+    assert "RECIPE_thigh_taper_dist_l" in by_name
+    assert "RECIPE_thigh_taper_dist_r" in by_name
     thigh = by_name["RECIPE_limb_thigh_l"]
     assert thigh.kind == "capsule"
     assert thigh.radius_m is not None
@@ -934,12 +936,13 @@ def test_recipe__t2_base_deltoid_scale() -> None:
 
 
 def test_recipe__t4_thigh_prox_soft_emit() -> None:
-    """0046 T4: thigh emits capsule + prox_soft; no dist_soft thigh."""
+    """0046 T4 + 0070: thigh emits prox + taper_dist + prox_soft; no dist_soft thigh."""
     report = _limb_mass_report()
     pkg = build_blockout_recipe(report, limbs=True)
     by_name = {p.name: p for p in pkg.parts}
     for side in ("l", "r"):
         assert f"RECIPE_limb_thigh_{side}" in by_name
+        assert f"RECIPE_thigh_taper_dist_{side}" in by_name
         soft = by_name[f"RECIPE_prox_soft_thigh_{side}"]
         thigh = by_name[f"RECIPE_limb_thigh_{side}"]
         assert soft.kind == "ellipsoid"
@@ -948,13 +951,16 @@ def test_recipe__t4_thigh_prox_soft_emit() -> None:
         assert float(soft.center[0]) == pytest.approx(float(thigh.p0[0]))
         assert float(soft.center[1]) == pytest.approx(float(thigh.p0[1]))
         assert float(soft.center[2]) == pytest.approx(float(thigh.p0[2]))
+        # soft r > prox shaft r (1.18x mid; prox shaft = 1.00x mid)
+        assert soft.rx_m is not None and thigh.radius_m is not None
+        assert float(soft.rx_m) > float(thigh.radius_m)
         assert any(f"thigh_{side}: prox_soft r=" in m for m in pkg.messages)
     assert "RECIPE_dist_soft_thigh_l" not in by_name
     assert "RECIPE_dist_soft_thigh_r" not in by_name
 
 
 def test_recipe__t5_thigh_prox_soft_scale() -> None:
-    """0046 T5: prox soft r ~ shaft_r * THIGH_PROX_SOFT_SCALE."""
+    """0046 T5 + 0070: prox soft r ~ measured mid_r * THIGH_PROX_SOFT_SCALE (not shaft alone)."""
     from meshops.proportion.blockout_recipe import THIGH_PROX_SOFT_SCALE
 
     thigh_hw = 0.06
@@ -964,20 +970,26 @@ def test_recipe__t5_thigh_prox_soft_scale() -> None:
     expected = max(thigh_hw * THIGH_PROX_SOFT_SCALE, 1e-4)
     for side in ("l", "r"):
         soft = by_name[f"RECIPE_prox_soft_thigh_{side}"]
+        prox = by_name[f"RECIPE_limb_thigh_{side}"]
         assert soft.rx_m == pytest.approx(expected, abs=1e-9)
         assert soft.ry_m == pytest.approx(expected, abs=1e-9)
         assert soft.rz_m == pytest.approx(expected, abs=1e-9)
+        # Prox shaft scale 1.0 → prox r == mid; soft still vs measured mid
+        assert float(prox.radius_m) == pytest.approx(thigh_hw, abs=1e-9)  # type: ignore[arg-type]
 
 
 def test_recipe__t6_thigh_adduction_engagement() -> None:
-    """0046 T6: template tilt → medial p1, length preserve, knee engagement, medial cap.
+    """0046 T6 + 0070 B8/AI2 P2-2: chain-knee medial, length, engagement, co-move Δ.
 
-    Also locks calf-cluster co-move (P3-2): knee_soft, calf_a, calf_cyl.p0 share
-    thigh p1 Δ; calf_b / calf_cyl.p1 stay at zero-tilt baseline.
+    Chain end = taper_dist.p1 (not limb_thigh.p1 mid). Co-move Δ from dist.p1.
+    limb_thigh.p1 ≈ mid after tilt. Calf distal stays fixed.
     """
     import math
 
-    from meshops.proportion.blockout_recipe import THIGH_ADDUCTION_MAX_MEDIAL_M
+    from meshops.proportion.blockout_recipe import (
+        THIGH_ADDUCTION_MAX_MEDIAL_M,
+        THIGH_SPLIT_T,
+    )
 
     report = _limb_mass_report()
     tpl = _template_applied_tilt(thigh_tilt_deg=10.0)
@@ -989,31 +1001,40 @@ def test_recipe__t6_thigh_adduction_engagement() -> None:
     for side in ("l", "r"):
         t0 = by0[f"RECIPE_limb_thigh_{side}"]
         t1 = by[f"RECIPE_limb_thigh_{side}"]
-        assert t0.p0 is not None and t0.p1 is not None
-        assert t1.p0 is not None and t1.p1 is not None
-        # p0 fixed
+        d0 = by0[f"RECIPE_thigh_taper_dist_{side}"]
+        d1 = by[f"RECIPE_thigh_taper_dist_{side}"]
+        assert t0.p0 is not None and d0.p1 is not None
+        assert t1.p0 is not None and d1.p1 is not None
+        # p0 (hip) fixed
         assert float(t1.p0[0]) == pytest.approx(float(t0.p0[0]), abs=1e-9)
         assert float(t1.p0[1]) == pytest.approx(float(t0.p0[1]), abs=1e-9)
         assert float(t1.p0[2]) == pytest.approx(float(t0.p0[2]), abs=1e-9)
-        len0 = math.dist(t0.p0, t0.p1)
-        len1 = math.dist(t1.p0, t1.p1)
+        # Full chain length preserved
+        len0 = math.dist(t0.p0, d0.p1)
+        len1 = math.dist(t1.p0, d1.p1)
         assert len1 == pytest.approx(len0, abs=1e-6)
-        # Medial: r → p1.x decreases; l → p1.x increases
+        # Medial on chain knee (dist.p1): r → x decreases; l → x increases
         if side == "r":
-            assert float(t1.p1[0]) < float(t0.p1[0]) - 1e-6
+            assert float(d1.p1[0]) < float(d0.p1[0]) - 1e-6
         else:
-            assert float(t1.p1[0]) > float(t0.p1[0]) + 1e-6
-        medial = abs(float(t1.p1[0]) - float(t0.p1[0]))
+            assert float(d1.p1[0]) > float(d0.p1[0]) + 1e-6
+        medial = abs(float(d1.p1[0]) - float(d0.p1[0]))
         assert medial <= THIGH_ADDUCTION_MAX_MEDIAL_M + 1e-5
-        # Engagement: thigh p1 within knee_soft radius of knee center
+        # limb_thigh.p1 ≈ mid after tilt; split closed
+        assert t1.p1 is not None and d1.p0 is not None
+        for i in range(3):
+            assert float(t1.p1[i]) == pytest.approx(float(d1.p0[i]), abs=1e-6)
+            expected_mid = float(t1.p0[i]) + THIGH_SPLIT_T * (float(d1.p1[i]) - float(t1.p0[i]))
+            assert float(t1.p1[i]) == pytest.approx(expected_mid, abs=1e-6)
+        # Engagement: chain knee within knee_soft radius
         knee = by[f"RECIPE_knee_soft_{side}"]
         assert knee.center is not None and knee.rx_m is not None
-        dist = math.dist(t1.p1, knee.center)
-        assert dist <= float(knee.rx_m) + 1e-5
+        eng = math.dist(d1.p1, knee.center)
+        assert eng <= float(knee.rx_m) + 1e-5
         assert any(f"thigh_{side}: adduction_tilt_deg=" in m for m in pkg.messages)
 
-        # P3-2: co-move cluster shares thigh p1 world Δ; distal calf stays fixed.
-        delta = [float(t1.p1[i]) - float(t0.p1[i]) for i in range(3)]
+        # Co-move cluster shares chain-knee world Δ (not prox mid Δ).
+        delta = [float(d1.p1[i]) - float(d0.p1[i]) for i in range(3)]
         assert abs(delta[0]) > 1e-6
 
         knee0 = by0[f"RECIPE_knee_soft_{side}"]
@@ -1048,7 +1069,7 @@ def test_recipe__t6_thigh_adduction_engagement() -> None:
 
 
 def test_recipe__t7_no_template_adduction_identity() -> None:
-    """0046 T7: no template / tilt 0 → no adduction geometry change."""
+    """0046 T7 + 0070: no template / tilt 0 → no adduction geometry change (prox+dist)."""
     report = _limb_mass_report()
     pkg_none = build_blockout_recipe(report, limbs=True)
     pkg_zero = build_blockout_recipe(
@@ -1059,18 +1080,23 @@ def test_recipe__t7_no_template_adduction_identity() -> None:
     by_n = {p.name: p for p in pkg_none.parts}
     by_z = {p.name: p for p in pkg_zero.parts}
     for side in ("l", "r"):
-        a = by_n[f"RECIPE_limb_thigh_{side}"]
-        b = by_z[f"RECIPE_limb_thigh_{side}"]
-        assert a.p1 is not None and b.p1 is not None
-        assert float(a.p1[0]) == pytest.approx(float(b.p1[0]), abs=1e-9)
-        assert float(a.p1[1]) == pytest.approx(float(b.p1[1]), abs=1e-9)
-        assert float(a.p1[2]) == pytest.approx(float(b.p1[2]), abs=1e-9)
+        for name in (
+            f"RECIPE_limb_thigh_{side}",
+            f"RECIPE_thigh_taper_dist_{side}",
+        ):
+            a = by_n[name]
+            b = by_z[name]
+            assert a.p0 is not None and b.p0 is not None
+            assert a.p1 is not None and b.p1 is not None
+            for i in range(3):
+                assert float(a.p0[i]) == pytest.approx(float(b.p0[i]), abs=1e-9)
+                assert float(a.p1[i]) == pytest.approx(float(b.p1[i]), abs=1e-9)
     assert not any("adduction_tilt_deg=" in m for m in pkg_none.messages)
     assert not any("adduction_tilt_deg=" in m for m in pkg_zero.messages)
 
 
 def test_recipe__t8_0045_fences_after_adduction() -> None:
-    """0046 T8: arm dist_soft + calf belly + knee_soft; no thigh dist_soft; knee attached."""
+    """0046 T8 + 0070: arm dist_soft + calf belly + knee; engagement vs chain knee."""
     import math
 
     from meshops.proportion.blockout_recipe import CALF_BELLY_SCALE
@@ -1089,11 +1115,12 @@ def test_recipe__t8_0045_fences_after_adduction() -> None:
         assert f"RECIPE_knee_soft_{side}" in by
         assert f"RECIPE_prox_soft_thigh_{side}" in by
         assert f"RECIPE_dist_soft_thigh_{side}" not in by
-        # Knee cluster still attached after adduction
-        thigh = by[f"RECIPE_limb_thigh_{side}"]
+        assert f"RECIPE_thigh_taper_dist_{side}" in by
+        # Knee cluster still attached to chain end after adduction
+        dist_seg = by[f"RECIPE_thigh_taper_dist_{side}"]
         knee = by[f"RECIPE_knee_soft_{side}"]
-        assert thigh.p1 is not None and knee.center is not None and knee.rx_m is not None
-        assert math.dist(thigh.p1, knee.center) <= float(knee.rx_m) + 1e-5
+        assert dist_seg.p1 is not None and knee.center is not None and knee.rx_m is not None
+        assert math.dist(dist_seg.p1, knee.center) <= float(knee.rx_m) + 1e-5
 
 
 def test_recipe__t12_m_profile_deltoid_scale() -> None:
