@@ -1598,7 +1598,7 @@ def _part_rx(by: dict[str, RecipePart], name: str) -> float:
 
 
 def test_recipe__torso_oval_ry_depth_taper_order() -> None:
-    """0047 T2/B3: ry_waist < ry_chest; ry_hip >= ry_waist; ry_hip < ry_pelvis."""
+    """0047 T2/B3 + 0053: ry_waist < ry_chest; ry_hip >= ry_waist; ry_hip > ry_pelvis."""
     report = _full_torso_report()  # chest depth 0.24 → half 0.12; hip 0.26 → half 0.13
     pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
     by = {p.name: p for p in pkg.parts}
@@ -1609,12 +1609,14 @@ def test_recipe__torso_oval_ry_depth_taper_order() -> None:
     eps = 1e-9
     assert ry_w < ry_c - eps
     assert ry_h >= ry_w - eps
-    assert ry_h < ry_p - eps
+    # 0053: pelvis shelf shallower than hip oval (strict invert of pre-0053 order)
+    assert ry_h > ry_p + eps
 
 
 def test_recipe__torso_oval_ry_depth_taper_magnitudes() -> None:
-    """0047 T3: chest/waist/hip/pelvis ry magnitudes from named fracs * half-depths."""
+    """0047 T3 + 0053: chest/waist/hip/pelvis ry magnitudes from named fracs * half-depths."""
     from meshops.proportion.blockout_recipe import (
+        PELVIS_OVAL_RY_FRAC_HALF_HIP,
         TORSO_OVAL_RY_CHEST_FRAC,
         TORSO_OVAL_RY_HIP_FRAC,
         TORSO_OVAL_RY_WAIST_FRAC,
@@ -1634,7 +1636,9 @@ def test_recipe__torso_oval_ry_depth_taper_magnitudes() -> None:
     assert _part_ry(by, "RECIPE_torso_oval_hip") == pytest.approx(
         half_hip * TORSO_OVAL_RY_HIP_FRAC, abs=1e-9
     )
-    assert _part_ry(by, "RECIPE_pelvis_oval") == pytest.approx(half_hip * 0.85, abs=1e-9)
+    assert _part_ry(by, "RECIPE_pelvis_oval") == pytest.approx(
+        half_hip * PELVIS_OVAL_RY_FRAC_HALF_HIP, abs=1e-9
+    )
 
 
 def test_recipe__torso_oval_hip_depth_preference() -> None:

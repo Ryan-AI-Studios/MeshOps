@@ -23,6 +23,7 @@ can pass; B6 distal/cyl p1 Y sync to ank_foot after feet emit.
 0050: neck column forward tilt (p0/p1) + head/face co-move + radius ceiling vs head.rx;
 schema stay 1.4.0.
 0052: glute_soft seat mass (ry floor + rear +Y) before 0036 outer align; schema stay 1.4.0.
+0053: pelvis bucket shelf scale (oval ry/rx/rz + trap half_depth/z-span); schema stay 1.4.0.
 """
 
 from __future__ import annotations
@@ -99,7 +100,7 @@ THIGH_ADDUCTION_MAX_MEDIAL_M: Final[float] = 0.030
 # 0047 B1: torso oval anteroposterior depth taper (anti-snowman); keep 0040 rz law.
 TORSO_OVAL_RY_CHEST_FRAC: Final[float] = 0.95
 TORSO_OVAL_RY_WAIST_FRAC: Final[float] = 0.72
-TORSO_OVAL_RY_HIP_FRAC: Final[float] = 0.80  # ≠ pelvis hardcoded 0.85
+TORSO_OVAL_RY_HIP_FRAC: Final[float] = 0.80  # ≠ PELVIS_OVAL_RY_FRAC_HALF_HIP (0.60)
 TORSO_OVAL_RZ_SPAN_FRAC: Final[float] = 0.22
 TORSO_OVAL_RZ_FLOOR_M: Final[float] = 0.025
 # 0049 B1: breast_soft vertical hang floor (center Z drop as fraction of rz).
@@ -126,6 +127,17 @@ GLUTE_SEAT_BEYOND_REF_Y: Final[float] = 0.020  # meters beyond pelvis/hip ref re
 GLUTE_SEAT_RY_CAP_FRAC_H: Final[float] = 0.10
 GLUTE_SEAT_Y_CAP_FRAC_H: Final[float] = 0.15
 GLUTE_SEAT_RY_ANISOTROPY_MAX: Final[float] = 2.0  # ry/rx after seat
+# 0053: pelvis bucket scale (shelf, not mid-blob)
+PELVIS_OVAL_RY_FRAC_HALF_HIP: Final[float] = 0.60
+PELVIS_OVAL_RX_FRAC_HIP_HW: Final[float] = 1.00
+PELVIS_OVAL_RZ_FRAC_H: Final[float] = 0.042
+PELVIS_OVAL_RZ_FLOOR_M: Final[float] = 0.028
+PELVIS_OVAL_RY_OVER_RX_MAX: Final[float] = 0.45  # B15 unit ceiling
+PELVIS_OVAL_RZ_OVER_H_MAX: Final[float] = 0.05  # B15 unit ceiling
+PELVIS_BUCKET_HALF_DEPTH_FRAC: Final[float] = 0.60
+PELVIS_BUCKET_HW_FRAC: Final[float] = 1.00
+PELVIS_BUCKET_Z_TOP_FRAC_H: Final[float] = 0.02
+PELVIS_BUCKET_Z_BOTTOM_FRAC_H: Final[float] = 0.08
 
 _GIRAFFE_FRAC: Final[float] = 0.20
 _GIRAFFE_ABS_NO_H: Final[float] = 0.35
@@ -721,10 +733,11 @@ def _build_pelvis(m: _ResolvedMetrics, messages: list[str]) -> RecipePart | None
         messages.append("RECIPE_pelvis_bucket skipped: need height_m for pelvis span")
         return None
     h = m.height_m
-    z_top = m.hip_z + 0.03 * h
-    z_bottom = m.hip_z - 0.12 * h
-    if z_bottom < 0.0:
-        z_bottom = 0.0
+    # 0053 shelf z-span. P3-4: oval z-center ~ hip_z-0.04H; bucket mid ~ hip_z-0.03H
+    # under new span (top +0.02H / bottom -0.08H) -- intentional.
+    z_top = m.hip_z + PELVIS_BUCKET_Z_TOP_FRAC_H * h
+    z_bottom = max(0.0, m.hip_z - PELVIS_BUCKET_Z_BOTTOM_FRAC_H * h)
+    half_depth = half_depth * PELVIS_BUCKET_HALF_DEPTH_FRAC
     y = m.hip_y if m.hip_y is not None else 0.0
     placement: Literal["full3d", "front_plane"] = "full3d" if m.hip_y is not None else "front_plane"
     z_mid = (z_bottom + z_top) / 2.0
@@ -733,8 +746,8 @@ def _build_pelvis(m: _ResolvedMetrics, messages: list[str]) -> RecipePart | None
         role="pelvis",
         kind="box",
         center=[0.0, y, z_mid],
-        top_half_width_m=m.hip_hw * 1.05,
-        bottom_half_width_m=m.hip_hw * 1.05,
+        top_half_width_m=m.hip_hw * PELVIS_BUCKET_HW_FRAC,
+        bottom_half_width_m=m.hip_hw * PELVIS_BUCKET_HW_FRAC,
         half_depth_m=half_depth,
         z_bottom_m=z_bottom,
         z_top_m=z_top,
@@ -1680,7 +1693,7 @@ def _build_torso_ovals(
             f"ry={ry_chest:.4f}/{ry_waist:.4f}/{ry_hip:.4f} (anti-snowman)"
         )
 
-    # Pelvis oval below hip (B10: ry = hip_half * 0.85 unchanged)
+    # 0053 pelvis shelf freezes (was B10: ry = hip_half * 0.85)
     if m.height_m is not None:
         h = m.height_m
         z_pelvis = m.hip_z - 0.04 * h
@@ -1688,18 +1701,28 @@ def _build_torso_ovals(
             z_pelvis = max(0.02, m.hip_z * 0.5)
         y_pelvis = m.hip_y if m.hip_y is not None else y
         p_place: Literal["full3d", "front_plane"] = "full3d" if m.hip_y is not None else placement
+        # P3-7: after B2, rx_pelvis may exceed rx of RECIPE_torso_oval_hip
+        # (bicristal shelf — intentional).
+        rx_p = w_h * PELVIS_OVAL_RX_FRAC_HIP_HW
+        ry_p = half_hip * PELVIS_OVAL_RY_FRAC_HALF_HIP
+        rz_p = max(PELVIS_OVAL_RZ_FLOOR_M, PELVIS_OVAL_RZ_FRAC_H * h)
         parts.append(
             RecipePart(
                 name="RECIPE_pelvis_oval",
                 role="pelvis",
                 kind="ellipsoid",
                 center=[0.0, y_pelvis, z_pelvis],
-                rx_m=w_h * 1.05,
-                ry_m=half_hip * 0.85,
-                rz_m=max(0.03, 0.06 * h),
+                rx_m=rx_p,
+                ry_m=ry_p,
+                rz_m=rz_p,
                 placement=p_place,
                 label="RECIPE_pelvis_oval",
             )
+        )
+        messages.append(
+            f"pelvis bucket scale: rx={rx_p:.4f} ry={ry_p:.4f} rz={rz_p:.4f} "
+            f"(fracs {PELVIS_OVAL_RX_FRAC_HIP_HW:.2f}/"
+            f"{PELVIS_OVAL_RY_FRAC_HALF_HIP:.2f}/{PELVIS_OVAL_RZ_FRAC_H}H)"
         )
     else:
         messages.append("RECIPE_pelvis_oval skipped: need height_m")
@@ -4593,6 +4616,16 @@ __all__ = [
     "MIDLINE_X_TOL_M",
     "NECK_FORWARD_TILT_DEG",
     "NECK_R_MAX_FRAC_HEAD_RX",
+    "PELVIS_BUCKET_HALF_DEPTH_FRAC",
+    "PELVIS_BUCKET_HW_FRAC",
+    "PELVIS_BUCKET_Z_BOTTOM_FRAC_H",
+    "PELVIS_BUCKET_Z_TOP_FRAC_H",
+    "PELVIS_OVAL_RX_FRAC_HIP_HW",
+    "PELVIS_OVAL_RY_FRAC_HALF_HIP",
+    "PELVIS_OVAL_RY_OVER_RX_MAX",
+    "PELVIS_OVAL_RZ_FLOOR_M",
+    "PELVIS_OVAL_RZ_FRAC_H",
+    "PELVIS_OVAL_RZ_OVER_H_MAX",
     "RECIPE_HONESTY",
     "RECIPE_ID",
     "RECIPE_SCHEMA_VERSION",
