@@ -1002,11 +1002,11 @@ def test_ext__t4_full_finger_bulk() -> None:
 
 
 def test_ext__t5_palm_pad_exact() -> None:
-    """T5: palm.rx_m == max(0.31*hand_len, 0.02); pad axis == max(0.30*hand_len*0.65, 0.012)."""
+    """T5: palm.rx_m == max(0.31*hand_len, 0.02); pad axis == max(0.36*hand_len*0.78, 0.012)."""
     report = _report_with_extremities()
     hand_len = _hand_len_from_lms(report.landmarks_xyz)
     expect_rx = max(0.31 * hand_len, 0.02)
-    expect_pad = max(0.30 * hand_len * 0.65, 0.012)
+    expect_pad = max(0.36 * hand_len * 0.78, 0.012)
     pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="full")
     for side in ("l", "r"):
         palm = next(p for p in pkg.parts if p.name == f"RECIPE_palm_{side}")
@@ -1174,7 +1174,7 @@ def test_ext__t14_thumb_clear_of_fingers() -> None:
 
 
 def test_ext__t_b11_bulk_message_full() -> None:
-    """B11: hand bulk message once when fingers=full and parts non-empty."""
+    """B11 / T19: hand bulk message once when fingers=full and parts non-empty."""
     report = _report_with_extremities()
     pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="full")
     bulk_msgs = [m for m in pkg.messages if "hand bulk: full digits" in m]
@@ -1182,7 +1182,116 @@ def test_ext__t_b11_bulk_message_full() -> None:
     assert "r_frac=0.16" in bulk_msgs[0]
     assert "palm_w=0.62" in bulk_msgs[0]
     assert "splay=1.95" in bulk_msgs[0]
+    assert "palm_th=0.36" in bulk_msgs[0]
+    assert "pad_ry=0.78" in bulk_msgs[0]
+    assert "segs=(0.24, 0.18, 0.13)" in bulk_msgs[0]
+    assert "dist_r=1.05" in bulk_msgs[0]
     assert "anti-stick" in bulk_msgs[0]
 
     pkg_mitt = build_blockout_recipe(report, limbs=False, hands=True, fingers="mitten")
     assert not any("hand bulk: full digits" in m for m in pkg_mitt.messages)
+
+
+# ---------------------------------------------------------------------------
+# 0064 — Palm pad + phalanx taper (T0, T5b, T15-T17)
+# ---------------------------------------------------------------------------
+
+
+def _seg_length(part: RecipePart) -> float:
+    """Capsule p0→p1 length in meters."""
+    assert part.p0 is not None and part.p1 is not None
+    p0 = part.p0
+    p1 = part.p1
+    dx = float(p1[0]) - float(p0[0])
+    dy = float(p1[1]) - float(p0[1])
+    dz = float(p1[2]) - float(p0[2])
+    return (dx * dx + dy * dy + dz * dz) ** 0.5
+
+
+def test_ext__t0_0064_constants() -> None:
+    """T0: 0064 freezes for palm pad + digit taper constants."""
+    from meshops.proportion.extremity_recipe import (
+        _FINGER_DISTAL_R_SCALE,
+        _FINGER_SEG_FRACS_HAND,
+        _PALM_PAD_RY_FRAC_TH,
+        _PALM_THICKNESS_FRAC_HAND,
+    )
+
+    assert _PALM_THICKNESS_FRAC_HAND == 0.36
+    assert _PALM_PAD_RY_FRAC_TH == 0.78
+    assert _FINGER_SEG_FRACS_HAND == (0.24, 0.18, 0.13)
+    assert abs(sum(_FINGER_SEG_FRACS_HAND) - 0.55) < 1e-12
+    assert _FINGER_DISTAL_R_SCALE == 1.05
+
+
+def test_ext__t5b_tip_directed_palm_pad() -> None:
+    """T5b: tip-directed axis (abs(Y)>abs(Z)) puts pad on rz with 0.36*0.78 law."""
+    extra = _extremity_lms()
+    # Wrist→tip primarily -Y so finger_primary_axis is tip-directed (not A-pose -Z)
+    for side, sx in (("l", -0.45), ("r", 0.45)):
+        extra[f"wrist_{side}"] = _lm(f"wrist_{side}", x_m=sx, y_m=0.0, z_m=0.95)
+        extra[f"hand_{side}"] = _lm(f"hand_{side}", x_m=sx, y_m=-0.08, z_m=0.95)
+        extra[f"fingertip_{side}"] = _lm(f"fingertip_{side}", x_m=sx, y_m=-0.23, z_m=0.95)
+    report = _full_torso_report(
+        extra_lms=extra,
+        extra_diams=[
+            _diam("ank_foot_l", half_width_m=0.035),
+            _diam("ank_foot_r", half_width_m=0.035),
+        ],
+    )
+    hand_len = _hand_len_from_lms(report.landmarks_xyz)
+    expect_pad = max(0.36 * hand_len * 0.78, 0.012)
+    # Confirm axis branch: |dy| >> |dz|
+    for side in ("l", "r"):
+        w = report.landmarks_xyz[f"wrist_{side}"]
+        t = report.landmarks_xyz[f"fingertip_{side}"]
+        assert abs(float(t.y_m or 0.0) - float(w.y_m or 0.0)) > abs(
+            float(t.z_m or 0.0) - float(w.z_m or 0.0)
+        )
+    pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="full")
+    for side in ("l", "r"):
+        palm = next(p for p in pkg.parts if p.name == f"RECIPE_palm_{side}")
+        assert palm.rz_m is not None
+        assert float(palm.rz_m) == pytest.approx(expect_pad, abs=1e-9)
+
+
+def test_ext__t15_middle_phalanx_length_taper() -> None:
+    """T15: middle finger L_dist < L_mid < L_prox (PP > MP > DP) both sides."""
+    report = _report_with_extremities()
+    pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="full")
+    for side in ("l", "r"):
+        p0 = next(p for p in pkg.parts if p.name == f"RECIPE_finger_middle_0_{side}")
+        p1 = next(p for p in pkg.parts if p.name == f"RECIPE_finger_middle_1_{side}")
+        p2 = next(p for p in pkg.parts if p.name == f"RECIPE_finger_middle_2_{side}")
+        l0, l1, l2 = _seg_length(p0), _seg_length(p1), _seg_length(p2)
+        assert l2 < l1 < l0, f"side={side} L=({l0:.6f},{l1:.6f},{l2:.6f})"
+
+
+def test_ext__t16_distal_radius_scale() -> None:
+    """T16: distal middle r == 1.05 * prox r (both sides)."""
+    report = _report_with_extremities()
+    pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="full")
+    for side in ("l", "r"):
+        prox = next(p for p in pkg.parts if p.name == f"RECIPE_finger_middle_0_{side}")
+        dist = next(p for p in pkg.parts if p.name == f"RECIPE_finger_middle_2_{side}")
+        r0 = _require_radius_m(prox)
+        r2 = _require_radius_m(dist)
+        assert r2 == pytest.approx(1.05 * r0, abs=1e-9), f"side={side} r0={r0} r2={r2}"
+
+
+def test_ext__t17_distal_lr_vs_prox_lr() -> None:
+    """T17: distal L/r < 1.50 and < 0.75 * prox L/r (anti-stick dual assert)."""
+    report = _report_with_extremities()
+    pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="full")
+    for side in ("l", "r"):
+        prox = next(p for p in pkg.parts if p.name == f"RECIPE_finger_middle_0_{side}")
+        dist = next(p for p in pkg.parts if p.name == f"RECIPE_finger_middle_2_{side}")
+        l0, r0 = _seg_length(prox), _require_radius_m(prox)
+        l2, r2 = _seg_length(dist), _require_radius_m(dist)
+        assert r0 > 0.0 and r2 > 0.0
+        lr_dist = l2 / r2
+        lr_prox = l0 / r0
+        assert lr_dist < 1.50, f"side={side} lr_dist={lr_dist}"
+        assert lr_dist < 0.75 * lr_prox, (
+            f"side={side} lr_dist={lr_dist} vs 0.75*lr_prox={0.75 * lr_prox}"
+        )

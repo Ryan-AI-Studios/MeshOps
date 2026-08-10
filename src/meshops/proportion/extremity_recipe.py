@@ -34,14 +34,16 @@ SOLE_THICKNESS_FRAC_H: Final[float] = 0.025  # was _PLATE_THICKNESS_FRAC_H 0.02
 SOLE_RZ_FRAC_OF_THICKNESS: Final[float] = 0.70  # was bare 0.55
 SOLE_RZ_FLOOR_M: Final[float] = 0.016  # was 0.012
 _HAND_LEN_FALLBACK_FRAC_H: Final[float] = 0.11
-# Hand constants — 0048 bulk priors (anti-stick full digits; mitten fence unchanged)
+# Hand constants — 0048 bulk + 0064 palm pad / digit taper (mitten fence unchanged)
 _PALM_WIDTH_FRAC_HAND: Final[float] = 0.62
-_PALM_THICKNESS_FRAC_HAND: Final[float] = 0.30
-_PALM_PAD_RY_FRAC_TH: Final[float] = 0.65  # pad mult on thickness axis (was bare 0.55)
+_PALM_THICKNESS_FRAC_HAND: Final[float] = 0.36  # 0064 B1 (was 0.30)
+_PALM_PAD_RY_FRAC_TH: Final[float] = 0.78  # 0064 B2 (was 0.65)
 _PALM_LEN_FRAC_HAND: Final[float] = 0.48
 _MITTEN_LEN_FRAC_HAND: Final[float] = 0.50
 _MITTEN_R_FRAC_PALM: Final[float] = 0.72  # fat mitt, not thin stick — DO NOT CHANGE
-_FINGER_SEG_FRAC_HAND: Final[float] = 1.0 / 5.0
+# 0064 B3/B4 digit taper (replace uniform 1/5)
+_FINGER_SEG_FRACS_HAND: Final[tuple[float, float, float]] = (0.24, 0.18, 0.13)  # sum 0.55
+_FINGER_DISTAL_R_SCALE: Final[float] = 1.05  # distal seg only
 _FINGER_R_FRAC_PALM: Final[float] = 0.16
 _FINGER_R_FLOOR_M: Final[float] = 0.006
 _FINGER_R_CAP_VS_HALF_W: Final[float] = 0.55
@@ -895,7 +897,9 @@ def build_hand_parts(
     if fingers == "full" and parts:
         msgs.append(
             f"hand bulk: full digits r_frac={_FINGER_R_FRAC_PALM} "
-            f"palm_w={_PALM_WIDTH_FRAC_HAND} splay={_FINGER_SPLAY_FRAC_HALF_W} (anti-stick)"
+            f"palm_w={_PALM_WIDTH_FRAC_HAND} splay={_FINGER_SPLAY_FRAC_HALF_W} "
+            f"palm_th={_PALM_THICKNESS_FRAC_HAND} pad_ry={_PALM_PAD_RY_FRAC_TH} "
+            f"segs={_FINGER_SEG_FRACS_HAND} dist_r={_FINGER_DISTAL_R_SCALE} (anti-stick)"
         )
     return parts
 
@@ -1032,30 +1036,33 @@ def _build_hand_side(
         )
         return out
 
-    # fingers == full: 4 fingers x 3 capsules + thumb x 2 (0048 bulk + splay)
-    seg = _FINGER_SEG_FRAC_HAND * hand_len
+    # fingers == full: 4 fingers x 3 capsules + thumb x 2 (0048 bulk + 0064 taper)
     fr = min(
         max(_FINGER_R_FRAC_PALM * palm_w, _FINGER_R_FLOOR_M),
         _FINGER_R_CAP_VS_HALF_W * half_w,
     )
     # Lateral splay in X (B12: scale with bulk so grooves stay visible)
     splay = half_w * _FINGER_SPLAY_FRAC_HALF_W
-    # Perpendicular-ish offset in X for finger rows
+    # Perpendicular-ish offset in X for finger rows; phalanx L taper PP>MP>DP
     for fi, fname in enumerate(_FINGER_NAMES):
         t = (fi - 1.5) / 1.5  # -1 ... +1-ish
         # Mirror lateral splay: left flips sign so fingers fan correctly in +X world
         dx = (-t if side == "l" else t) * splay * 0.5
         base = _add([palm_c[0] + dx, palm_c[1], palm_c[2]], axis, 0.12 * hand_len)
+        along = 0.0
         for si in range(3):
-            p0 = _add(base, axis, si * seg)
-            p1 = _add(base, axis, (si + 1) * seg)
+            seg_l = _FINGER_SEG_FRACS_HAND[si] * hand_len
+            r = fr * (_FINGER_DISTAL_R_SCALE if si == 2 else 1.0)
+            p0 = _add(base, axis, along)
+            p1 = _add(base, axis, along + seg_l)
+            along += seg_l
             out.append(
                 _capsule(
                     f"RECIPE_finger_{fname}_{si}_{side}",
                     "finger_soft",
                     p0,
                     p1,
-                    fr,
+                    r,
                     parent_joint=pj_digit,
                 )
             )
@@ -1137,6 +1144,10 @@ __all__ = [
     "TOE_TIP_MAX_PAST_M",
     "TOE_TIP_PAST_FRAC",
     "TOE_WEDGE_RZ_FRAC_SOLE",
+    "_FINGER_DISTAL_R_SCALE",
+    "_FINGER_SEG_FRACS_HAND",
+    "_PALM_PAD_RY_FRAC_TH",
+    "_PALM_THICKNESS_FRAC_HAND",
     "FingerTier",
     "ToeTier",
     "apply_foot_length_visual_floor",
