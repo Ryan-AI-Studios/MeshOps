@@ -626,18 +626,25 @@ def _recipe_breast_center_gap(measured_gap_m: float) -> tuple[float, float, floa
     return center_gap, rx, shoulder_hw
 
 
+def _expected_b3_center_span(rx: float, measured_gap_m: float, shoulder_hw: float) -> float:
+    """0067 B3/B3b: base=rx+max(0.010, gap/2); floor sh*0.25; cap never below base."""
+    medial = max(0.010, measured_gap_m / 2.0)
+    base = rx + medial
+    offset = max(base, shoulder_hw * 0.25)
+    offset = min(offset, max(shoulder_hw * 0.45, base))
+    return 2.0 * offset
+
+
 def test_recipe_measured_gap_smoke() -> None:
     """Recipe B7/0067: measured soft_spacing drives center gap via B3 sternum post-pass."""
     gap_04, rx_04, shoulder_hw = _recipe_breast_center_gap(0.04)
-    medial_04 = max(0.010, 0.04 / 2.0)
-    expected_04 = 2.0 * min(max(rx_04 + medial_04, shoulder_hw * 0.25), shoulder_hw * 0.45)
+    expected_04 = _expected_b3_center_span(rx_04, 0.04, shoulder_hw)
     assert gap_04 == pytest.approx(expected_04, rel=1e-5)
 
     gap_20, rx_20, shoulder_hw_20 = _recipe_breast_center_gap(0.20)
     assert shoulder_hw_20 == pytest.approx(shoulder_hw, rel=1e-9)
     assert rx_20 == pytest.approx(rx_04, rel=1e-9)
-    medial_20 = max(0.010, 0.20 / 2.0)
-    expected_20 = 2.0 * min(max(rx_20 + medial_20, shoulder_hw_20 * 0.25), shoulder_hw_20 * 0.45)
+    expected_20 = _expected_b3_center_span(rx_20, 0.20, shoulder_hw_20)
     assert gap_20 == pytest.approx(expected_20, rel=1e-5)
 
     # soft_spacing is consulted: larger measured gap → larger center separation

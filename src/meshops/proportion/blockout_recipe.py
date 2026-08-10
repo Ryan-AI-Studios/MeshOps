@@ -5021,11 +5021,12 @@ def _breast_sternum_soft_half(
                 return tmv / 2.0
         gf = getattr(template_applied.constants, "intermammary_gap_frac", None)
         bust = _resolve_diameter(report.diameters, "bust")
-        hw = _half_width_from_diameter(bust) if bust is not None else m.shoulder_hw
+        # B3 P3-6 / Codex P2: frac path needs bust_hw only — never shoulder_hw fallback.
+        hw = _half_width_from_diameter(bust) if bust is not None else None
         if gf is not None and hw is not None:
             gff = float(gf)
             hwf = float(hw)
-            if math.isfinite(gff) and math.isfinite(hwf):
+            if math.isfinite(gff) and math.isfinite(hwf) and hwf > 0.0:
                 return (gff * hwf) / 2.0
     return 0.0
 
@@ -5096,14 +5097,19 @@ def _apply_breast_lower_pole_athletic(
     tear_ry = BREAST_TEAR_RY_FRAC_RX * tear_rx
     tear_rz = BREAST_TEAR_RZ_FRAC_RX * tear_rx
 
-    # B3: sternum — medial_half = MAX(clearance, soft_half); shoulder floor + B3b cap.
+    # B3: sternum — medial_half = MAX(clearance, soft_half); shoulder floor + B3b soft cap.
+    # B3b must never invert clearance: offset stays ≥ tear_rx + medial_half (Codex P1).
     soft_half = _breast_sternum_soft_half(report, m, template_applied)
     medial_half = max(BREAST_STERNUM_CLEARANCE_M, soft_half)
-    offset = tear_rx + medial_half
+    base_offset = tear_rx + medial_half
+    offset = base_offset
     sh = m.shoulder_hw
     if sh is not None and math.isfinite(float(sh)) and float(sh) > eps:
-        offset = max(offset, float(sh) * BREAST_X_SHOULDER_FLOOR_FRAC)
-        offset = min(offset, float(sh) * BREAST_X_SHOULDER_MAX_FRAC)
+        shf = float(sh)
+        offset = max(offset, shf * BREAST_X_SHOULDER_FLOOR_FRAC)
+        cap = shf * BREAST_X_SHOULDER_MAX_FRAC
+        # Soft max: bind only when cap still honors base medial clearance.
+        offset = min(offset, max(cap, base_offset))
 
     for i in idxs:
         p = parts[i]

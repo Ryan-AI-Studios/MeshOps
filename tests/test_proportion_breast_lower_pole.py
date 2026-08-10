@@ -627,3 +627,47 @@ def test_soft_half_else_zero_not_shoulder() -> None:
     report = _report_soft_cs(soft_spacing=None)
     half = _breast_sternum_soft_half(report, _empty_metrics(shoulder_hw=0.20), None)
     assert half == 0.0
+
+
+def test_soft_half_template_frac_without_bust_is_zero() -> None:
+    """Codex P2: template frac with no bust diameter must not fall back to shoulder_hw."""
+
+    class _C:
+        intermammary_gap_m = None
+        intermammary_gap_frac = 0.18
+
+    class _T:
+        constants = _C()
+
+    # No soft_spacing, no diameters → frac path must return 0 (not 0.18*shoulder/2).
+    report = ProportionReport(
+        schema_version="1.1.0",
+        height_m=1.72,
+        head_unit_frac=1.0 / 7.5,
+        landmarks_xyz=_base_lms(),
+        diameters=[],
+        depth_bands=[],
+        cross_sections=[],
+        quality=QualityFlags(),
+    )
+    half = _breast_sternum_soft_half(report, _empty_metrics(shoulder_hw=0.20), _T())  # type: ignore[arg-type]
+    assert half == 0.0
+
+
+def test_t16_narrow_shoulder_cap_never_inverts_gap() -> None:
+    """Codex P1: B3b max offset must not drive contact_gap negative."""
+    # Athletic-scale rx after B1 can exceed 0.45*narrow shoulder; cap must not invert.
+    # sh=0.14 → cap=0.063; post-cap tear_rx~0.072 → base > cap → keep base (gap>0).
+    parts = _dual_breast_parts(rx=0.09, ry=0.07, rz=0.08, offset_x=0.05)
+    report = _report_soft_cs(
+        soft_spacing=SoftSpacing(intermammary_gap_m=0.029),
+        shoulder_hw=0.14,
+    )
+    msgs: list[str] = []
+    m = _empty_metrics(height_m=1.72, shoulder_hw=0.14)
+    _apply_breast_lower_pole_athletic(parts, report, m, None, msgs)
+    gap = _contact_gap(parts)
+    assert gap + 1e-9 >= 2.0 * BREAST_STERNUM_CLEARANCE_M
+    for p in parts:
+        assert p.center is not None and p.rx_m is not None
+        assert abs(p.center[0]) + 1e-9 >= float(p.rx_m) + BREAST_STERNUM_CLEARANCE_M
