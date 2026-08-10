@@ -93,6 +93,17 @@ _ARM_SHAFT_R_FLOOR: Final[float] = 1e-4
 ELBOW_SOFT_SCALE: Final[float] = 1.10  # B10 — readable bulge, NOT 0.55
 ELBOW_SOFT_MIN_FRAC_H: Final[float] = 0.016
 WRIST_SOFT_PALM_RX_FRAC: Final[float] = 0.85  # B11
+# 0063 — arm muscle softs (bicep / triceps)
+BICEP_ARM_RX_SCALE: Final[float] = 0.78
+BICEP_RY_FRAC: Final[float] = 0.90
+BICEP_RZ_FRAC: Final[float] = 0.95
+BICEP_FRONT_PAST_M: Final[float] = 0.010
+BICEP_ALONG_T: Final[float] = 0.50
+TRICEP_ARM_RX_SCALE: Final[float] = 0.82
+TRICEP_RY_FRAC: Final[float] = 0.88
+TRICEP_RZ_FRAC: Final[float] = 0.92
+TRICEP_REAR_PAST_M: Final[float] = 0.010
+TRICEP_ALONG_T: Final[float] = 0.50
 # --- Knee joint mass (0045 retune → 0071) ---
 KNEE_SOFT_FRAC: Final[float] = 1.10  # B1: scale vs SEAM adj (not full-leg max)
 KNEE_SOFT_MIN_FRAC_H: Final[float] = 0.018  # B2: stature floor
@@ -1392,6 +1403,125 @@ def _shoulder_x_abs_for_girdle(
     ):
         return float(m.shoulder_hw)
     return None
+
+
+def _ua_shaft_metrics(
+    parts: list[RecipePart],
+    side: str,
+    *,
+    along_t: float,
+) -> tuple[float, list[float]] | None:
+    """Return (ua_prox_r, mid_xyz) or None.
+
+    B15: p0 = RECIPE_limb_upper_arm_{side}.p0
+         p1 = RECIPE_arm_taper_dist_ua_{side}.p1 if present else limb.p1
+    B17: mid = lerp(p0, p1, along_t); shaft_y for past math = mid[1]
+    ua_r = limb_upper_arm.radius_m (prox)
+    """
+    limb = next((p for p in parts if p.name == f"RECIPE_limb_upper_arm_{side}"), None)
+    if limb is None or limb.p0 is None or limb.radius_m is None:
+        return None
+    try:
+        ua_r = float(limb.radius_m)
+        p0 = [float(limb.p0[0]), float(limb.p0[1]), float(limb.p0[2])]
+    except (TypeError, ValueError, IndexError):
+        return None
+    if not math.isfinite(ua_r) or ua_r <= 0.0:
+        return None
+    if not all(math.isfinite(v) for v in p0):
+        return None
+
+    p1: list[float] | None = None
+    dist = next((p for p in parts if p.name == f"RECIPE_arm_taper_dist_ua_{side}"), None)
+    if dist is not None and dist.p1 is not None:
+        try:
+            cand = [float(dist.p1[0]), float(dist.p1[1]), float(dist.p1[2])]
+        except (TypeError, ValueError, IndexError):
+            cand = []
+        if len(cand) == 3 and all(math.isfinite(v) for v in cand):
+            p1 = cand
+    if p1 is None:
+        if limb.p1 is None:
+            return None
+        try:
+            p1 = [float(limb.p1[0]), float(limb.p1[1]), float(limb.p1[2])]
+        except (TypeError, ValueError, IndexError):
+            return None
+        if not all(math.isfinite(v) for v in p1):
+            return None
+
+    if _segment_length((p0[0], p0[1], p0[2]), (p1[0], p1[1], p1[2])) <= _NEAR_ZERO_LEN:
+        return None
+
+    t = float(along_t)
+    mid = [
+        p0[0] + t * (p1[0] - p0[0]),
+        p0[1] + t * (p1[1] - p0[1]),
+        p0[2] + t * (p1[2] - p0[2]),
+    ]
+    return ua_r, mid
+
+
+def _apply_arm_muscle_softs(parts: list[RecipePart], messages: list[str]) -> None:
+    """0063: bicep scale+front past + triceps append (post-pass only — B18).
+
+    After profile + 0060/0061; before breast hang. Requires measured UA (limbs).
+    Triceps gated on same-side bicep presence (B16). Full-chain mid (B15/B17).
+    """
+    for side in ("l", "r"):
+        metrics = _ua_shaft_metrics(parts, side, along_t=BICEP_ALONG_T)
+        if metrics is None:
+            continue  # B14
+        ua_r, mid = metrics
+        shaft_y = float(mid[1])  # B17
+
+        # --- bicep (only if profile already emitted one) ---
+        bicep = _find_recipe_part(parts, role="bicep_soft", side=side)  # AI2 P2-3
+        if bicep is not None and bicep.center is not None:
+            rx = ua_r * BICEP_ARM_RX_SCALE
+            ry = rx * BICEP_RY_FRAC
+            rz = rx * BICEP_RZ_FRAC
+            shaft_front = shaft_y - ua_r
+            cy = shaft_front - BICEP_FRONT_PAST_M + ry
+            bicep.rx_m = rx
+            bicep.ry_m = ry
+            bicep.rz_m = rz
+            bicep.center = [float(mid[0]), cy, float(mid[2])]
+            past = shaft_front - (cy - ry)
+            messages.append(f"bicep_soft_{side}: rx={rx:.4f} front_past={past:.4f}")
+
+        # --- triceps: B16 gate on bicep presence ---
+        if bicep is None:
+            continue
+        tname = f"RECIPE_triceps_soft_{side}"
+        if any(p.name == tname for p in parts):
+            continue
+        t_metrics = _ua_shaft_metrics(parts, side, along_t=TRICEP_ALONG_T)
+        if t_metrics is None:
+            continue
+        _, tmid = t_metrics
+        trx = ua_r * TRICEP_ARM_RX_SCALE
+        try_ = trx * TRICEP_RY_FRAC
+        trz = trx * TRICEP_RZ_FRAC
+        shaft_rear = float(tmid[1]) + ua_r
+        tcy = shaft_rear + TRICEP_REAR_PAST_M - try_
+        # role=limb_segment: name-gate future limb_segment filters (P3-3)
+        parts.append(
+            RecipePart(
+                name=tname,
+                role="limb_segment",
+                kind="ellipsoid",
+                center=[float(tmid[0]), tcy, float(tmid[2])],
+                rx_m=trx,
+                ry_m=try_,
+                rz_m=trz,
+                placement="full3d",
+                label=tname,
+                notes="name-gate future role==limb_segment filters (0063 P3-3)",
+            )
+        )
+        rear_past = (tcy + try_) - shaft_rear
+        messages.append(f"triceps_soft_{side}: rx={trx:.4f} rear_past={rear_past:.4f}")
 
 
 def _apply_shoulder_girdle_softs(
@@ -3748,6 +3878,9 @@ def build_blockout_recipe(
     # 0061: clavicle radius/shelf + trap floors/nape (after 0060 bury; before breast hang)
     _apply_shoulder_girdle_softs(parts, report, resolved, messages)
 
+    # 0063: bicep scale+front past + triceps append (after profile + 0060/0061; before breast hang)
+    _apply_arm_muscle_softs(parts, messages)
+
     # 0049 B4: drop breast_soft center Z for readable hang (before 0033 tilt)
     _apply_breast_hang_z(parts, report, resolved, messages)
 
@@ -5613,6 +5746,11 @@ def run_blockout_emit_setup(
 
 __all__ = [
     "AXIS_NOTES",
+    "BICEP_ALONG_T",
+    "BICEP_ARM_RX_SCALE",
+    "BICEP_FRONT_PAST_M",
+    "BICEP_RY_FRAC",
+    "BICEP_RZ_FRAC",
     "BPY_BASENAME",
     "CALF_BELLY_LAT_FRAC",
     "CALF_BELLY_REAR_FRAC",
@@ -5699,6 +5837,11 @@ __all__ = [
     "TRAP_RZ_FLOOR_FRAC_H",
     "TRAP_Y_BACK_FRAC_RY",
     "TRAP_Y_NEAR_ZERO",
+    "TRICEP_ALONG_T",
+    "TRICEP_ARM_RX_SCALE",
+    "TRICEP_REAR_PAST_M",
+    "TRICEP_RY_FRAC",
+    "TRICEP_RZ_FRAC",
     "UA_DIST_SHAFT_SCALE",
     "UA_PROX_SHAFT_SCALE",
     "UA_SPLIT_T",
@@ -5710,6 +5853,7 @@ __all__ = [
     "RecipePart",
     "_append_all_hip_softs",
     "_append_elbow_softs",
+    "_apply_arm_muscle_softs",
     "_apply_deltoid_socket_bury",
     "_apply_glute_seat_mass",
     "_apply_join_ready_overlaps",
@@ -5727,6 +5871,7 @@ __all__ = [
     "_midpoint_of_joints",
     "_neck_upper_z",
     "_pelvis_ref_rear_y",
+    "_ua_shaft_metrics",
     "build_blockout_recipe",
     "emit_bpy_script",
     "load_blockout_recipe",
