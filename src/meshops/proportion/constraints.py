@@ -1009,6 +1009,8 @@ def _check_calf_slant(
 
 # B18: face/hair/neckline/SCM/fuse softs must not fail C_axial_depth_plane
 # (forward of chest_mid by design). Core RECIPE_head / RECIPE_neck still checked.
+# 0061: clavicle front-shelf ridge is intentionally on chest front surface
+# (ConstraintRole maps to shoulder_bridge; must not fail axial mid-plane).
 _AXIAL_EXEMPT_NAME_TOKENS: Final[tuple[str, ...]] = (
     "jaw",
     "brow_soft",
@@ -1020,6 +1022,7 @@ _AXIAL_EXEMPT_NAME_TOKENS: Final[tuple[str, ...]] = (
     "neckline",
     "sternomastoid",
     "neck_head_fuse",
+    "clavicle",
 )
 
 

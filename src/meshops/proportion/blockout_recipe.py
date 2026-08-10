@@ -108,6 +108,18 @@ DELT_RZ_FRAC: Final[float] = 0.78  # was 0.85; vertical de-sphere
 DELT_OUTER_X_FRAC: Final[float] = 0.08  # was 0.25; * rx, sign by side (r:+, l:-); midline skip
 DELT_DISTAL_BURY_T: Final[float] = 0.18  # fraction of UA p0->p1 (prox half) along X-Z
 _DELT_BURY_LEN_FLOOR: Final[float] = 1e-4
+# 0061 — shoulder girdle softs (clavicle / trap)
+CLAVICLE_RADIUS_FRAC_H: Final[float] = 0.012
+CLAVICLE_MEDIAL_Z_DROP_FRAC_H: Final[float] = 0.025
+CLAVICLE_LATERAL_INSET_FRAC: Final[float] = 0.06
+TRAP_RX_FLOOR_FRAC_H: Final[float] = 0.042
+TRAP_RY_FLOOR_FRAC_H: Final[float] = 0.022
+TRAP_RZ_FLOOR_FRAC_H: Final[float] = 0.038
+TRAP_LAT_FRAC: Final[float] = 0.55
+TRAP_NAPE_Z_BIAS_FRAC_H: Final[float] = 0.010
+TRAP_Y_NEAR_ZERO: Final[float] = 1e-4
+TRAP_Y_BACK_FRAC_RY: Final[float] = 0.4
+NECK_NAPE_CLEARANCE_M: Final[float] = 0.005
 # 0046 B6: thigh proximal soft at hip (no dist_soft - 0045 B13).
 # 0069: THIGH_PROX_SOFT_SCALE kept for fence/import smoke; superseded for product emit
 # (isotropic RECIPE_prox_soft_thigh_* replaced by anisotropic RECIPE_hip_soft_*).
@@ -1252,6 +1264,254 @@ def _apply_deltoid_socket_bury(
         messages.append(
             f"deltoid_{side}: socket bury t={t:.2f} outer_frac={DELT_OUTER_X_FRAC:.2f} "
             f"rx={rx:.4f} ry={ry:.4f} rz={rz:.4f}"
+        )
+
+
+def _find_recipe_part(
+    parts: list[RecipePart],
+    *,
+    role: str,
+    side: str,
+) -> RecipePart | None:
+    """Find RECIPE_{role}_{side} by exact name (quiet miss → None)."""
+    name = f"RECIPE_{role}_{side}"
+    for p in parts:
+        if p.name == name:
+            return p
+    return None
+
+
+def _neck_upper_z(parts: list[RecipePart]) -> float | None:
+    """AI2 P2-3: neck top Z for trap nape clamp. Prefer RECIPE_neck p1 (upper end)."""
+    neck_p1_z: float | None = None
+    role_max_z: float | None = None
+    for p in parts:
+        if p.name == "RECIPE_neck" and p.p1 is not None and len(p.p1) >= 3:
+            try:
+                z = float(p.p1[2])
+            except (TypeError, ValueError, IndexError):
+                z = float("nan")
+            if math.isfinite(z):
+                neck_p1_z = z
+        if p.role == "neck":
+            for end in (p.p0, p.p1):
+                if end is None or len(end) < 3:
+                    continue
+                try:
+                    z = float(end[2])
+                except (TypeError, ValueError, IndexError):
+                    continue
+                if math.isfinite(z):
+                    role_max_z = z if role_max_z is None else max(role_max_z, z)
+    if neck_p1_z is not None:
+        return neck_p1_z
+    return role_max_z
+
+
+def _chest_front_y_for_girdle(
+    report: ProportionReport,
+    m: _ResolvedMetrics,
+    parts: list[RecipePart],
+) -> float | None:
+    """Prefer landmark but never more front than oval surface when oval present.
+
+    Front is more negative Y in body-frame. Prefer chest_front landmark when it
+    does not dig past torso oval front; when both known, return max(lm_y, oval_y)
+    (less-front of the two — anti-overshoot so left-only landmarks cannot push
+    the clavicle shelf through the chest oval). Else return whichever is known,
+    then half-depth proxy. Never invent a positive (rear) shelf.
+    """
+    lm_y: float | None = None
+    front_lm = report.landmarks_xyz.get("chest_front")
+    if front_lm is not None and front_lm.y_m is not None and math.isfinite(float(front_lm.y_m)):
+        lm_y = float(front_lm.y_m)
+
+    oval_y: float | None = None
+    for p in parts:
+        if p.name != "RECIPE_torso_oval_chest":
+            continue
+        if p.center is None or len(p.center) < 2 or p.ry_m is None:
+            continue
+        try:
+            cy = float(p.center[1])
+            ry = float(p.ry_m)
+        except (TypeError, ValueError, IndexError):
+            continue
+        if not (math.isfinite(cy) and math.isfinite(ry)):
+            continue
+        front_y = cy - abs(ry)
+        if math.isfinite(front_y):
+            oval_y = front_y
+            break
+
+    if lm_y is not None and oval_y is not None:
+        # Less-front of the two (body-frame: larger Y is less front).
+        return max(lm_y, oval_y)
+    if lm_y is not None:
+        return lm_y
+    if oval_y is not None:
+        return oval_y
+    # Half-depth proxy: chest_y - half_depth (front more negative when half_depth > 0).
+    if (
+        m.chest_y is not None
+        and m.chest_half_depth is not None
+        and math.isfinite(float(m.chest_y))
+        and math.isfinite(float(m.chest_half_depth))
+    ):
+        front_y = float(m.chest_y) - abs(float(m.chest_half_depth))
+        # Never invent positive rear shelf as "front".
+        if math.isfinite(front_y) and front_y <= 0.0:
+            return front_y
+    return None
+
+
+def _shoulder_x_abs_for_girdle(
+    report: ProportionReport,
+    m: _ResolvedMetrics,
+    side: str,
+    *,
+    clav_lat_x: float | None,
+) -> float | None:
+    """Pre-inset shoulder |X| for trap lat law: clav lat, landmark, or shoulder_hw."""
+    if (
+        clav_lat_x is not None
+        and math.isfinite(float(clav_lat_x))
+        and abs(float(clav_lat_x)) > 1e-9
+    ):
+        return abs(float(clav_lat_x))
+    sh_id = f"shoulder_{side}"
+    lm = report.landmarks_xyz.get(sh_id)
+    if lm is not None and lm.x_m is not None and math.isfinite(float(lm.x_m)):
+        ax = abs(float(lm.x_m))
+        if ax > 1e-9:
+            return ax
+    if (
+        m.shoulder_hw is not None
+        and math.isfinite(float(m.shoulder_hw))
+        and float(m.shoulder_hw) > 1e-9
+    ):
+        return float(m.shoulder_hw)
+    return None
+
+
+def _apply_shoulder_girdle_softs(
+    parts: list[RecipePart],
+    report: ProportionReport,
+    m: _ResolvedMetrics,
+    messages: list[str],
+) -> None:
+    """0061: clavicle radius + asymmetric front shelf + sternal Z; trap floors + nape.
+
+    Wire once after 0060 deltoid bury and before breast hang/tilt. Quiet skip when
+    clavicle/trap absent (limbs-only / no profile).
+    """
+    h = m.height_m
+    h_f: float | None = None
+    if h is not None and math.isfinite(float(h)):
+        h_f = float(h)
+    shelf_y = _chest_front_y_for_girdle(report, m, parts)
+    neck_z_hi = _neck_upper_z(parts)
+
+    for side in ("l", "r"):
+        sign = -1.0 if side == "l" else 1.0
+        clav_lat_x: float | None = None
+
+        clav = _find_recipe_part(parts, role="clavicle", side=side)
+        if clav is not None:
+            if clav.kind != "capsule" or clav.p0 is None or clav.p1 is None:
+                messages.append(f"clavicle_{side}: girdle skip (not capsule)")
+            else:
+                orig_p0 = list(clav.p0)
+                orig_p1 = list(clav.p1)
+                orig_radius = clav.radius_m
+                if h_f is not None:
+                    floor_r = CLAVICLE_RADIUS_FRAC_H * h_f
+                    if clav.radius_m is None or float(clav.radius_m) < floor_r:
+                        clav.radius_m = floor_r
+
+                p0 = list(clav.p0)
+                p1 = list(clav.p1)
+                if abs(float(p0[0])) >= abs(float(p1[0])):
+                    lat, med = p0, p1
+                    lat_was_p0 = True
+                else:
+                    lat, med = p1, p0
+                    lat_was_p0 = False
+
+                sh_x = abs(float(lat[0]))
+                sh_z = float(lat[2])
+                clav_lat_x = sh_x
+
+                # Lateral X/Z + asymmetric Y shelf (AI2 P2-2 deepen-front only)
+                lat[0] = sign * sh_x * (1.0 - CLAVICLE_LATERAL_INSET_FRAC)
+                lat[2] = sh_z
+                if shelf_y is not None and math.isfinite(float(shelf_y)):
+                    lat[1] = min(float(lat[1]), float(shelf_y))
+
+                # Medial sternal
+                med[0] = 0.0
+                if h_f is not None:
+                    med[2] = sh_z - CLAVICLE_MEDIAL_Z_DROP_FRAC_H * h_f
+                if shelf_y is not None and math.isfinite(float(shelf_y)):
+                    med[1] = min(float(med[1]), float(shelf_y))
+
+                new_p0 = lat if lat_was_p0 else med
+                new_p1 = med if lat_was_p0 else lat
+                if (
+                    _segment_length(
+                        (new_p0[0], new_p0[1], new_p0[2]), (new_p1[0], new_p1[1], new_p1[2])
+                    )
+                    < _NEAR_ZERO_LEN
+                ):
+                    # Full restore including radius floor (Codex P3)
+                    clav.p0 = orig_p0
+                    clav.p1 = orig_p1
+                    clav.radius_m = orig_radius
+                    messages.append(f"clavicle_{side}: girdle skip (zero length)")
+                else:
+                    clav.p0 = new_p0
+                    clav.p1 = new_p1
+                    r_msg = float(clav.radius_m) if clav.radius_m is not None else 0.0
+                    shelf_s = f"{float(shelf_y):.4f}" if shelf_y is not None else "None"
+                    messages.append(
+                        f"clavicle_{side}: radius floor frac={CLAVICLE_RADIUS_FRAC_H} "
+                        f"r={r_msg:.4f} shelf_y={shelf_s} "
+                        f"lat_y={float(lat[1]):.4f} med_y={float(med[1]):.4f}"
+                    )
+
+        trap = _find_recipe_part(parts, role="trap_soft", side=side)
+        if trap is None or trap.center is None:
+            continue
+        old_ry = float(trap.ry_m or 0.0)
+        if h_f is not None:
+            trap.rx_m = max(float(trap.rx_m or 0.0), TRAP_RX_FLOOR_FRAC_H * h_f)
+            trap.ry_m = max(float(trap.ry_m or 0.0), TRAP_RY_FLOOR_FRAC_H * h_f)
+            trap.rz_m = max(float(trap.rz_m or 0.0), TRAP_RZ_FLOOR_FRAC_H * h_f)
+
+        c = list(trap.center)
+        sh_x_trap = _shoulder_x_abs_for_girdle(report, m, side, clav_lat_x=clav_lat_x)
+        if sh_x_trap is not None and sh_x_trap > 1e-9:
+            c[0] = sign * TRAP_LAT_FRAC * sh_x_trap
+
+        if h_f is not None:
+            c[2] = float(c[2]) + TRAP_NAPE_Z_BIAS_FRAC_H * h_f
+            if neck_z_hi is not None and math.isfinite(float(neck_z_hi)):
+                c[2] = min(float(c[2]), float(neck_z_hi) - NECK_NAPE_CLEARANCE_M)
+
+        # AI2 P3-1: re-derive back Y after ry floor
+        ry = float(trap.ry_m or 0.02)
+        y0 = float(c[1])
+        ry_fallback = (
+            y0 > 0.0 and old_ry > 1e-9 and abs(y0 - abs(old_ry) * TRAP_Y_BACK_FRAC_RY) < 1e-5
+        )
+        if abs(y0) < TRAP_Y_NEAR_ZERO or ry_fallback or y0 <= 0.0:
+            c[1] = abs(ry) * TRAP_Y_BACK_FRAC_RY
+
+        trap.center = c
+        messages.append(
+            f"trap_soft_{side}: floors rx/ry/rz="
+            f"{float(trap.rx_m or 0.0):.4f}/{float(trap.ry_m or 0.0):.4f}/"
+            f"{float(trap.rz_m or 0.0):.4f} nape_z={float(c[2]):.4f} cx={float(c[0]):.4f}"
         )
 
 
@@ -3485,6 +3745,9 @@ def build_blockout_recipe(
     # 0060: deltoid socket bury along UA X-Z (after base/profile delts + limbs; before breast hang)
     _apply_deltoid_socket_bury(parts, messages)
 
+    # 0061: clavicle radius/shelf + trap floors/nape (after 0060 bury; before breast hang)
+    _apply_shoulder_girdle_softs(parts, report, resolved, messages)
+
     # 0049 B4: drop breast_soft center Z for readable hang (before 0033 tilt)
     _apply_breast_hang_z(parts, report, resolved, messages)
 
@@ -5356,6 +5619,9 @@ __all__ = [
     "CALF_BELLY_SCALE",
     "CALF_DIST_END_SCALE",
     "CALF_PROX_END_SCALE",
+    "CLAVICLE_LATERAL_INSET_FRAC",
+    "CLAVICLE_MEDIAL_Z_DROP_FRAC_H",
+    "CLAVICLE_RADIUS_FRAC_H",
     "CROTCH_SEAT_SLACK_M",
     "CROTCH_Z_FRAC_FALLBACK",
     "DELT_ARM_RADIUS_SCALE",
@@ -5397,6 +5663,7 @@ __all__ = [
     "LIMB_DISTAL_SOFT_SCALE",
     "MIDLINE_X_TOL_M",
     "NECK_FORWARD_TILT_DEG",
+    "NECK_NAPE_CLEARANCE_M",
     "NECK_R_MAX_FRAC_HEAD_RX",
     "PELVIS_BUCKET_HALF_DEPTH_FRAC",
     "PELVIS_BUCKET_HW_FRAC",
@@ -5425,6 +5692,13 @@ __all__ = [
     "TORSO_OVAL_RZ_SPAN_FRAC",
     "TORSO_WAIST_PINCH_TAPER_GATE",
     "TORSO_WAIST_RX_MAX_FRAC_CHEST",
+    "TRAP_LAT_FRAC",
+    "TRAP_NAPE_Z_BIAS_FRAC_H",
+    "TRAP_RX_FLOOR_FRAC_H",
+    "TRAP_RY_FLOOR_FRAC_H",
+    "TRAP_RZ_FLOOR_FRAC_H",
+    "TRAP_Y_BACK_FRAC_RY",
+    "TRAP_Y_NEAR_ZERO",
     "UA_DIST_SHAFT_SCALE",
     "UA_PROX_SHAFT_SCALE",
     "UA_SPLIT_T",
@@ -5440,15 +5714,18 @@ __all__ = [
     "_apply_glute_seat_mass",
     "_apply_join_ready_overlaps",
     "_apply_neck_column_priors",
+    "_apply_shoulder_girdle_softs",
     "_apply_thigh_adduction",
     "_apply_wrist_palm_floor",
     "_build_arm_tapered",
     "_build_thigh_tapered",
+    "_chest_front_y_for_girdle",
     "_co_shift_thigh_taper_dist",
     "_glute_or_hip_half_depth_m",
     "_knee_adj_radius_m",
     "_knee_seam_radius_m",
     "_midpoint_of_joints",
+    "_neck_upper_z",
     "_pelvis_ref_rear_y",
     "build_blockout_recipe",
     "emit_bpy_script",

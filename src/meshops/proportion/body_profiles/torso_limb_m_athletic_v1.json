@@ -27,11 +27,11 @@
           "parent_joint_fallback": ["spine_high", "shoulder_l"],
           "scale": {
             "rx_frac_h": 0.042,
-            "ry_frac_h": 0.016,
-            "rz_frac_h": 0.034
+            "ry_frac_h": 0.026,
+            "rz_frac_h": 0.040
           },
           "placement_rules": ["mid_bone", "y_back_pos", "dual_lr"],
-          "notes": "thicker trap defaults vs female"
+          "notes": "thicker trap defaults vs female (0061 M ry/rz)"
         }
       ]
     },
@@ -162,7 +162,7 @@
           "parent_joint_id": "shoulder_l",
           "parent_joint_fallback": ["spine_high"],
           "scale": {
-            "radius_frac_h": 0.006
+            "radius_frac_h": 0.012
           },
           "placement_rules": ["dual_lr"]
         }
