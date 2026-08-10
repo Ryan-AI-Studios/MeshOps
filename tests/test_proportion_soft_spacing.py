@@ -584,11 +584,17 @@ def test_constraints_template_when_no_measured() -> None:
 def _recipe_breast_center_gap(measured_gap_m: float) -> tuple[float, float, float]:
     """Build recipe with fixed fixture + measured gap; return (center_gap, rx, shoulder_hw).
 
-    B7 formula (blockout_recipe): half_gap = measured/2;
-    offset = max(half_gap + rx*0.5, shoulder_hw*0.25); centers at ±offset.
+    0067 B3 (post-pass SoT over emit provisional X):
+    medial_half = max(0.010, measured_gap/2);
+    offset = max(rx + medial_half, shoulder_hw*0.25);
+    offset = min(offset, shoulder_hw*0.45);  # B3b
+    centers at ±offset; center_span = 2*offset.
+    rx is post-pass (after B1 cap + B2 tear equalize).
+    Shoulders ±0.25 keep B3b from collapsing both gaps to the same offset.
     """
     from meshops.proportion.models import CrossSection
 
+    shoulder_hw = 0.25
     report = ProportionReport(
         schema_version="1.2.0",
         height_m=1.72,
@@ -602,8 +608,8 @@ def _recipe_breast_center_gap(measured_gap_m: float) -> tuple[float, float, floa
         depth_bands=[],
         diameters=[],
         landmarks_xyz={
-            "shoulder_l": _xyz("shoulder_l", x_m=-0.18, z_m=1.4),
-            "shoulder_r": _xyz("shoulder_r", x_m=0.18, z_m=1.4),
+            "shoulder_l": _xyz("shoulder_l", x_m=-shoulder_hw, z_m=1.4),
+            "shoulder_r": _xyz("shoulder_r", x_m=shoulder_hw, z_m=1.4),
             "crotch_pubic": _xyz("crotch_pubic", z_m=0.9),
         },
     )
@@ -617,20 +623,28 @@ def _recipe_breast_center_gap(measured_gap_m: float) -> tuple[float, float, floa
     assert len(rx_vals) == 2
     assert rx_vals[0] == pytest.approx(rx_vals[1], rel=1e-9)
     rx = float(rx_vals[0])
-    shoulder_hw = 0.18  # mean abs x of shoulder_l/r landmarks
     return center_gap, rx, shoulder_hw
 
 
+def _expected_b3_center_span(rx: float, measured_gap_m: float, shoulder_hw: float) -> float:
+    """0067 B3/B3b: base=rx+max(0.010, gap/2); floor sh*0.25; cap never below base."""
+    medial = max(0.010, measured_gap_m / 2.0)
+    base = rx + medial
+    offset = max(base, shoulder_hw * 0.25)
+    offset = min(offset, max(shoulder_hw * 0.45, base))
+    return 2.0 * offset
+
+
 def test_recipe_measured_gap_smoke() -> None:
-    """Recipe B7: measured soft_spacing drives center gap (not pre-0030 shoulder-only)."""
+    """Recipe B7/0067: measured soft_spacing drives center gap via B3 sternum post-pass."""
     gap_04, rx_04, shoulder_hw = _recipe_breast_center_gap(0.04)
-    expected_04 = 2.0 * max(0.04 / 2.0 + rx_04 * 0.5, shoulder_hw * 0.25)
+    expected_04 = _expected_b3_center_span(rx_04, 0.04, shoulder_hw)
     assert gap_04 == pytest.approx(expected_04, rel=1e-5)
 
     gap_20, rx_20, shoulder_hw_20 = _recipe_breast_center_gap(0.20)
     assert shoulder_hw_20 == pytest.approx(shoulder_hw, rel=1e-9)
     assert rx_20 == pytest.approx(rx_04, rel=1e-9)
-    expected_20 = 2.0 * max(0.20 / 2.0 + rx_20 * 0.5, shoulder_hw_20 * 0.25)
+    expected_20 = _expected_b3_center_span(rx_20, 0.20, shoulder_hw_20)
     assert gap_20 == pytest.approx(expected_20, rel=1e-5)
 
     # soft_spacing is consulted: larger measured gap → larger center separation
