@@ -439,8 +439,10 @@ def test_recipe__limbs_y_null_front_plane() -> None:
 
 
 def test_recipe__limbs_emit_split_calf() -> None:
-    """0034 names + 0045 B1/B2: calf belly + asymmetric ends; no RECIPE_limb_calf_*."""
+    """0034 names + 0045 B1/B2 + 0071 p0 belly: split calf; no RECIPE_limb_calf_*."""
     from meshops.proportion.blockout_recipe import (
+        CALF_BELLY_LAT_FRAC,
+        CALF_BELLY_REAR_FRAC,
         CALF_BELLY_SCALE,
         CALF_DIST_END_SCALE,
         CALF_PROX_END_SCALE,
@@ -491,11 +493,17 @@ def test_recipe__limbs_emit_split_calf() -> None:
         assert float(a.center[1]) == pytest.approx(knee_y)
         assert float(b.center[1]) == pytest.approx(ankle_y)
         assert cyl.p0 is not None and cyl.p1 is not None
-        assert float(cyl.p0[1]) == pytest.approx(knee_y)
+        # 0071: p0-only lat+rear belly; p1 stays on ankle joint
+        sign = 1.0 if side == "r" else -1.0
+        assert float(cyl.p0[0]) == pytest.approx(
+            float(a.center[0]) + sign * CALF_BELLY_LAT_FRAC * cyl_r, abs=1e-9
+        )
+        assert float(cyl.p0[1]) == pytest.approx(knee_y + CALF_BELLY_REAR_FRAC * cyl_r, abs=1e-9)
         assert float(cyl.p1[1]) == pytest.approx(ankle_y)
         assert a.placement == "full3d"
-        # T2: belly/taper message
+        # T2: belly/taper + p0 bias messages
         assert any(f"calf_{side}: belly/taper a=" in m for m in pkg.messages)
+        assert any(f"calf_{side}: belly bias p0 lat=" in m for m in pkg.messages)
 
     assert not any("limb_calf" in p.name.lower() for p in pkg.parts)
     # T8: no RECIPE_limb_calf on limbs path
@@ -552,8 +560,12 @@ def test_recipe__calf_distal_syncs_to_ank_foot() -> None:
         ay = float(ank.center[1])
         assert float(dist.center[1]) == pytest.approx(ay)
         assert float(cyl.p1[1]) == pytest.approx(ay)
-        # Proximal Y stays at knee (0.0 in this fixture)
-        assert float(cyl.p0[1]) == pytest.approx(0.0)
+        # 0071: p0 has rear belly bias; B6 never rewrites p0 Y (only p1)
+        from meshops.proportion.blockout_recipe import CALF_BELLY_REAR_FRAC
+
+        assert cyl.radius_m is not None
+        expected_p0_y = 0.0 + CALF_BELLY_REAR_FRAC * float(cyl.radius_m)
+        assert float(cyl.p0[1]) == pytest.approx(expected_p0_y, abs=1e-6)
         # B6 Y rewrite from ank_foot → placement is full3d (even if emit was front_plane)
         assert dist.placement == "full3d"
         assert cyl.placement == "full3d"
@@ -760,15 +772,18 @@ def test_recipe__t4_arm_dist_soft_scale() -> None:
 
 
 def test_recipe__t5_knee_soft_radius_mixed_thigh_calf() -> None:
-    """0045 T5: knee_soft r = max(0.55*max(thigh.r, calf_a.rx), 0.018*H)."""
+    """0071 T5 pin: knee_soft rx = 1.10*seam; seam=max(taper_dist else thigh, calf_a)."""
     from meshops.proportion.blockout_recipe import (
         CALF_PROX_END_SCALE,
         KNEE_SOFT_FRAC,
         KNEE_SOFT_MIN_FRAC_H,
+        KNEE_SOFT_RY_FRAC,
+        KNEE_SOFT_RZ_FRAC,
+        THIGH_DIST_SHAFT_SCALE,
     )
 
     height_m = 1.72
-    thigh_hw = 0.08  # larger than calf_a.rx so max = thigh
+    thigh_hw = 0.08  # prox > calf_a; taper_dist = 0.08*0.8 = 0.064 > calf_a
     calf_hw = 0.04
     report = _limb_mass_report(
         height_m=height_m,
@@ -780,18 +795,25 @@ def test_recipe__t5_knee_soft_radius_mixed_thigh_calf() -> None:
     for side in ("l", "r"):
         knee = by_name[f"RECIPE_knee_soft_{side}"]
         thigh = by_name[f"RECIPE_limb_thigh_{side}"]
+        dist = by_name[f"RECIPE_thigh_taper_dist_{side}"]
         calf_a = by_name[f"RECIPE_calf_a_{side}"]
         assert knee.kind == "ellipsoid"
         assert knee.role == "limb_segment"
-        adj = max(float(thigh.radius_m), float(calf_a.rx_m))  # type: ignore[arg-type]
-        expected = max(KNEE_SOFT_FRAC * adj, KNEE_SOFT_MIN_FRAC_H * height_m)
-        # Mixed: thigh 0.08 > calf_a.rx = 0.04*0.88 → adj = thigh
+        # Seam: prefer taper_dist over prox; include calf_a
+        seam = max(float(dist.radius_m), float(calf_a.rx_m))  # type: ignore[arg-type]
+        base = max(KNEE_SOFT_FRAC * seam, KNEE_SOFT_MIN_FRAC_H * height_m)
         assert float(calf_a.rx_m) == pytest.approx(  # type: ignore[arg-type]
             calf_hw * CALF_PROX_END_SCALE, abs=1e-9
         )
+        assert float(dist.radius_m) == pytest.approx(  # type: ignore[arg-type]
+            thigh_hw * THIGH_DIST_SHAFT_SCALE, abs=1e-9
+        )
+        # thigh prox still > calf_a (mixed mass context); do NOT require rx from prox max
         assert float(thigh.radius_m) > float(calf_a.rx_m)  # type: ignore[arg-type]
-        assert knee.rx_m == pytest.approx(expected, abs=1e-9)
-        assert any(f"knee_soft_{side}: r=" in m for m in pkg.messages)
+        assert knee.rx_m == pytest.approx(base, abs=1e-9)
+        assert knee.ry_m == pytest.approx(base * KNEE_SOFT_RY_FRAC, abs=1e-9)
+        assert knee.rz_m == pytest.approx(base * KNEE_SOFT_RZ_FRAC, abs=1e-9)
+        assert any(f"knee_soft_{side}: rx=" in m for m in pkg.messages)
         assert knee.center is not None
         assert float(knee.center[2]) == pytest.approx(0.50)
 
