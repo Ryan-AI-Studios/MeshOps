@@ -1171,11 +1171,36 @@ def _apply_delt_outer_x_bias(
     center[0] = new_x
 
 
+def _ua_endpoints_finite_xz(
+    p0: list[float] | tuple[float, ...] | None,
+    p1: list[float] | tuple[float, ...] | None,
+) -> tuple[float, float, float, float] | None:
+    """Return (p0x, p0z, p1x, p1z) when both endpoints have finite X/Z; else None."""
+    if p0 is None or p1 is None:
+        return None
+    if len(p0) < 3 or len(p1) < 3:
+        return None
+    try:
+        p0x = float(p0[0])
+        p0z = float(p0[2])
+        p1x = float(p1[0])
+        p1z = float(p1[2])
+    except (TypeError, ValueError, IndexError):
+        return None
+    if not all(math.isfinite(v) for v in (p0x, p0z, p1x, p1z)):
+        return None
+    return p0x, p0z, p1x, p1z
+
+
 def _apply_deltoid_socket_bury(
     parts: list[RecipePart],
     messages: list[str],
 ) -> None:
-    """0060: shift deltoid centers along upper_arm p0->p1 in X-Z only (0051 Y fence)."""
+    """0060: shift deltoid centers along upper_arm p0->p1 in X-Z only (0051 Y fence).
+
+    X bury is lateral-non-increasing: do not move center further from the midline
+    than the pre-bury outer placement (arm splay must not undo socket medial).
+    """
     by = {p.name: p for p in parts}
     for side in ("l", "r"):
         delt = by.get(f"RECIPE_deltoid_soft_{side}")
@@ -1183,13 +1208,16 @@ def _apply_deltoid_socket_bury(
         if delt is None or delt.center is None:
             continue
         ua = by.get(f"RECIPE_limb_upper_arm_{side}")
-        if ua is None or ua.p0 is None or ua.p1 is None:
+        if ua is None:
             messages.append(f"deltoid_{side}: socket bury skipped (missing UA)")
             continue
-        p0 = ua.p0
-        p1 = ua.p1
-        vx = float(p1[0]) - float(p0[0])
-        vz = float(p1[2]) - float(p0[2])
+        ends = _ua_endpoints_finite_xz(ua.p0, ua.p1)
+        if ends is None:
+            messages.append(f"deltoid_{side}: socket bury skipped (missing UA)")
+            continue
+        p0x, p0z, p1x, p1z = ends
+        vx = p1x - p0x
+        vz = p1z - p0z
         # AI2 P2-1: do NOT use vy = p1.y - p0.y — zero Y bury component
         length_xz = math.sqrt(vx * vx + vz * vz)
         if length_xz < _DELT_BURY_LEN_FLOOR:
@@ -1197,9 +1225,27 @@ def _apply_deltoid_socket_bury(
             continue
         t = DELT_DISTAL_BURY_T
         c = delt.center
-        c[0] = float(c[0]) + t * vx
+        if len(c) < 3:
+            messages.append(f"deltoid_{side}: socket bury skipped (missing UA)")
+            continue
+        try:
+            cx0 = float(c[0])
+            cz0 = float(c[2])
+        except (TypeError, ValueError, IndexError):
+            messages.append(f"deltoid_{side}: socket bury skipped (missing UA)")
+            continue
+        if not (math.isfinite(cx0) and math.isfinite(cz0)):
+            messages.append(f"deltoid_{side}: socket bury skipped (missing UA)")
+            continue
+        dx = t * vx
+        dz = t * vz
+        # Lateral-non-increasing: drop X component that moves mass further outer.
+        # Product UA splay has same-sign vx as side; full t*vx undid outer medial.
+        if cx0 * dx > 0.0:
+            dx = 0.0
+        c[0] = cx0 + dx
         # c[1] unchanged — 0051 deltoid Y co-read fence
-        c[2] = float(c[2]) + t * vz
+        c[2] = cz0 + dz
         rx = float(delt.rx_m or 0.0)
         ry = float(delt.ry_m or 0.0)
         rz = float(delt.rz_m or 0.0)

@@ -438,7 +438,8 @@ def test_t12_m_profile_scale() -> None:
 
 
 def test_t5_bury_applies_distal_shift_math() -> None:
-    """Unit: bury shifts X/Z by t*v and leaves Y; used for isolation confidence."""
+    """Unit: bury shifts X/Z by t*v (medial-ward X) and leaves Y."""
+    # Left: p1 more medial (x less negative) so X bury is kept (lateral-non-increasing).
     parts = [
         _part(
             "RECIPE_deltoid_soft_l",
@@ -452,7 +453,7 @@ def test_t5_bury_applies_distal_shift_math() -> None:
             kind="capsule",
             role="limb_segment",
             p0=[-0.20, 0.0, 1.38],
-            p1=[-0.25, -0.05, 1.10],
+            p1=[-0.15, -0.05, 1.10],  # medial-ward + distal
             radius_m=0.04,
         ),
     ]
@@ -461,7 +462,7 @@ def test_t5_bury_applies_distal_shift_math() -> None:
     _apply_deltoid_socket_bury(parts, messages)
     c = parts[0].center
     assert c is not None
-    vx = -0.05
+    vx = 0.05
     vz = 1.10 - 1.38
     t = DELT_DISTAL_BURY_T
     assert c[0] == pytest.approx(-0.20 + t * vx, abs=1e-9)
@@ -490,3 +491,68 @@ def test_t5_bury_applies_distal_shift_math() -> None:
     _apply_deltoid_socket_bury(parts_z, msgs2)
     assert any("zero UA XZ length" in m for m in msgs2)
     assert math.isclose(float(parts_z[0].center[0]), 0.20)  # type: ignore[index]
+
+
+def test_t5b_lateral_splay_x_bury_clamped() -> None:
+    """Product-class: outward UA splay must not increase |cx| via bury X."""
+    parts = [
+        _part(
+            "RECIPE_deltoid_soft_r",
+            center=[0.262, 0.0, 1.38],
+            rx_m=0.059,
+            ry_m=0.042,
+            rz_m=0.046,
+        ),
+        _part(
+            "RECIPE_limb_upper_arm_r",
+            kind="capsule",
+            role="limb_segment",
+            p0=[0.2575, 0.0, 1.38],
+            p1=[0.3275, 0.0, 1.26],  # outward splay + distal
+            radius_m=0.0438,
+        ),
+    ]
+    cx_before = float(parts[0].center[0])  # type: ignore[index]
+    messages: list[str] = []
+    _apply_deltoid_socket_bury(parts, messages)
+    c = parts[0].center
+    assert c is not None
+    # X clamped (no further lateral); Z still buries
+    assert c[0] == pytest.approx(cx_before, abs=1e-12)
+    assert c[2] < 1.38 - 1e-6
+    assert any("socket bury t=" in m for m in messages)
+
+
+def test_t7c_nonfinite_ua_skips() -> None:
+    """P1 close: NaN / short / inf UA endpoints skip without poisoning center."""
+    nan = float("nan")
+    cases: list[tuple[list[float], list[float]]] = [
+        ([0.2, 0.0, 1.38], [nan, 0.0, 1.10]),
+        ([0.2, 0.0, 1.38], [float("inf"), 0.0, 1.10]),
+        ([0.2, 0.0], [0.25, 0.0, 1.10]),  # short p0
+    ]
+    for p0, p1 in cases:
+        parts = [
+            _part(
+                "RECIPE_deltoid_soft_r",
+                center=[0.26, 0.0, 1.38],
+                rx_m=0.05,
+                ry_m=0.036,
+                rz_m=0.039,
+            ),
+            _part(
+                "RECIPE_limb_upper_arm_r",
+                kind="capsule",
+                role="limb_segment",
+                p0=p0,
+                p1=p1,
+                radius_m=0.04,
+            ),
+        ]
+        messages: list[str] = []
+        _apply_deltoid_socket_bury(parts, messages)
+        c = parts[0].center
+        assert c is not None
+        assert c[0] == pytest.approx(0.26, abs=1e-12)
+        assert math.isfinite(float(c[0])) and math.isfinite(float(c[2]))
+        assert any("socket bury skipped" in m for m in messages)
