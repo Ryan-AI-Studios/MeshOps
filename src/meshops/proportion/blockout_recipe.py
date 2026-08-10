@@ -22,6 +22,7 @@ can pass; B6 distal/cyl p1 Y sync to ank_foot after feet emit.
 0065: torso front snowman — waist rx pinch + chest ry/front flatten (full3d rear bias);
 schema stay 1.4.0.
 0049: breast_soft center Z hang drop (before 0033 tilt); B1 floor 0.55*rz; schema stay 1.4.0.
+0067: breast_soft athletic rx cap + teardrop axes + sternum X (before hang); schema stay 1.4.0.
 0050: neck column forward tilt (p0/p1) + head/face co-move + radius ceiling vs head.rx;
 schema stay 1.4.0.
 0052: glute_soft seat mass (ry floor + rear +Y) before 0036 outer align; schema stay 1.4.0.
@@ -164,6 +165,14 @@ TORSO_CHEST_Y_REAR_BIAS_FRAC_RY: Final[float] = 0.28
 BREAST_HANG_Z_DROP_FRAC_RZ: Final[float] = 0.55
 # 0049 D2: unit min hang drop vs pre-anchor (softer than B1; waist soft-clamp threshold).
 BREAST_HANG_Z_MIN_DROP_FRAC_RZ: Final[float] = 0.40
+# 0067 B1-B3/B12: athletic lower-pole teardrop + sternum (before hang).
+BREAST_ATHLETIC_RX_MAX_FRAC_H: Final[float] = 0.042
+BREAST_TEAR_RY_FRAC_RX: Final[float] = 0.78
+BREAST_TEAR_RZ_FRAC_RX: Final[float] = 1.05
+BREAST_STERNUM_CLEARANCE_M: Final[float] = 0.010
+BREAST_X_SHOULDER_FLOOR_FRAC: Final[float] = 0.25
+BREAST_X_SHOULDER_MAX_FRAC: Final[float] = 0.45
+BREAST_ATTACH_Y_SCALE: Final[float] = 1.0  # B12 — do not re-anchor Y to chest
 # 0050 B1/B5: neck column forward tilt about +X (tip -Y) + radius ceiling vs head.rx.
 NECK_FORWARD_TILT_DEG: Final[float] = 12.0
 NECK_R_MAX_FRAC_HEAD_RX: Final[float] = 0.55
@@ -3881,6 +3890,9 @@ def build_blockout_recipe(
     # 0063: bicep scale+front past + triceps append (after profile + 0060/0061; before breast hang)
     _apply_arm_muscle_softs(parts, messages)
 
+    # 0067 B4: athletic tear + sternum on dual breast_soft (before hang Z / tilt)
+    _apply_breast_lower_pole_athletic(parts, report, resolved, template_applied, messages)
+
     # 0049 B4: drop breast_soft center Z for readable hang (before 0033 tilt)
     _apply_breast_hang_z(parts, report, resolved, messages)
 
@@ -4984,6 +4996,153 @@ def _crotch_z_quiet(report: ProportionReport, height_m: float | None) -> float |
         if math.isfinite(h) and h > 0.0:
             return CROTCH_Z_FRAC_FALLBACK * h
     return None
+
+
+def _breast_sternum_soft_half(
+    report: ProportionReport,
+    m: _ResolvedMetrics,
+    template_applied: TemplateAppliedPackage | None,
+) -> float:
+    """0067 B3: medial soft_half ladder for sternum (else 0 - not shoulder*0.18).
+
+    Order: measured intermammary_gap_m/2 -> template gap_m/2 -> template frac*bust_hw/2
+    -> else 0.0. Distinct from `_half_gap_intermammary` emit fallback.
+    """
+    soft = getattr(report, "soft_spacing", None)
+    if soft is not None and soft.intermammary_gap_m is not None:
+        g = float(soft.intermammary_gap_m)
+        if math.isfinite(g):
+            return g / 2.0
+    if template_applied is not None:
+        tm = getattr(template_applied.constants, "intermammary_gap_m", None)
+        if tm is not None:
+            tmv = float(tm)
+            if math.isfinite(tmv):
+                return tmv / 2.0
+        gf = getattr(template_applied.constants, "intermammary_gap_frac", None)
+        bust = _resolve_diameter(report.diameters, "bust")
+        hw = _half_width_from_diameter(bust) if bust is not None else m.shoulder_hw
+        if gf is not None and hw is not None:
+            gff = float(gf)
+            hwf = float(hw)
+            if math.isfinite(gff) and math.isfinite(hwf):
+                return (gff * hwf) / 2.0
+    return 0.0
+
+
+def _apply_breast_lower_pole_athletic(
+    parts: list[RecipePart],
+    report: ProportionReport,
+    m: _ResolvedMetrics,
+    template_applied: TemplateAppliedPackage | None,
+    messages: list[str],
+) -> None:
+    """0067: athletic rx cap + teardrop + sternum X on dual breast_soft (before hang).
+
+    Mutates *parts* in place. B6: role breast_soft + ellipsoid only; never pec.
+    B1 mean-rx cap vs H; B2 equal tear axes; B3 sternum MAX(clearance, soft_half);
+    B12 attach Y scale only (default 1.0 — no chest re-anchor).
+    """
+    eps = _NEAR_ZERO_LEN
+    idxs = [
+        i
+        for i, p in enumerate(parts)
+        if p.role == "breast_soft"
+        and p.kind == "ellipsoid"
+        and p.center is not None
+        and len(p.center) >= 3
+        and p.rx_m is not None
+        and math.isfinite(float(p.rx_m))
+        and float(p.rx_m) > 0.0
+    ]
+    if len(idxs) < 2:
+        messages.append("breast_lower_pole_athletic_applied: false")
+        return
+
+    # B1: dual-mean rx athletic cap (uniform scale all axes when over cap).
+    rxs: list[float] = []
+    for i in idxs:
+        rx_i = parts[i].rx_m
+        assert rx_i is not None
+        rxs.append(float(rx_i))
+    mean_rx = sum(rxs) / float(len(rxs))
+    h = m.height_m
+    s_applied = 1.0
+    cap_m: float | None = None
+    if h is not None and math.isfinite(float(h)) and float(h) > 0.0:
+        cap_m = BREAST_ATHLETIC_RX_MAX_FRAC_H * float(h)
+        if mean_rx > cap_m + eps:
+            s_applied = cap_m / mean_rx
+            for i in idxs:
+                p = parts[i]
+                rx_p = p.rx_m
+                assert rx_p is not None
+                upd: dict[str, float] = {"rx_m": float(rx_p) * s_applied}
+                if p.ry_m is not None and math.isfinite(float(p.ry_m)):
+                    upd["ry_m"] = float(p.ry_m) * s_applied
+                if p.rz_m is not None and math.isfinite(float(p.rz_m)):
+                    upd["rz_m"] = float(p.rz_m) * s_applied
+                parts[i] = p.model_copy(update=upd)
+            mean_rx = cap_m
+
+    # B2: teardrop from post-B1 dual-mean rx; both sides equal axes (B7).
+    rxs2: list[float] = []
+    for i in idxs:
+        rx_i = parts[i].rx_m
+        assert rx_i is not None
+        rxs2.append(float(rx_i))
+    mean_rx = sum(rxs2) / float(len(rxs2))
+    tear_rx = mean_rx
+    tear_ry = BREAST_TEAR_RY_FRAC_RX * tear_rx
+    tear_rz = BREAST_TEAR_RZ_FRAC_RX * tear_rx
+
+    # B3: sternum — medial_half = MAX(clearance, soft_half); shoulder floor + B3b cap.
+    soft_half = _breast_sternum_soft_half(report, m, template_applied)
+    medial_half = max(BREAST_STERNUM_CLEARANCE_M, soft_half)
+    offset = tear_rx + medial_half
+    sh = m.shoulder_hw
+    if sh is not None and math.isfinite(float(sh)) and float(sh) > eps:
+        offset = max(offset, float(sh) * BREAST_X_SHOULDER_FLOOR_FRAC)
+        offset = min(offset, float(sh) * BREAST_X_SHOULDER_MAX_FRAC)
+
+    for i in idxs:
+        p = parts[i]
+        assert p.center is not None
+        cx = float(p.center[0])
+        if abs(cx) < eps:
+            name = p.name or ""
+            if name.endswith("_l"):
+                sign = -1.0
+            elif name.endswith("_r"):
+                sign = 1.0
+            else:
+                sign = 1.0
+        else:
+            sign = -1.0 if cx < 0.0 else 1.0
+        cy = float(p.center[1])
+        if BREAST_ATTACH_Y_SCALE != 1.0:
+            cy = cy * BREAST_ATTACH_Y_SCALE
+        cz = float(p.center[2])
+        parts[i] = p.model_copy(
+            update={
+                "rx_m": tear_rx,
+                "ry_m": tear_ry,
+                "rz_m": tear_rz,
+                "center": [sign * offset, cy, cz],
+            }
+        )
+
+    contact_gap = 2.0 * (offset - tear_rx)
+    messages.append("breast_lower_pole_athletic_applied: true")
+    messages.append(f"breast_athletic_scale_s={s_applied}")
+    if cap_m is not None:
+        messages.append(f"breast_athletic_rx_cap_m={cap_m}")
+    messages.append(f"breast_tear_ry_frac_rx={BREAST_TEAR_RY_FRAC_RX}")
+    messages.append(f"breast_tear_rz_frac_rx={BREAST_TEAR_RZ_FRAC_RX}")
+    messages.append(f"breast_sternum_soft_half_m={soft_half}")
+    messages.append(f"breast_sternum_medial_half_m={medial_half}")
+    messages.append(f"breast_sternum_gap_m={contact_gap}")
+    messages.append(f"breast_sternum_offset_m={offset}")
 
 
 def _apply_breast_hang_z(
