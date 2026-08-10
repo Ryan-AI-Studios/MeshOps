@@ -18,6 +18,7 @@ from meshops.proportion.blockout_recipe import (
     _BASELINE_ROLES_NO_PROFILE,
     _MICHELIN_FRAC,
     RECIPE_SCHEMA_VERSION,
+    TRAP_LAT_FRAC,
     _midpoint_of_joints,
     build_blockout_recipe,
     load_blockout_recipe,
@@ -345,21 +346,24 @@ def test_profile__bicep_mid_when_joints_finite() -> None:
 
 
 def test_profile__trap_mid_l_ne_r() -> None:
+    """T11 (0061): trap |cx| = TRAP_LAT_FRAC * |shoulder_x|; L != R (not mid-bone X)."""
     report = _rich_report()
     profile = load_anatomy_profile("torso_limb_f_athletic_v1")
     skel = _skeleton_with_arms()
     pkg = build_blockout_recipe(report, limbs=False, profile=profile, skeleton=skel)
     joints = {j.id: j for j in skel.joints}
-    mid_l = _midpoint_of_joints(joints, "neck_base", "shoulder_l")
-    mid_r = _midpoint_of_joints(joints, "neck_base", "shoulder_r")
-    assert mid_l is not None and mid_r is not None
-    assert mid_l[0] != mid_r[0]
+    sh_l = joints["shoulder_l"]
+    sh_r = joints["shoulder_r"]
+    assert sh_l.x_m is not None and sh_r.x_m is not None
+    sh_x_l = abs(float(sh_l.x_m))
+    sh_x_r = abs(float(sh_r.x_m))
     trap_l = next(p for p in pkg.parts if p.name == "RECIPE_trap_soft_l")
     trap_r = next(p for p in pkg.parts if p.name == "RECIPE_trap_soft_r")
     assert trap_l.center is not None and trap_r.center is not None
-    assert trap_l.center[0] == pytest.approx(mid_l[0], abs=1e-5)
-    assert trap_r.center[0] == pytest.approx(mid_r[0], abs=1e-5)
+    assert abs(float(trap_l.center[0])) == pytest.approx(TRAP_LAT_FRAC * sh_x_l, abs=1e-5)
+    assert abs(float(trap_r.center[0])) == pytest.approx(TRAP_LAT_FRAC * sh_x_r, abs=1e-5)
     assert trap_l.center[0] != trap_r.center[0]
+    assert float(trap_l.center[0]) < 0.0 < float(trap_r.center[0])
 
 
 def test_profile__no_profiles_excludes_new_roles() -> None:

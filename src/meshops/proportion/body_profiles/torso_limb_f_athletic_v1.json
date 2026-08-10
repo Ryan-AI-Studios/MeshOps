@@ -26,12 +26,12 @@
           "parent_joint_id": "neck_base",
           "parent_joint_fallback": ["spine_high", "shoulder_l"],
           "scale": {
-            "rx_frac_h": 0.035,
-            "ry_frac_h": 0.012,
-            "rz_frac_h": 0.028
+            "rx_frac_h": 0.042,
+            "ry_frac_h": 0.022,
+            "rz_frac_h": 0.038
           },
           "placement_rules": ["mid_bone", "y_back_pos", "dual_lr"],
-          "notes": "mid(neck_base, shoulder_*) thin trap ovals"
+          "notes": "mid(neck_base, shoulder_*) trap ovals (0061 floors)"
         }
       ]
     },
@@ -168,7 +168,7 @@
           "parent_joint_id": "shoulder_l",
           "parent_joint_fallback": ["spine_high"],
           "scale": {
-            "radius_frac_h": 0.006
+            "radius_frac_h": 0.012
           },
           "placement_rules": ["dual_lr"]
         }
