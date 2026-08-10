@@ -17,6 +17,7 @@ from meshops.proportion.blockout_recipe import (
     BREAST_X_SHOULDER_FLOOR_FRAC,
     BREAST_X_SHOULDER_MAX_FRAC,
     RECIPE_SCHEMA_VERSION,
+    BlockoutRecipePackage,
     RecipePart,
     _apply_breast_lower_pole_athletic,
     _breast_sternum_soft_half,
@@ -324,7 +325,7 @@ def _f_athletic_pkg(
     soft_spacing: SoftSpacing | None = None,
     breast_tilt_deg: float | None = None,
     bust_hw: float = 0.16,
-) -> object:
+) -> BlockoutRecipePackage:
     profile = load_anatomy_profile("torso_limb_f_athletic_v1")
     return build_blockout_recipe(
         _rich_report(soft_spacing=soft_spacing, bust_hw=bust_hw),
@@ -449,9 +450,13 @@ def test_t6_dual_lr_axes_and_z_equal() -> None:
     pkg = _f_athletic_pkg()
     breasts = [p for p in pkg.parts if p.role == "breast_soft" and p.center]
     assert len(breasts) == 2
-    assert breasts[0].rx_m == pytest.approx(float(breasts[1].rx_m), abs=1e-12)
-    assert breasts[0].ry_m == pytest.approx(float(breasts[1].ry_m), abs=1e-12)
-    assert breasts[0].rz_m == pytest.approx(float(breasts[1].rz_m), abs=1e-12)
+    a, b = breasts[0], breasts[1]
+    assert a.rx_m is not None and b.rx_m is not None
+    assert a.ry_m is not None and b.ry_m is not None
+    assert a.rz_m is not None and b.rz_m is not None
+    assert float(a.rx_m) == pytest.approx(float(b.rx_m), abs=1e-12)
+    assert float(a.ry_m) == pytest.approx(float(b.ry_m), abs=1e-12)
+    assert float(a.rz_m) == pytest.approx(float(b.rz_m), abs=1e-12)
     zs = [p.center[2] for p in breasts if p.center is not None]
     assert zs[0] == pytest.approx(zs[1], abs=1e-12)
 
@@ -507,6 +512,7 @@ def test_t9_pec_soft_untouched() -> None:
         label="RECIPE_pec_soft_l",
     )
     parts.append(pec)
+    assert pec.center is not None
     pre = (list(pec.center), pec.rx_m, pec.ry_m, pec.rz_m)
     msgs: list[str] = []
     _apply_breast_lower_pole_athletic(parts, _report_soft_cs(), _empty_metrics(), None, msgs)
