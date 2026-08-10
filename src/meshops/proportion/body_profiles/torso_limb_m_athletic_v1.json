@@ -69,9 +69,9 @@
           "parent_joint_id": "shoulder_l",
           "parent_joint_fallback": ["elbow_l"],
           "scale": {
-            "rx_frac_h": 0.032,
-            "ry_frac_h": 0.030,
-            "rz_frac_h": 0.036,
+            "rx_frac_h": 0.022,
+            "ry_frac_h": 0.020,
+            "rz_frac_h": 0.021,
             "use_diameter": "upper_arm"
           },
           "placement_rules": ["mid_bone", "dual_lr"]

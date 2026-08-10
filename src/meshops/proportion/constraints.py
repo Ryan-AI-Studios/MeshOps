@@ -296,6 +296,9 @@ def classify_part_name(name: str) -> tuple[ConstraintRole, Side]:
         return "unknown", side
     if "elbow_soft" in lower:
         return "unknown", side
+    # 0063 B5: triceps soft → unknown before upper_arm (C_no_dup safe with bicep).
+    if "triceps" in lower:
+        return "unknown", side
     if "thigh" in lower or "limb_thigh" in lower:
         return "thigh", side
     if "upper_arm" in lower or "limb_upper_arm" in lower:
