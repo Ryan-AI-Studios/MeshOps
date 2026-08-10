@@ -101,10 +101,13 @@ KNEE_SOFT_RZ_FRAC: Final[float] = 0.75  # B4: vertical de-sphere
 KNEE_SOFT_OUTER_FRAC_RX: Final[float] = 0.06  # B5: outer center bias (* rx, signed)
 KNEE_SOFT_REAR_FRAC_RY: Final[float] = 0.10  # B6: rear +Y center bias (* ry)
 # 0046 B1: deltoid scale vs upper_arm half-width (profile + base).
+# 0060: keep bulk; retune axes/outer + distal socket bury (X-Z only).
 DELT_ARM_RADIUS_SCALE: Final[float] = 1.35
-DELT_RY_FRAC: Final[float] = 0.90
-DELT_RZ_FRAC: Final[float] = 0.85
-DELT_OUTER_X_FRAC: Final[float] = 0.25  # * rx, sign by side (r:+, l:-); skip if crosses midline
+DELT_RY_FRAC: Final[float] = 0.72  # was 0.90; depth flatten (cap silhouette)
+DELT_RZ_FRAC: Final[float] = 0.78  # was 0.85; vertical de-sphere
+DELT_OUTER_X_FRAC: Final[float] = 0.08  # was 0.25; * rx, sign by side (r:+, l:-); midline skip
+DELT_DISTAL_BURY_T: Final[float] = 0.18  # fraction of UA p0->p1 (prox half) along X-Z
+_DELT_BURY_LEN_FLOOR: Final[float] = 1e-4
 # 0046 B6: thigh proximal soft at hip (no dist_soft - 0045 B13).
 # 0069: THIGH_PROX_SOFT_SCALE kept for fence/import smoke; superseded for product emit
 # (isotropic RECIPE_prox_soft_thigh_* replaced by anisotropic RECIPE_hip_soft_*).
@@ -1166,6 +1169,44 @@ def _apply_delt_outer_x_bias(
             messages.append(f"deltoid_{side}: outer_x bias skipped (midline cross)")
         return
     center[0] = new_x
+
+
+def _apply_deltoid_socket_bury(
+    parts: list[RecipePart],
+    messages: list[str],
+) -> None:
+    """0060: shift deltoid centers along upper_arm p0->p1 in X-Z only (0051 Y fence)."""
+    by = {p.name: p for p in parts}
+    for side in ("l", "r"):
+        delt = by.get(f"RECIPE_deltoid_soft_{side}")
+        # P3-1: no message when deltoid absent (common limbs=False / profile-skip noise)
+        if delt is None or delt.center is None:
+            continue
+        ua = by.get(f"RECIPE_limb_upper_arm_{side}")
+        if ua is None or ua.p0 is None or ua.p1 is None:
+            messages.append(f"deltoid_{side}: socket bury skipped (missing UA)")
+            continue
+        p0 = ua.p0
+        p1 = ua.p1
+        vx = float(p1[0]) - float(p0[0])
+        vz = float(p1[2]) - float(p0[2])
+        # AI2 P2-1: do NOT use vy = p1.y - p0.y — zero Y bury component
+        length_xz = math.sqrt(vx * vx + vz * vz)
+        if length_xz < _DELT_BURY_LEN_FLOOR:
+            messages.append(f"deltoid_{side}: socket bury skipped (zero UA XZ length)")
+            continue
+        t = DELT_DISTAL_BURY_T
+        c = delt.center
+        c[0] = float(c[0]) + t * vx
+        # c[1] unchanged — 0051 deltoid Y co-read fence
+        c[2] = float(c[2]) + t * vz
+        rx = float(delt.rx_m or 0.0)
+        ry = float(delt.ry_m or 0.0)
+        rz = float(delt.rz_m or 0.0)
+        messages.append(
+            f"deltoid_{side}: socket bury t={t:.2f} outer_frac={DELT_OUTER_X_FRAC:.2f} "
+            f"rx={rx:.4f} ry={ry:.4f} rz={rz:.4f}"
+        )
 
 
 def _build_deltoids(
@@ -3395,6 +3436,9 @@ def build_blockout_recipe(
             ):
                 messages.append("trap_soft L/R coincident — check neck_base/shoulder joints")
 
+    # 0060: deltoid socket bury along UA X-Z (after base/profile delts + limbs; before breast hang)
+    _apply_deltoid_socket_bury(parts, messages)
+
     # 0049 B4: drop breast_soft center Z for readable hang (before 0033 tilt)
     _apply_breast_hang_z(parts, report, resolved, messages)
 
@@ -5269,6 +5313,7 @@ __all__ = [
     "CROTCH_SEAT_SLACK_M",
     "CROTCH_Z_FRAC_FALLBACK",
     "DELT_ARM_RADIUS_SCALE",
+    "DELT_DISTAL_BURY_T",
     "DELT_OUTER_X_FRAC",
     "DELT_RY_FRAC",
     "DELT_RZ_FRAC",
@@ -5345,6 +5390,7 @@ __all__ = [
     "RecipePart",
     "_append_all_hip_softs",
     "_append_elbow_softs",
+    "_apply_deltoid_socket_bury",
     "_apply_glute_seat_mass",
     "_apply_join_ready_overlaps",
     "_apply_neck_column_priors",
