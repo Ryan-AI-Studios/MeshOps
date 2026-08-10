@@ -73,9 +73,11 @@ def _limb_mass_report(
     ua_hw: float = 0.0438,
     fa_hw: float | None = None,
     shoulder_y: float = 0.05,
+    elbow_y: float | None = None,
 ) -> ProportionReport:
     """Synthetic full-limb report for 0063 arm muscle softs tests."""
     fa = fa_hw if fa_hw is not None else 0.0350
+    ey = float(elbow_y) if elbow_y is not None else float(shoulder_y)
     lms = {
         "sole": _lm("sole", x_m=0.0, y_m=0.0, z_m=0.0),
         "crotch": _lm("crotch", x_m=0.0, y_m=0.0, z_m=0.90),
@@ -88,10 +90,10 @@ def _limb_mass_report(
         "chin": _lm("chin", x_m=0.0, y_m=-0.02, z_m=1.50),
         "head_top": _lm("head_top", x_m=0.0, y_m=0.0, z_m=height_m),
         "cranial_vertex": _lm("cranial_vertex", x_m=0.0, y_m=-0.01, z_m=1.68),
-        "elbow_l": _lm("elbow_l", x_m=-0.25, y_m=shoulder_y, z_m=1.10),
-        "elbow_r": _lm("elbow_r", x_m=0.25, y_m=shoulder_y, z_m=1.10),
-        "wrist_l": _lm("wrist_l", x_m=-0.30, y_m=shoulder_y, z_m=0.90),
-        "wrist_r": _lm("wrist_r", x_m=0.30, y_m=shoulder_y, z_m=0.90),
+        "elbow_l": _lm("elbow_l", x_m=-0.25, y_m=ey, z_m=1.10),
+        "elbow_r": _lm("elbow_r", x_m=0.25, y_m=ey, z_m=1.10),
+        "wrist_l": _lm("wrist_l", x_m=-0.30, y_m=ey, z_m=0.90),
+        "wrist_r": _lm("wrist_r", x_m=0.30, y_m=ey, z_m=0.90),
         "knee_l": _lm("knee_l", x_m=-0.12, y_m=0.04, z_m=0.50),
         "knee_r": _lm("knee_r", x_m=0.12, y_m=0.04, z_m=0.50),
         "ankle_l": _lm("ankle_l", x_m=-0.10, y_m=0.01, z_m=0.08),
@@ -418,6 +420,55 @@ def test_t12_no_ua_skips_softs() -> None:
     assert parts == []
     assert messages == []
     assert _ua_shaft_metrics([], "l", along_t=0.5) is None
+
+
+def test_t13b_shaft_y_uses_mid_not_p0() -> None:
+    """B17: shaft_y = mid[1] on full chain — not shoulder-only p0[1].
+
+    Codex R1 P3: default fixtures used equal shoulder/elbow Y so a mistaken
+    shaft_y=p0[1] still passed. Differential Y fails that bug.
+    """
+    shoulder_y = 0.05
+    elbow_y = 0.17
+    parts = [
+        _part(
+            "RECIPE_limb_upper_arm_l",
+            radius_m=0.04,
+            p0=[-0.20, shoulder_y, 1.38],
+            p1=[-0.225, 0.11, 1.24],  # seam
+        ),
+        _part(
+            "RECIPE_arm_taper_dist_ua_l",
+            radius_m=0.035,
+            p0=[-0.225, 0.11, 1.24],
+            p1=[-0.25, elbow_y, 1.10],  # elbow
+        ),
+        _part(
+            "RECIPE_bicep_soft_l",
+            kind="ellipsoid",
+            role="bicep_soft",
+            center=[-0.225, 0.05, 1.24],
+            rx_m=0.02,
+            ry_m=0.02,
+            rz_m=0.02,
+        ),
+    ]
+    messages: list[str] = []
+    _apply_arm_muscle_softs(parts, messages)
+    metrics = _ua_shaft_metrics(parts, "l", along_t=BICEP_ALONG_T)
+    assert metrics is not None
+    ua_r, mid = metrics
+    # mid Y must be lerp of full chain (not p0 Y alone)
+    assert float(mid[1]) == pytest.approx((shoulder_y + elbow_y) / 2.0, abs=1e-9)
+    assert float(mid[1]) != pytest.approx(shoulder_y, abs=1e-6)
+    bicep = next(p for p in parts if p.name == "RECIPE_bicep_soft_l")
+    assert bicep.center is not None and bicep.ry_m is not None
+    shaft_front = float(mid[1]) - ua_r
+    expected_cy = shaft_front - BICEP_FRONT_PAST_M + float(bicep.ry_m)
+    assert float(bicep.center[1]) == pytest.approx(expected_cy, abs=1e-9)
+    # Wrong shaft_y=p0[1] would place cy at shoulder-based front past
+    wrong_cy = (shoulder_y - ua_r) - BICEP_FRONT_PAST_M + float(bicep.ry_m)
+    assert float(bicep.center[1]) != pytest.approx(wrong_cy, abs=1e-6)
 
 
 def test_t13_full_chain_mid_ne_prox_only() -> None:
