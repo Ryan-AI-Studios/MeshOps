@@ -325,7 +325,7 @@ def test_neck_column__t4_face_soft_comoves() -> None:
         assert float(ear.center[1]) == pytest.approx(pre_head_y + dy_tip, abs=1e-5)
         assert float(ear.center[1]) == pytest.approx(float(head.center[1]), abs=1e-5)
     else:
-        # Jaw is face_y + 0.05*ry then + dy_tip; still moved faceward with head
+        # Jaw is face_y + JAW_Y_BIAS_FRAC_RY*ry (0.08) then + dy_tip; still moved faceward with head
         assert float(soft.center[1]) < pre_head_y - 1e-4
         assert abs(float(soft.center[1]) - float(head.center[1])) < 0.05
 

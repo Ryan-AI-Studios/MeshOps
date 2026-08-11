@@ -223,12 +223,12 @@ def _jaw_part(parts: list[RecipePart]) -> RecipePart:
 
 def test_jaw_soft__t0_constants_exported() -> None:
     """T0: JAW_* + JAW_X_BULGE_ALLOW_M importable; defaults match freezes."""
-    assert pytest.approx(0.85) == JAW_RX_FRAC_HEAD_RX
+    assert pytest.approx(0.74) == JAW_RX_FRAC_HEAD_RX
     assert pytest.approx(0.55) == JAW_RY_FRAC_HEAD_RY
     assert pytest.approx(0.15) == JAW_RZ_FRAC_H
     assert pytest.approx(0.13) == JAW_Z_CENTER_FRAC_H
-    assert pytest.approx(0.05) == JAW_Y_BIAS_FRAC_RY
-    assert pytest.approx(0.015) == JAW_X_BULGE_ALLOW_M
+    assert pytest.approx(0.08) == JAW_Y_BIAS_FRAC_RY
+    assert pytest.approx(0.006) == JAW_X_BULGE_ALLOW_M
     for name in (
         "JAW_RX_FRAC_HEAD_RX",
         "JAW_RY_FRAC_HEAD_RY",
@@ -304,7 +304,7 @@ def test_jaw_soft__t4_center_z_and_chin_extent() -> None:
 
 
 def test_jaw_soft__t5_center_y_face_plane() -> None:
-    """T5: center Y = face_y + 0.05*ry with face_y = head.y - 0.40*ry."""
+    """T5: center Y = face_y + JAW_Y_BIAS_FRAC_RY*ry (0.08) with face_y = head.y - 0.40*ry."""
     bounds = _synthetic_bounds(y=-0.03, ry=0.10)
     report = _full_torso_report()
     parts = build_face_parts(report, bounds, face=True, messages=[])
@@ -477,7 +477,7 @@ def test_jaw_soft__t13_product_class_bounds_and_bulge() -> None:
     parts = build_face_parts(report, bounds, face=True, messages=msgs)
     jaw = _jaw_part(parts)
     assert jaw.kind == "ellipsoid"
-    assert jaw.rx_m == pytest.approx(0.85 * rx, abs=1e-4)  # ~0.0750
+    assert jaw.rx_m == pytest.approx(JAW_RX_FRAC_HEAD_RX * rx, abs=1e-4)  # ~0.0653
     assert jaw.ry_m == pytest.approx(0.55 * ry, abs=1e-4)  # ~0.0499
     assert jaw.rz_m == pytest.approx(0.15 * h, abs=1e-4)  # ~0.0315
     assert jaw.center is not None
@@ -490,7 +490,7 @@ def test_jaw_soft__t13_product_class_bounds_and_bulge() -> None:
     t = (float(jaw.center[2]) - bounds.z_c) / bounds.rz
     head_x = bounds.rx * math.sqrt(max(0.0, 1.0 - t * t))
     bulge = jaw_rx - head_x
-    assert bulge == pytest.approx(0.0124, abs=2e-3)
+    assert bulge == pytest.approx(0.0027, abs=2e-3)
     assert bulge <= JAW_X_BULGE_ALLOW_M
     assert any("jaw_vs_head_x_bulge_m=" in m for m in msgs)
 
