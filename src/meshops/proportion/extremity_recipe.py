@@ -83,21 +83,21 @@ _HEEL_BRIDGE_OVERLAP_FRAC: Final[float] = 0.35  # 0040 reuse (reach overlap conc
 FOOT_LEN_VISUAL_MIN_FRAC_H: Final[float] = 0.13  # 0072 B10 (was 0.12)
 FOOT_LEN_MIN_VS_ANK_HW: Final[float] = 4.8
 FOOT_LEN_MIN_VS_CALF_DIAM: Final[float] = 1.55
-HEEL_REAR_Y_BIAS_FRAC_DEPTH: Final[float] = 0.06  # 0072 B2 (was 0.12)
+HEEL_REAR_Y_BIAS_FRAC_DEPTH: Final[float] = 0.10  # 0076 B3 (was 0.06 / 0072)
 HEEL_REAR_OVERHANG_M: Final[float] = 0.012  # 0072 B3 rear tip clamp budget
 HEEL_Z_FRAC_ANK: Final[float] = 0.42
 HEEL_RZ_CAP_FRAC_ANK: Final[float] = 0.48
 HEEL_RY_MIN_FRAC_DEPTH: Final[float] = 0.30  # 0072 B1 (was 0.42)
 HEEL_RY_MIN_VS_RZ_FRAC: Final[float] = 0.70  # 0072 B1c (was bare 0.70)
 HEEL_RY_MAX_FRAC_HALF_DEPTH: Final[float] = 0.34  # 0072 B11 composition accept
-# 0056 ank/heel contact mass freezes (B1-B7, B13)
-ANK_RY_FRAC_HALF_W: Final[float] = 1.45  # AI2 P2-3
-ANK_RY_FLOOR_M: Final[float] = 0.036
-ANK_RZ_FRAC_HALF_W: Final[float] = 2.00
-ANK_RZ_FLOOR_M: Final[float] = 0.048
+# 0056 ank/heel contact mass freezes (B1-B7, B13) + 0076 anti-ball / mild column
+ANK_RY_FRAC_HALF_W: Final[float] = 1.22  # 0076 B1 anti-ball (was 1.45)
+ANK_RY_FLOOR_M: Final[float] = 0.030  # 0076 B1 (was 0.036; product frac wins)
+ANK_RZ_FRAC_HALF_W: Final[float] = 1.80  # 0076 B2 mild column (was 2.00)
+ANK_RZ_FLOOR_M: Final[float] = 0.044  # 0076 B2 (was 0.048; product frac wins)
 ANK_RZ_MIN_VS_CALF_B: Final[float] = 1.35
 ANK_RZ_MAX_FRAC_ANK_Z: Final[float] = 0.60  # AI2 P2-2 ceiling
-HEEL_CONTACT_OVERLAP_TARGET_M: Final[float] = 0.005  # B7 all three sites
+HEEL_CONTACT_OVERLAP_TARGET_M: Final[float] = 0.005  # B7 all three sites (0056 fence)
 _FINGER_Y_BIAS_FRAC: Final[float] = 0.10  # secondary only when no tip
 _NEAR_ZERO: Final[float] = 1e-9
 _FINGER_NAMES: Final[tuple[str, ...]] = ("index", "middle", "ring", "pinky")
@@ -665,6 +665,10 @@ def _build_foot_side(
     messages.append(
         f"foot_{side}: heel proportion ry={heel_ry:.4f} rear_tip={heel_rear_tip:.4f} "
         f"(plate_rear={plate_rear_y:.4f} overhang={HEEL_REAR_OVERHANG_M})"
+    )
+    # 0076 B9: separate heel/ank proportion telemetry (do not merge into heel line)
+    messages.append(
+        f"foot_{side}: heel/ank proportion dy={heel_y - ank_y:.4f} ank_ry_rx={ank_ry / ank_rx:.3f}"
     )
 
     # Toe wedge: **in front of** the plate (-Y past front edge), elongated + flat on sole.

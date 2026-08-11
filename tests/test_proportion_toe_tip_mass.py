@@ -399,18 +399,18 @@ def test_t7_0054_sole_toe_r_freezes_unchanged() -> None:
 
 
 def test_t8_0072_heel_and_0056_ank_freezes_unchanged() -> None:
-    """T8: 0072 heel + 0056 ANK/contact freezes unchanged."""
+    """T8: 0072 heel fence + 0076 ank freezes + contact fence."""
     assert pytest.approx(0.30) == HEEL_RY_MIN_FRAC_DEPTH
     assert pytest.approx(0.70) == HEEL_RY_MIN_VS_RZ_FRAC
-    assert pytest.approx(0.06) == HEEL_REAR_Y_BIAS_FRAC_DEPTH
+    assert pytest.approx(0.10) == HEEL_REAR_Y_BIAS_FRAC_DEPTH  # 0076 B3 (was 0.06)
     assert pytest.approx(0.012) == HEEL_REAR_OVERHANG_M
     assert pytest.approx(0.34) == HEEL_RY_MAX_FRAC_HALF_DEPTH
     assert pytest.approx(0.32) == BALL_SOFT_RY_FRAC_HALF_DEPTH
     assert pytest.approx(0.13) == FOOT_LEN_VISUAL_MIN_FRAC_H
-    assert pytest.approx(1.45) == ANK_RY_FRAC_HALF_W
-    assert pytest.approx(0.036) == ANK_RY_FLOOR_M
-    assert pytest.approx(2.00) == ANK_RZ_FRAC_HALF_W
-    assert pytest.approx(0.048) == ANK_RZ_FLOOR_M
+    assert pytest.approx(1.22) == ANK_RY_FRAC_HALF_W  # 0076 B1 (was 1.45)
+    assert pytest.approx(0.030) == ANK_RY_FLOOR_M  # 0076 B1 (was 0.036)
+    assert pytest.approx(1.80) == ANK_RZ_FRAC_HALF_W  # 0076 B2 (was 2.00)
+    assert pytest.approx(0.044) == ANK_RZ_FLOOR_M  # 0076 B2 (was 0.048)
     assert pytest.approx(1.35) == ANK_RZ_MIN_VS_CALF_B
     assert pytest.approx(0.60) == ANK_RZ_MAX_FRAC_ANK_Z
     assert pytest.approx(0.005) == HEEL_CONTACT_OVERLAP_TARGET_M

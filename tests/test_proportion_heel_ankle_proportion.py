@@ -1,7 +1,7 @@
-"""Track 0056 - ankle / heel contact mass freezes (T0-T14).
+"""Track 0076 - heel / ankle visual proportion freezes (T0-T12).
 
-Product half_width ~ 0.0263 must be used for frac-win asserts so dead-frac
-regressions are not masked by synthetic ank_foot hw=0.035.
+Anti-ball ank (ry/rz shrink) + heel rear seat bias while keeping
+0056 contact gap ≥ +0.005. Product half_width ~ 0.0263 for frac-win.
 """
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from meshops.proportion.blockout_recipe import RecipePart, build_blockout_recipe
-from meshops.proportion.constraints import HEEL_REACH_GAP_TOL_M, validate_constraints
+from meshops.proportion.constraints import validate_constraints
 from meshops.proportion.extremity_recipe import (
     ANK_RY_FLOOR_M,
     ANK_RY_FRAC_HALF_W,
@@ -17,19 +17,18 @@ from meshops.proportion.extremity_recipe import (
     ANK_RZ_FRAC_HALF_W,
     ANK_RZ_MAX_FRAC_ANK_Z,
     ANK_RZ_MIN_VS_CALF_B,
-    FOOT_LEN_MIN_VS_ANK_HW,
-    FOOT_LEN_MIN_VS_CALF_DIAM,
-    FOOT_LEN_VISUAL_MIN_FRAC_H,
     HEEL_CONTACT_OVERLAP_TARGET_M,
+    HEEL_REAR_OVERHANG_M,
     HEEL_REAR_Y_BIAS_FRAC_DEPTH,
     HEEL_RY_MIN_FRAC_DEPTH,
-    HEEL_RZ_CAP_FRAC_ANK,
-    HEEL_Z_FRAC_ANK,
     SOLE_RZ_FLOOR_M,
     SOLE_RZ_FRAC_OF_THICKNESS,
     SOLE_THICKNESS_FRAC_H,
+    TOE_R_FLOOR_M,
     TOE_R_FRAC_HALF_W,
-    build_foot_parts,
+    TOE_TIP_MAX_PAST_BALL_FRAC,
+    TOE_TIP_MAX_PAST_BALL_M,
+    TOE_TIP_PAD_SCALE,
 )
 from meshops.proportion.models import (
     DepthBand,
@@ -39,7 +38,7 @@ from meshops.proportion.models import (
     QualityFlags,
 )
 
-# Product-class ankle half-width — must not use 0.035 synthetic default for T1-T4/T9.
+# Product-class ankle half-width — same as 0056 suite.
 PRODUCT_HW_M: float = 0.0263
 PRODUCT_H_M: float = 1.72
 PRODUCT_ANK_Z_M: float = 0.1314
@@ -156,39 +155,45 @@ def _contact_overlap(pkg_parts: list, side: str = "l") -> float:
     return heel_top - ank_bottom
 
 
+def _half_depth(pkg_parts: list, side: str = "l") -> float:
+    plate = _plate(pkg_parts, side)
+    assert plate.half_depth_m is not None
+    return float(plate.half_depth_m)
+
+
 # ---------------------------------------------------------------------------
-# T0 exports + retune bands
+# T0 public freezes
 # ---------------------------------------------------------------------------
 
 
-def test_t0_exports_named_freezes_in_retune_bands() -> None:
-    """T0: all ANK_* + HEEL_CONTACT_* exported and in plan §0 retune bands (0076)."""
-    assert 1.15 <= ANK_RY_FRAC_HALF_W <= 1.30
-    assert 0.028 <= ANK_RY_FLOOR_M <= 0.033
-    assert 1.70 <= ANK_RZ_FRAC_HALF_W <= 1.90
-    assert 0.042 <= ANK_RZ_FLOOR_M <= 0.046
-    assert 1.20 <= ANK_RZ_MIN_VS_CALF_B <= 1.50
-    assert 0.55 <= ANK_RZ_MAX_FRAC_ANK_Z <= 0.65
-    assert 0.003 <= HEEL_CONTACT_OVERLAP_TARGET_M <= 0.010
-    # Exact defaults from plan freezes (0076 anti-ball / mild column)
+def test_t0_public_freezes_0076() -> None:
+    """T0: B1-B3 exacts + contact/heel_ry/overhang fences."""
     assert pytest.approx(1.22) == ANK_RY_FRAC_HALF_W
     assert pytest.approx(0.030) == ANK_RY_FLOOR_M
     assert pytest.approx(1.80) == ANK_RZ_FRAC_HALF_W
     assert pytest.approx(0.044) == ANK_RZ_FLOOR_M
+    assert pytest.approx(0.10) == HEEL_REAR_Y_BIAS_FRAC_DEPTH
+    # Bands (open retune)
+    assert 1.15 <= ANK_RY_FRAC_HALF_W <= 1.30
+    assert 0.028 <= ANK_RY_FLOOR_M <= 0.033
+    assert 1.70 <= ANK_RZ_FRAC_HALF_W <= 1.90
+    assert 0.042 <= ANK_RZ_FLOOR_M <= 0.046
+    assert 0.08 <= HEEL_REAR_Y_BIAS_FRAC_DEPTH <= 0.14
+    # Unchanged fences
+    assert pytest.approx(0.005) == HEEL_CONTACT_OVERLAP_TARGET_M
+    assert pytest.approx(0.30) == HEEL_RY_MIN_FRAC_DEPTH
+    assert pytest.approx(0.012) == HEEL_REAR_OVERHANG_M
     assert pytest.approx(1.35) == ANK_RZ_MIN_VS_CALF_B
     assert pytest.approx(0.60) == ANK_RZ_MAX_FRAC_ANK_Z
-    assert pytest.approx(0.005) == HEEL_CONTACT_OVERLAP_TARGET_M
-    # Validate tol fence (constraints only — not emit budget)
-    assert pytest.approx(0.015) == HEEL_REACH_GAP_TOL_M
 
 
 # ---------------------------------------------------------------------------
-# T1-T5 product contact mass + constraints
+# T1-T6 product composition
 # ---------------------------------------------------------------------------
 
 
-def test_t1_product_heel_ank_overlap() -> None:
-    """T1: product-like heel_top - ank_bottom >= overlap target."""
+def test_t1_product_contact_gap_ge_target() -> None:
+    """T1: product-class contact gap ≥ +0.005 after full foot emit."""
     report = _product_feet_report()
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     gap = _contact_overlap(pkg.parts)
@@ -197,41 +202,119 @@ def test_t1_product_heel_ank_overlap() -> None:
     )
 
 
-def test_t2_product_ank_rz_frac_wins() -> None:
-    """T2: product ank_rz >= frac*hw (frac wins over floor)."""
-    report = _product_feet_report(half_width_m=PRODUCT_HW_M)
+def test_t2_product_ank_ry_rx_anti_ball_anti_pea() -> None:
+    """T2: product ank_ry/rx ≤ 1.30 AND ≥ 1.15 (anti-ball + anti-pea)."""
+    report = _product_feet_report()
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     ank = _ank(pkg.parts)
-    assert ank.rz_m is not None
-    frac_rz = ANK_RZ_FRAC_HALF_W * PRODUCT_HW_M
-    assert float(ank.rz_m) >= frac_rz - EPS
-    assert frac_rz > ANK_RZ_FLOOR_M
-    assert float(ank.rz_m) > ANK_RZ_FLOOR_M + EPS or abs(float(ank.rz_m) - frac_rz) < 1e-5
+    assert ank.rx_m is not None and ank.ry_m is not None
+    ratio = float(ank.ry_m) / float(ank.rx_m)
+    assert 1.15 <= ratio <= 1.30, f"ank_ry/rx={ratio}"
 
 
-def test_t3_product_ank_ry_frac_wins() -> None:
-    """T3: product ank_ry >= frac*hw (frac wins — AI2 P2-3)."""
+def test_t3_product_ank_ry_frac_wins_floor() -> None:
+    """T3: 1.22*hw > 0.030 and emitted ank_ry approx frac path."""
+    assert ANK_RY_FRAC_HALF_W * PRODUCT_HW_M > ANK_RY_FLOOR_M
     report = _product_feet_report(half_width_m=PRODUCT_HW_M)
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     ank = _ank(pkg.parts)
     assert ank.ry_m is not None
     frac_ry = ANK_RY_FRAC_HALF_W * PRODUCT_HW_M
-    assert float(ank.ry_m) >= frac_ry - EPS
-    assert frac_ry > ANK_RY_FLOOR_M
-    assert float(ank.ry_m) > ANK_RY_FLOOR_M + EPS or abs(float(ank.ry_m) - frac_ry) < 1e-5
+    assert float(ank.ry_m) == pytest.approx(frac_ry, abs=1e-5)
 
 
-def test_t4_ank_rx_equals_half_width() -> None:
-    """T4: ank_rx == half_width (C_foot_width)."""
-    report = _product_feet_report(half_width_m=PRODUCT_HW_M)
+def test_t4_product_ank_rz_rx_le_190() -> None:
+    """T4: product ank_rz/rx ≤ 1.90."""
+    report = _product_feet_report()
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     ank = _ank(pkg.parts)
-    assert ank.rx_m is not None
-    assert float(ank.rx_m) == pytest.approx(PRODUCT_HW_M, abs=1e-6)
+    assert ank.rx_m is not None and ank.rz_m is not None
+    ratio = float(ank.rz_m) / float(ank.rx_m)
+    assert ratio <= 1.90 + EPS, f"ank_rz/rx={ratio}"
 
 
-def test_t5_constraints_foot_stack_green() -> None:
-    """T5: C_heel_reaches / C_foot_width / C_ankle_over_heel pass."""
+def test_t5_product_heel_dy_ge_008_half_depth() -> None:
+    """T5: product heel_y - ank_y >= 0.08 * half_depth."""
+    report = _product_feet_report()
+    pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
+    ank = _ank(pkg.parts)
+    heel = _heel(pkg.parts)
+    assert ank.center is not None and heel.center is not None
+    dy = float(heel.center[1]) - float(ank.center[1])
+    hd = _half_depth(pkg.parts)
+    assert dy >= 0.08 * hd - EPS, f"dy={dy} < 0.08*hd={0.08 * hd}"
+
+
+def test_t6_heel_rear_tip_within_overhang() -> None:
+    """T6: heel rear tip ≤ plate_rear + overhang."""
+    report = _product_feet_report()
+    pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
+    heel = _heel(pkg.parts)
+    plate = _plate(pkg.parts)
+    assert heel.center is not None and heel.ry_m is not None
+    assert plate.center is not None and plate.half_depth_m is not None
+    rear_tip = float(heel.center[1]) + float(heel.ry_m)
+    plate_rear = float(plate.center[1]) + float(plate.half_depth_m)
+    assert rear_tip <= plate_rear + HEEL_REAR_OVERHANG_M + EPS, (
+        f"rear_tip={rear_tip} > plate_rear+overhang={plate_rear + HEEL_REAR_OVERHANG_M}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# T7 sole / toe fence smoke
+# ---------------------------------------------------------------------------
+
+
+def test_t7_sole_toe_freezes_unchanged_smoke() -> None:
+    """T7: SOLE_*/TOE_* freezes still present; sole_rz floor still binds path."""
+    assert pytest.approx(0.025) == SOLE_THICKNESS_FRAC_H
+    assert pytest.approx(0.70) == SOLE_RZ_FRAC_OF_THICKNESS
+    assert pytest.approx(0.016) == SOLE_RZ_FLOOR_M
+    assert pytest.approx(0.36) == TOE_R_FRAC_HALF_W
+    assert pytest.approx(0.009) == TOE_R_FLOOR_M
+    assert pytest.approx(0.028) == TOE_TIP_MAX_PAST_BALL_M
+    assert pytest.approx(0.12) == TOE_TIP_MAX_PAST_BALL_FRAC
+    assert pytest.approx(1.15) == TOE_TIP_PAD_SCALE
+    report = _product_feet_report(height_m=1.72)
+    pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
+    plate = _plate(pkg.parts)
+    assert plate.rz_m is not None
+    expect_rz = max(
+        SOLE_THICKNESS_FRAC_H * 1.72 * SOLE_RZ_FRAC_OF_THICKNESS,
+        SOLE_RZ_FLOOR_M,
+    )
+    assert float(plate.rz_m) == pytest.approx(expect_rz, abs=1e-4)
+
+
+# ---------------------------------------------------------------------------
+# T8 messages
+# ---------------------------------------------------------------------------
+
+
+def test_t8_messages_ank_contact_and_heel_ank_proportion() -> None:
+    """T8: ank contact mass AND separate heel/ank proportion with dy=."""
+    report = _product_feet_report()
+    pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
+    joined = "\n".join(pkg.messages)
+    assert "ank contact mass" in joined
+    assert "heel/ank proportion" in joined
+    assert "dy=" in joined
+    assert any(
+        "heel/ank proportion" in m and "dy=" in m and m.startswith("foot_") for m in pkg.messages
+    )
+    # Separate lines — proportion line is not the heel proportion ry= line
+    prop_msgs = [m for m in pkg.messages if "heel/ank proportion" in m]
+    assert prop_msgs
+    assert all("heel proportion ry=" not in m for m in prop_msgs)
+
+
+# ---------------------------------------------------------------------------
+# T9 constraints
+# ---------------------------------------------------------------------------
+
+
+def test_t9_constraints_foot_stack_green() -> None:
+    """T9: C_heel_reaches / C_foot_width / C_ankle_over_heel pass."""
     report = _product_feet_report()
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     result = validate_constraints(pkg, report=report)
@@ -248,133 +331,12 @@ def test_t5_constraints_foot_stack_green() -> None:
 
 
 # ---------------------------------------------------------------------------
-# T6-T7 fence 0054 / 0044 constants
+# T10 ank_rz ceiling
 # ---------------------------------------------------------------------------
 
 
-def test_t6_0054_sole_toe_fence() -> None:
-    """T6: SOLE_* / TOE_R_FRAC still at shipped 0054 values; plate.rz matches law."""
-    assert pytest.approx(0.025) == SOLE_THICKNESS_FRAC_H
-    assert pytest.approx(0.70) == SOLE_RZ_FRAC_OF_THICKNESS
-    assert pytest.approx(0.016) == SOLE_RZ_FLOOR_M
-    assert pytest.approx(0.36) == TOE_R_FRAC_HALF_W
-    report = _product_feet_report(height_m=1.72)
-    pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
-    plate = _plate(pkg.parts)
-    assert plate.rz_m is not None
-    expect_rz = max(
-        SOLE_THICKNESS_FRAC_H * 1.72 * SOLE_RZ_FRAC_OF_THICKNESS,
-        SOLE_RZ_FLOOR_M,
-    )
-    assert float(plate.rz_m) == pytest.approx(expect_rz, abs=1e-4)
-
-
-def test_t7_0044_length_heel_fence() -> None:
-    """T7: 0056 true freezes + 0072 retargets for length/heel ry/bias."""
-    # 0072 B10 / B2 / B1 retargets (value changes by design)
-    assert pytest.approx(0.13) == FOOT_LEN_VISUAL_MIN_FRAC_H
-    assert pytest.approx(4.8) == FOOT_LEN_MIN_VS_ANK_HW
-    assert pytest.approx(1.55) == FOOT_LEN_MIN_VS_CALF_DIAM
-    assert pytest.approx(0.10) == HEEL_REAR_Y_BIAS_FRAC_DEPTH  # 0076 B3 (was 0.06)
-    # 0056 true freezes — HEEL_Z_FRAC_ANK is Z (not ry)
-    assert pytest.approx(0.42) == HEEL_Z_FRAC_ANK
-    assert pytest.approx(0.48) == HEEL_RZ_CAP_FRAC_ANK
-    assert pytest.approx(0.30) == HEEL_RY_MIN_FRAC_DEPTH
-
-
-# ---------------------------------------------------------------------------
-# T8 messages
-# ---------------------------------------------------------------------------
-
-
-def test_t8_messages_include_ank_contact() -> None:
-    """T8: messages include 'ank contact'."""
-    report = _product_feet_report()
-    pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
-    joined = "\n".join(pkg.messages)
-    assert "ank contact" in joined
-    assert any("ank contact mass" in m and m.startswith("foot_") for m in pkg.messages)
-
-
-# ---------------------------------------------------------------------------
-# T9 / T9b product frac-over-floor invariants
-# ---------------------------------------------------------------------------
-
-
-def test_t9_rz_frac_wins_on_product_hw() -> None:
-    """T9: ANK_RZ_FRAC_HALF_W * 0.0263 > ANK_RZ_FLOOR_M."""
-    assert ANK_RZ_FRAC_HALF_W * PRODUCT_HW_M > ANK_RZ_FLOOR_M
-
-
-def test_t9b_ry_frac_wins_on_product_hw() -> None:
-    """T9b: ANK_RY_FRAC_HALF_W * 0.0263 > ANK_RY_FLOOR_M (AI2 P2-3)."""
-    assert ANK_RY_FRAC_HALF_W * PRODUCT_HW_M > ANK_RY_FLOOR_M
-
-
-# ---------------------------------------------------------------------------
-# T10 floor path (tiny hw)
-# ---------------------------------------------------------------------------
-
-
-def test_t10_ank_rz_floor_binds_when_hw_tiny() -> None:
-    """T10: tiny hw -> ANK_RZ_FLOOR_M binds (before ceiling)."""
-    tiny_hw = 0.015
-    assert ANK_RZ_FRAC_HALF_W * tiny_hw < ANK_RZ_FLOOR_M
-    report = _product_feet_report(half_width_m=tiny_hw, ank_z=0.15)
-    pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="wedge")
-    ank = _ank(pkg.parts)
-    assert ank.rz_m is not None
-    # Floor binds; ceiling at ank_z=0.15 is 0.09 > floor
-    assert float(ank.rz_m) == pytest.approx(ANK_RZ_FLOOR_M, abs=1e-5)
-
-
-# ---------------------------------------------------------------------------
-# T11 / T11b contact emit paths
-# ---------------------------------------------------------------------------
-
-
-def test_t11_no_cap_path_overlap() -> None:
-    """T11: product no-cap path overlap >= target."""
-    report = _product_feet_report()
-    pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
-    gap = _contact_overlap(pkg.parts)
-    assert gap >= HEEL_CONTACT_OVERLAP_TARGET_M - EPS
-    # Cap-lose message should not appear on product path
-    assert not any("cap lose" in m for m in pkg.messages)
-
-
-def test_t11b_cap_lose_never_minus_tol_float() -> None:
-    """T11b: force still_need/cap-lose path; never ≈ -0.015 float (AI2 P2-1).
-
-    Tall ank_z + floor-stuck ank_rz (tiny hw) makes reach_need > rz_cap, then
-    still_need after clamp exceeds rz_cap and emits 'heel_rz cap lose for contact'.
-    """
-    # reach_need > rz_cap when ank_z large and ank_rz ~ floor (tiny hw)
-    report = _product_feet_report(half_width_m=0.02, ank_z=0.50)
-    pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="wedge")
-    gap = _contact_overlap(pkg.parts)
-    joined = "\n".join(pkg.messages)
-    assert "cap lose" in joined, (
-        f"expected still_need cap-lose message; gap={gap}; msgs={pkg.messages}"
-    )
-    # Cap-lose still keeps contact target (or at least non-float)
-    assert gap >= HEEL_CONTACT_OVERLAP_TARGET_M - EPS or gap >= -EPS, (
-        f"gap={gap} must not float under heel on cap-lose"
-    )
-    # Never reintroduce validate-tol float edge
-    assert abs(gap - (-HEEL_REACH_GAP_TOL_M)) > 1e-3, (
-        f"gap={gap} ≈ -HEEL_REACH_GAP_TOL (emit must not budget validate tol)"
-    )
-    assert gap > -HEEL_REACH_GAP_TOL_M + 1e-3
-
-
-# ---------------------------------------------------------------------------
-# T12 ank_rz ceiling (AI2 P2-2)
-# ---------------------------------------------------------------------------
-
-
-def test_t12_ank_rz_ceiling_binds_synth() -> None:
-    """T12: hw=0.035, ank_z=0.08 -> ceiling binds (not 1.80*0.035 balloon)."""
+def test_t10_ank_rz_ceiling_binds_synth() -> None:
+    """T10: hw=0.035, ank_z=0.08 -> ceiling binds (0.60*ank_z)."""
     hw = 0.035
     ank_z = 0.08
     report = _product_feet_report(half_width_m=hw, ank_z=ank_z)
@@ -389,49 +351,39 @@ def test_t12_ank_rz_ceiling_binds_synth() -> None:
 
 
 # ---------------------------------------------------------------------------
-# T13 calf floor bind
+# T11 cap-lose contact
 # ---------------------------------------------------------------------------
 
 
-def test_t13_calf_floor_binds() -> None:
-    """T13: large RECIPE_calf_b r forces ANK_RZ_MIN_VS_CALF_B floor (AI2 P3-1)."""
-    report = _product_feet_report(half_width_m=PRODUCT_HW_M, ank_z=PRODUCT_ANK_Z_M)
-    # calf_r * 1.35 must beat frac (0.0526) and stay under ceiling (0.60*ank_z≈0.0788)
-    calf_r = 0.050
-    calf_floor = calf_r * ANK_RZ_MIN_VS_CALF_B  # 0.0675
-    assert calf_floor > ANK_RZ_FRAC_HALF_W * PRODUCT_HW_M
-    assert calf_floor < ANK_RZ_MAX_FRAC_ANK_Z * PRODUCT_ANK_Z_M
-    calf = RecipePart(
-        name="RECIPE_calf_b_l",
-        role="limb_segment",
-        kind="ellipsoid",
-        center=[-0.10, 0.02, PRODUCT_ANK_Z_M],
-        rx_m=calf_r,
-        ry_m=calf_r,
-        rz_m=calf_r,
+def test_t11_cap_lose_still_contact_ge_target() -> None:
+    """T11: still_need/cap-lose path keeps contact ≥ +0.005 (or non-float)."""
+    report = _product_feet_report(half_width_m=0.02, ank_z=0.50)
+    pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="wedge")
+    gap = _contact_overlap(pkg.parts)
+    joined = "\n".join(pkg.messages)
+    assert "cap lose" in joined, (
+        f"expected still_need cap-lose message; gap={gap}; msgs={pkg.messages}"
     )
-    msgs: list[str] = []
-    parts = build_foot_parts(
-        report,
-        toes="wedge",
-        messages=msgs,
-        existing_parts=[calf],
+    assert gap >= HEEL_CONTACT_OVERLAP_TARGET_M - EPS or gap >= -EPS, (
+        f"gap={gap} must not float under heel on cap-lose"
     )
-    ank = _ank(parts)
-    assert ank.rz_m is not None
-    assert float(ank.rz_m) == pytest.approx(calf_floor, abs=1e-5)
 
 
 # ---------------------------------------------------------------------------
-# T14 product ceiling non-binding
+# T12 honesty package
 # ---------------------------------------------------------------------------
 
 
-def test_t14_product_ceiling_non_binding() -> None:
-    """T14: product ank_rz < ANK_RZ_MAX * ank_z (ceiling non-binding)."""
+def test_t12_schema_honesty_no_dual_radius() -> None:
+    """T12: schema 1.4.0; no dual_radius field; heel/ank roles only for those parts."""
     report = _product_feet_report()
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
-    ank = _ank(pkg.parts)
-    assert ank.center is not None and ank.rz_m is not None
-    ank_z = float(ank.center[2])
-    assert float(ank.rz_m) < ANK_RZ_MAX_FRAC_ANK_Z * ank_z - EPS
+    assert pkg.schema_version == "1.4.0"
+    assert "dual_radius" not in RecipePart.model_fields
+    for p in pkg.parts:
+        dumped = p.model_dump()
+        assert "dual_radius" not in dumped
+        if p.name.startswith("RECIPE_heel_"):
+            assert p.role == "heel"
+        if p.name.startswith("RECIPE_ank_foot_"):
+            assert p.role == "ankle_bridge"
