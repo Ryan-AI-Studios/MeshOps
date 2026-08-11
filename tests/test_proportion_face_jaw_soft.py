@@ -224,8 +224,8 @@ def _jaw_part(parts: list[RecipePart]) -> RecipePart:
 def test_jaw_soft__t0_constants_exported() -> None:
     """T0: JAW_* + JAW_X_BULGE_ALLOW_M importable; defaults match freezes."""
     assert pytest.approx(0.74) == JAW_RX_FRAC_HEAD_RX
-    assert pytest.approx(0.55) == JAW_RY_FRAC_HEAD_RY
-    assert pytest.approx(0.15) == JAW_RZ_FRAC_H
+    assert pytest.approx(0.42) == JAW_RY_FRAC_HEAD_RY
+    assert pytest.approx(0.13) == JAW_RZ_FRAC_H
     assert pytest.approx(0.13) == JAW_Z_CENTER_FRAC_H
     assert pytest.approx(0.08) == JAW_Y_BIAS_FRAC_RY
     assert pytest.approx(0.006) == JAW_X_BULGE_ALLOW_M
@@ -290,7 +290,7 @@ def test_jaw_soft__t3_extents_match_fracs() -> None:
 
 
 def test_jaw_soft__t4_center_z_and_chin_extent() -> None:
-    """T4: center_z = z_chin + 0.13*H; center_z - rz ~ z_chin - 0.02*H."""
+    """T4: center_z = z_chin + Z_CENTER*H; center_z - rz approx z_chin (flush)."""
     bounds = _synthetic_bounds(z_chin=1.50, h=0.20, rx=0.09, ry=0.10)
     report = _full_torso_report()
     parts = build_face_parts(report, bounds, face=True, messages=[])
@@ -299,18 +299,19 @@ def test_jaw_soft__t4_center_z_and_chin_extent() -> None:
     expected_z = bounds.z_chin + JAW_Z_CENTER_FRAC_H * bounds.H
     assert jaw.center[2] == pytest.approx(expected_z, abs=1e-6)
     bottom = float(jaw.center[2]) - float(jaw.rz_m)
-    expected_bottom = bounds.z_chin - 0.02 * bounds.H
+    expected_bottom = bounds.z_chin + (JAW_Z_CENTER_FRAC_H - JAW_RZ_FRAC_H) * bounds.H
     assert bottom == pytest.approx(expected_bottom, abs=1e-6)
+    assert bottom == pytest.approx(bounds.z_chin, abs=1e-6)
 
 
 def test_jaw_soft__t5_center_y_face_plane() -> None:
-    """T5: center Y = face_y + JAW_Y_BIAS_FRAC_RY*ry (0.08) with face_y = head.y - 0.40*ry."""
+    """T5: center Y = face_y + JAW_Y_BIAS_FRAC_RY*ry with face_y = head.y - _JAW_FACE_Y*ry."""
     bounds = _synthetic_bounds(y=-0.03, ry=0.10)
     report = _full_torso_report()
     parts = build_face_parts(report, bounds, face=True, messages=[])
     jaw = _jaw_part(parts)
     assert jaw.center is not None
-    face_y = bounds.y - 0.40 * bounds.ry
+    face_y = bounds.y - face_recipe_mod._JAW_FACE_Y_FRAC_RY * bounds.ry
     expected_y = face_y + JAW_Y_BIAS_FRAC_RY * bounds.ry
     assert jaw.center[1] == pytest.approx(expected_y, abs=1e-6)
 
@@ -478,13 +479,14 @@ def test_jaw_soft__t13_product_class_bounds_and_bulge() -> None:
     jaw = _jaw_part(parts)
     assert jaw.kind == "ellipsoid"
     assert jaw.rx_m == pytest.approx(JAW_RX_FRAC_HEAD_RX * rx, abs=1e-4)  # ~0.0653
-    assert jaw.ry_m == pytest.approx(0.55 * ry, abs=1e-4)  # ~0.0499
-    assert jaw.rz_m == pytest.approx(0.15 * h, abs=1e-4)  # ~0.0315
+    assert jaw.ry_m == pytest.approx(JAW_RY_FRAC_HEAD_RY * ry, abs=1e-4)  # ~0.0381
+    assert jaw.rz_m == pytest.approx(JAW_RZ_FRAC_H * h, abs=1e-4)  # ~0.0273
     assert jaw.center is not None
-    expected_z = z_chin + 0.13 * h
+    expected_z = z_chin + JAW_Z_CENTER_FRAC_H * h
     assert jaw.center[2] == pytest.approx(expected_z, abs=1e-4)
     bottom = float(jaw.center[2]) - float(jaw.rz_m or 0.0)
-    assert bottom == pytest.approx(z_chin - 0.02 * h, abs=1e-4)
+    assert bottom == pytest.approx(z_chin + (JAW_Z_CENTER_FRAC_H - JAW_RZ_FRAC_H) * h, abs=1e-4)
+    assert bottom == pytest.approx(z_chin, abs=1e-4)
 
     jaw_rx = float(jaw.rx_m or 0.0)
     t = (float(jaw.center[2]) - bounds.z_c) / bounds.rz
