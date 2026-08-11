@@ -291,7 +291,7 @@ def test_t7_constraints_full_toes_green() -> None:
 
 def test_t8_foot_len_freezes_importable_and_floor() -> None:
     """T8: FOOT_LEN_* freezes importable; length floor still applies."""
-    assert pytest.approx(0.13) == FOOT_LEN_VISUAL_MIN_FRAC_H
+    assert pytest.approx(0.145) == FOOT_LEN_VISUAL_MIN_FRAC_H
     assert FOOT_LEN_MIN_VS_ANK_HW > 0
     assert FOOT_LEN_MIN_VS_CALF_DIAM > 0
     msgs: list[str] = []

@@ -93,10 +93,15 @@ BALL_SOFT_RY_FRAC_HALF_DEPTH: Final[float] = 0.32  # 0072 B8 (was bare 0.28)
 # Heel min-floor inside max(...) — rear pad primary (0044 B6-B8), not tower.
 _HEEL_R_FRAC_FOOT: Final[float] = 0.18
 _HEEL_BRIDGE_OVERLAP_FRAC: Final[float] = 0.35  # 0040 reuse (reach overlap concept)
-# 0044 B1-B3 / B6-B8 visual mass freezes (+ 0072 B1-B3 / B10-B11)
-FOOT_LEN_VISUAL_MIN_FRAC_H: Final[float] = 0.13  # 0072 B10 (was 0.12)
+# 0044 B1-B3 / B6-B8 visual mass freezes (+ 0072 B1-B3 / B10-B11 + 0080 full-figure)
+FOOT_LEN_VISUAL_MIN_FRAC_H: Final[float] = 0.145  # 0080 B1 (was 0.13 / 0072)
+FOOT_LEN_VISUAL_MAX_FRAC_H: Final[float] = 0.155  # 0080 B15 floor-induced anti-boat cap only
 FOOT_LEN_MIN_VS_ANK_HW: Final[float] = 4.8
-FOOT_LEN_MIN_VS_CALF_DIAM: Final[float] = 1.55
+FOOT_LEN_MIN_VS_CALF_DIAM: Final[float] = 4.0  # 0080 B2 (was 1.55)
+# 0080 half-width visual floors (never shrink; calf_b distal only)
+FOOT_HW_MIN_FRAC_LEN: Final[float] = 0.16
+FOOT_HW_MIN_VS_CALF_R: Final[float] = 1.20  # calf_b distal only
+FOOT_HW_MIN_FRAC_H: Final[float] = 0.022
 HEEL_REAR_Y_BIAS_FRAC_DEPTH: Final[float] = 0.10  # 0076 B3 (was 0.06 / 0072)
 HEEL_REAR_OVERHANG_M: Final[float] = 0.012  # 0072 B3 rear tip clamp budget
 HEEL_Z_FRAC_ANK: Final[float] = 0.42
@@ -391,20 +396,32 @@ def apply_foot_length_visual_floor(
     messages: list[str],
     side: str,
 ) -> float:
-    """0044 B1-B5: mannequin visual length floor; never shrinks measured/template.
+    """0044/0080: mannequin visual length floor; never shrinks measured/template.
 
     Floor sources (skip when unavailable): stature FOOT_LEN_VISUAL_MIN_FRAC_H·H
-    (0.13·H), ank half-width 4.8·hw, calf distal diam 1.55·(2·calf_r). Template
-    length is not a floor when measured exists (B18).
+    (0.145·H), ank half-width 4.8·hw, calf distal diam 4.0·(2·calf_r). When H is
+    present, each floor candidate is capped at FOOT_LEN_VISUAL_MAX_FRAC_H·H
+    (0.155·H, B15 anti-boat) *before* max — does not shrink measured/template
+    already above the cap. Template length is not a floor when measured exists
+    (B18).
     """
     floors: list[tuple[str, float]] = []
+    max_cap: float | None = None
     if height_m is not None and height_m > 0:
-        floors.append(("stature", FOOT_LEN_VISUAL_MIN_FRAC_H * float(height_m)))
+        max_cap = FOOT_LEN_VISUAL_MAX_FRAC_H * float(height_m)
+
+    def _cap(raw: float) -> float:
+        if max_cap is None:
+            return raw
+        return min(raw, max_cap)
+
+    if height_m is not None and height_m > 0:
+        floors.append(("stature", _cap(FOOT_LEN_VISUAL_MIN_FRAC_H * float(height_m))))
     if half_width > 0:
-        floors.append(("ank_hw", FOOT_LEN_MIN_VS_ANK_HW * float(half_width)))
+        floors.append(("ank_hw", _cap(FOOT_LEN_MIN_VS_ANK_HW * float(half_width))))
     if calf_distal_r is not None and calf_distal_r > 0:
         diam = 2.0 * float(calf_distal_r)
-        floors.append(("calf_diam", FOOT_LEN_MIN_VS_CALF_DIAM * diam))
+        floors.append(("calf_diam", _cap(FOOT_LEN_MIN_VS_CALF_DIAM * diam)))
     if not floors:
         return foot_len
     floor_val = max(v for _, v in floors)
@@ -415,6 +432,41 @@ def apply_foot_length_visual_floor(
         )
         return floor_val
     return foot_len
+
+
+def apply_foot_half_width_visual_floor(
+    half_width: float,
+    *,
+    foot_len: float,
+    height_m: float | None,
+    calf_distal_r: float | None,
+    messages: list[str],
+    side: str,
+) -> float:
+    """0080 B4/B5: mannequin half-width visual floor; never shrinks measured/template.
+
+    Floor sources (skip when unavailable): foot_len * FOOT_HW_MIN_FRAC_LEN (0.16),
+    calf_b distal r * FOOT_HW_MIN_VS_CALF_R (1.20), stature FOOT_HW_MIN_FRAC_H*H
+    (0.022*H). Skips foot_len floor when foot_len <= 0. Applied *after* length
+    floor only — never re-runs length.
+    """
+    floors: list[tuple[str, float]] = []
+    if foot_len > 0:
+        floors.append(("foot_len", FOOT_HW_MIN_FRAC_LEN * float(foot_len)))
+    if calf_distal_r is not None and calf_distal_r > 0:
+        floors.append(("calf_r", FOOT_HW_MIN_VS_CALF_R * float(calf_distal_r)))
+    if height_m is not None and height_m > 0:
+        floors.append(("stature", FOOT_HW_MIN_FRAC_H * float(height_m)))
+    if not floors:
+        return half_width
+    floor_val = max(v for _, v in floors)
+    winner = max(floors, key=lambda t: t[1])[0]
+    if half_width + 1e-12 < floor_val:
+        messages.append(
+            f"foot_{side}: width visual floor {half_width:.4f}->{floor_val:.4f} m ({winner})"
+        )
+        return floor_val
+    return half_width
 
 
 def _calf_distal_r_from_parts(
@@ -560,12 +612,20 @@ def _build_foot_side(
         messages=messages,
     )
 
-    # 0044 B1-B5: visual floor after resolve (never shrinks)
+    # 0044/0080: length floor then width floor after resolve (never shrinks; no re-length)
     calf_r = _calf_distal_r_from_parts(existing_parts, side)
     foot_len = apply_foot_length_visual_floor(
         foot_len,
         height_m=height_m,
         half_width=half_width,
+        calf_distal_r=calf_r,
+        messages=messages,
+        side=side,
+    )
+    half_width = apply_foot_half_width_visual_floor(
+        half_width,
+        foot_len=foot_len,
+        height_m=height_m,
         calf_distal_r=calf_r,
         messages=messages,
         side=side,
@@ -1179,9 +1239,13 @@ __all__ = [
     "ANK_RZ_MIN_VS_CALF_B",
     "BALL_SOFT_RY_FRAC_HALF_DEPTH",
     "FINGER_TIERS",
+    "FOOT_HW_MIN_FRAC_H",
+    "FOOT_HW_MIN_FRAC_LEN",
+    "FOOT_HW_MIN_VS_CALF_R",
     "FOOT_LEN_BASE_FRAC_H",
     "FOOT_LEN_MIN_VS_ANK_HW",
     "FOOT_LEN_MIN_VS_CALF_DIAM",
+    "FOOT_LEN_VISUAL_MAX_FRAC_H",
     "FOOT_LEN_VISUAL_MIN_FRAC_H",
     "HEEL_CONTACT_OVERLAP_TARGET_M",
     "HEEL_REAR_OVERHANG_M",
@@ -1222,6 +1286,7 @@ __all__ = [
     "_THUMB_DISTAL_R_SCALE",
     "FingerTier",
     "ToeTier",
+    "apply_foot_half_width_visual_floor",
     "apply_foot_length_visual_floor",
     "build_foot_parts",
     "build_hand_parts",

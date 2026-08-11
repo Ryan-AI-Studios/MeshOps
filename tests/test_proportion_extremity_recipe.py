@@ -23,11 +23,22 @@ from meshops.proportion.constraints import (
     validate_constraints,
 )
 from meshops.proportion.extremity_recipe import (
+    ANK_RY_FRAC_HALF_W,
+    FOOT_HW_MIN_FRAC_H,
+    FOOT_HW_MIN_FRAC_LEN,
+    FOOT_HW_MIN_VS_CALF_R,
     FOOT_LEN_BASE_FRAC_H,
+    FOOT_LEN_MIN_VS_ANK_HW,
     FOOT_LEN_MIN_VS_CALF_DIAM,
+    FOOT_LEN_VISUAL_MAX_FRAC_H,
     FOOT_LEN_VISUAL_MIN_FRAC_H,
+    HEEL_CONTACT_OVERLAP_TARGET_M,
+    HEEL_REAR_OVERHANG_M,
+    HEEL_RY_MAX_FRAC_HALF_DEPTH,
+    HEEL_RY_MIN_FRAC_DEPTH,
     HEEL_RZ_CAP_FRAC_ANK,
     _assert_ank_foot_name,
+    apply_foot_half_width_visual_floor,
     apply_foot_length_visual_floor,
     build_foot_parts,
     finger_primary_axis,
@@ -750,7 +761,7 @@ def test_ext__skeleton_parent_joint() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 0044 — Foot visual mass (T1-T8)
+# 0044 / 0080 — Foot visual mass + full-figure scale (T0-T10)
 # ---------------------------------------------------------------------------
 
 
@@ -776,6 +787,17 @@ def _report_foot_span(
             _diam("ank_foot_r", half_width_m=half_width_m),
         ],
     )
+
+
+def test_ext__t0_0080_constants() -> None:
+    """T0: 0080 freezes for length/width floors + B15 anti-boat cap."""
+    assert pytest.approx(0.145) == FOOT_LEN_VISUAL_MIN_FRAC_H
+    assert pytest.approx(0.155) == FOOT_LEN_VISUAL_MAX_FRAC_H
+    assert pytest.approx(4.0) == FOOT_LEN_MIN_VS_CALF_DIAM
+    assert pytest.approx(4.8) == FOOT_LEN_MIN_VS_ANK_HW
+    assert pytest.approx(0.16) == FOOT_HW_MIN_FRAC_LEN
+    assert pytest.approx(1.20) == FOOT_HW_MIN_VS_CALF_R
+    assert pytest.approx(0.022) == FOOT_HW_MIN_FRAC_H
 
 
 def test_ext__t1_short_measured_plate_ry_visual_floor() -> None:
@@ -807,7 +829,7 @@ def test_ext__t2_long_measured_not_shrunk() -> None:
 
 
 def test_ext__t3_apply_foot_length_visual_floor_calf() -> None:
-    """T3: unit floor calf_r=0.08, H=None, hw=0.02 -> >=1.55x0.16; source calf_diam."""
+    """T3: unit floor calf_r=0.08, H=None, hw=0.02 -> 4.0*2*0.08=0.64; source calf_diam."""
     msgs: list[str] = []
     out = apply_foot_length_visual_floor(
         0.10,
@@ -820,12 +842,65 @@ def test_ext__t3_apply_foot_length_visual_floor_calf() -> None:
     expect = FOOT_LEN_MIN_VS_CALF_DIAM * (2.0 * 0.08)
     assert out >= expect - 1e-9
     assert out == pytest.approx(expect, abs=1e-9)
+    assert out == pytest.approx(0.64, abs=1e-9)
     assert any("calf_diam" in m for m in msgs)
     assert any("0.1000->" in m or "length visual floor" in m for m in msgs)
 
 
+def test_ext__t3b_width_floor_foot_len_wins() -> None:
+    """T3b: hw=0.02, foot_len=0.25, calf_r=0.03, H=1.72 → 0.04; foot_len wins."""
+    msgs: list[str] = []
+    out = apply_foot_half_width_visual_floor(
+        0.02,
+        foot_len=0.25,
+        height_m=1.72,
+        calf_distal_r=0.03,
+        messages=msgs,
+        side="l",
+    )
+    expect = FOOT_HW_MIN_FRAC_LEN * 0.25  # 0.04
+    assert out == pytest.approx(expect, abs=1e-9)
+    assert out == pytest.approx(0.04, abs=1e-9)
+    assert any("width visual floor" in m for m in msgs)
+    assert any("foot_len" in m for m in msgs)
+
+
+def test_ext__t3c_wide_hw_not_shrunk() -> None:
+    """T3c: wide measured hw=0.06 not shrunk by width floors."""
+    msgs: list[str] = []
+    out = apply_foot_half_width_visual_floor(
+        0.06,
+        foot_len=0.25,
+        height_m=1.72,
+        calf_distal_r=0.03,
+        messages=msgs,
+        side="l",
+    )
+    assert out == pytest.approx(0.06, abs=1e-9)
+    assert not any("width visual floor" in m for m in msgs)
+
+
+def test_ext__t3d_b15_length_floor_cap() -> None:
+    """T3d: B15 caps calf length floor at 0.155*H (not raw 4.0*diam)."""
+    msgs: list[str] = []
+    out = apply_foot_length_visual_floor(
+        0.10,
+        height_m=1.72,
+        half_width=0.02,
+        calf_distal_r=0.08,
+        messages=msgs,
+        side="l",
+    )
+    raw_calf = FOOT_LEN_MIN_VS_CALF_DIAM * (2.0 * 0.08)  # 0.64
+    cap = FOOT_LEN_VISUAL_MAX_FRAC_H * 1.72  # 0.2666
+    assert raw_calf > cap
+    assert out <= cap + 1e-9
+    assert out == pytest.approx(cap, abs=1e-9)
+    assert any("length visual floor" in m for m in msgs)
+
+
 def test_ext__t4_heel_rear_pad_reach_and_cap() -> None:
-    """T4: heel.y >= ank.y; heel.z < ank.z; heel_rz <= cap; C_heel_reaches pass."""
+    """T4: heel.y >= ank.y; heel.z < ank.z; contact ≥0.005; C_heel_reaches pass."""
     report = _report_foot_span(heel_y=0.06, toe_y=-0.12, height_m=1.72, ank_z=0.13)
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="wedge")
     by_name = {p.name: p for p in pkg.parts}
@@ -838,6 +913,10 @@ def test_ext__t4_heel_rear_pad_reach_and_cap() -> None:
         hrz = float(heel.rz_m or 0.0)
         az = float(ank.center[2])
         assert hrz <= HEEL_RZ_CAP_FRAC_ANK * az + 1e-6
+        # Contact overlap (heel_top - ank_bottom)
+        ank_bottom = float(ank.center[2]) - float(ank.rz_m or 0.0)
+        heel_top = float(heel.center[2]) + hrz
+        assert heel_top - ank_bottom >= HEEL_CONTACT_OVERLAP_TARGET_M - 1e-6
     result = validate_constraints(pkg, report=report)
     by_id = {r.id: r for r in result.rules}
     assert by_id["C_heel_reaches_ank_foot"].status == "pass", by_id[
@@ -846,7 +925,7 @@ def test_ext__t4_heel_rear_pad_reach_and_cap() -> None:
 
 
 def test_ext__t5_heel_not_tower_class() -> None:
-    """T5: product-like emit heel_rz <= 0.48xank_z and < old tower class ~0.068."""
+    """T5: product-like emit heel_rz <= 0.48xank_z; heel_ry <= 0.34*half_depth."""
     report = _report_foot_span(
         heel_y=0.06,
         toe_y=-0.08,  # short-ish measured like product
@@ -859,11 +938,15 @@ def test_ext__t5_heel_not_tower_class() -> None:
     for side in ("l", "r"):
         heel = by_name[f"RECIPE_heel_{side}"]
         ank = by_name[f"RECIPE_ank_foot_{side}"]
+        plate = by_name[f"RECIPE_foot_plate_{side}"]
         assert heel.center is not None and ank.center is not None
         hrz = float(heel.rz_m or 0.0)
+        hry = float(heel.ry_m or 0.0)
         az = float(ank.center[2])
+        half_d = float(plate.half_depth_m or 0.0)
         assert hrz <= HEEL_RZ_CAP_FRAC_ANK * az + 1e-6
         assert hrz < 0.068 - 1e-6, f"heel_rz={hrz} still tower-class"
+        assert hry <= HEEL_RY_MAX_FRAC_HALF_DEPTH * half_d + 1e-6
 
 
 def test_ext__t6_organic_sole_arch_ball_toe_topology() -> None:
@@ -920,7 +1003,7 @@ def test_ext__t8_mcp_catalog_stays_46() -> None:
 
 
 def test_ext__build_foot_parts_existing_parts_calf_floor() -> None:
-    """existing_parts calf_b feeds visual floor (B5 wiring)."""
+    """T9: existing_parts calf_b feeds length and width visual floors."""
     report = _report_foot_span(heel_y=0.04, toe_y=-0.04, height_m=1.72, half_width_m=0.02)
     # Strip height so stature floor does not dominate; calf term should win
     report = report.model_copy(update={"height_m": None})
@@ -946,6 +1029,40 @@ def test_ext__build_foot_parts_existing_parts_calf_floor() -> None:
     half = float(left_plates[0].half_depth_m or 0.0)
     assert half >= 0.5 * FOOT_LEN_MIN_VS_CALF_DIAM * 0.16 - 1e-6
     assert any("calf_diam" in m for m in msgs)
+    # Width floor also consumes calf_b
+    left_ank = next(p for p in parts if p.name == "RECIPE_ank_foot_l")
+    assert left_ank.rx_m is not None
+    assert float(left_ank.rx_m) >= FOOT_HW_MIN_VS_CALF_R * 0.08 - 1e-6
+    assert any("width visual floor" in m or "calf_r" in m for m in msgs)
+
+
+def test_ext__t10_fence_ank_heel_overhang_contact() -> None:
+    """T10: fence ank 1.22 / heel 0.30 / overhang 0.012 / contact 0.005."""
+    assert pytest.approx(1.22) == ANK_RY_FRAC_HALF_W
+    assert pytest.approx(0.30) == HEEL_RY_MIN_FRAC_DEPTH
+    assert pytest.approx(0.012) == HEEL_REAR_OVERHANG_M
+    assert pytest.approx(0.005) == HEEL_CONTACT_OVERLAP_TARGET_M
+    report = _report_foot_span(heel_y=0.06, toe_y=-0.12, height_m=1.72, ank_z=0.13)
+    pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="wedge")
+    by_name = {p.name: p for p in pkg.parts}
+    for side in ("l", "r"):
+        heel = by_name[f"RECIPE_heel_{side}"]
+        ank = by_name[f"RECIPE_ank_foot_{side}"]
+        plate = by_name[f"RECIPE_foot_plate_{side}"]
+        assert ank.rx_m is not None and ank.ry_m is not None
+        assert float(ank.ry_m) == pytest.approx(
+            max(ANK_RY_FRAC_HALF_W * float(ank.rx_m), 0.030),
+            abs=1e-5,
+        )
+        half_d = float(plate.half_depth_m or 0.0)
+        assert float(heel.ry_m or 0.0) >= HEEL_RY_MIN_FRAC_DEPTH * half_d - 1e-6
+        assert heel.center is not None and plate.center is not None
+        rear_tip = float(heel.center[1]) + float(heel.ry_m or 0.0)
+        plate_rear = float(plate.center[1]) + half_d
+        assert rear_tip <= plate_rear + HEEL_REAR_OVERHANG_M + 1e-6
+        ank_bottom = float(ank.center[2]) - float(ank.rz_m or 0.0)  # type: ignore[index]
+        heel_top = float(heel.center[2]) + float(heel.rz_m or 0.0)
+        assert heel_top - ank_bottom >= HEEL_CONTACT_OVERLAP_TARGET_M - 1e-6
 
 
 # ---------------------------------------------------------------------------

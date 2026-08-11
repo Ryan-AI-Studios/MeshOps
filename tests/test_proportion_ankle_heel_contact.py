@@ -222,12 +222,16 @@ def test_t3_product_ank_ry_frac_wins() -> None:
 
 
 def test_t4_ank_rx_equals_half_width() -> None:
-    """T4: ank_rx == half_width (C_foot_width)."""
+    """T4: ank_rx co-scales with plate top_half_width (post-0080 width floor)."""
     report = _product_feet_report(half_width_m=PRODUCT_HW_M)
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     ank = _ank(pkg.parts)
+    plate = _plate(pkg.parts)
     assert ank.rx_m is not None
-    assert float(ank.rx_m) == pytest.approx(PRODUCT_HW_M, abs=1e-6)
+    assert plate.top_half_width_m is not None
+    # Width floor may raise above bare PRODUCT_HW; ank tracks plate half-width
+    assert float(ank.rx_m) == pytest.approx(float(plate.top_half_width_m), abs=1e-6)
+    assert float(ank.rx_m) >= PRODUCT_HW_M - 1e-6
 
 
 def test_t5_constraints_foot_stack_green() -> None:
@@ -271,10 +275,10 @@ def test_t6_0054_sole_toe_fence() -> None:
 
 def test_t7_0044_length_heel_fence() -> None:
     """T7: 0056 true freezes + 0072 retargets for length/heel ry/bias."""
-    # 0072 B10 / B2 / B1 retargets (value changes by design)
-    assert pytest.approx(0.13) == FOOT_LEN_VISUAL_MIN_FRAC_H
+    # 0080 B1/B2 / 0072 B1 retargets (value changes by design)
+    assert pytest.approx(0.145) == FOOT_LEN_VISUAL_MIN_FRAC_H
     assert pytest.approx(4.8) == FOOT_LEN_MIN_VS_ANK_HW
-    assert pytest.approx(1.55) == FOOT_LEN_MIN_VS_CALF_DIAM
+    assert pytest.approx(4.0) == FOOT_LEN_MIN_VS_CALF_DIAM
     assert pytest.approx(0.10) == HEEL_REAR_Y_BIAS_FRAC_DEPTH  # 0076 B3 (was 0.06)
     # 0056 true freezes — HEEL_Z_FRAC_ANK is Z (not ry)
     assert pytest.approx(0.42) == HEEL_Z_FRAC_ANK
@@ -317,13 +321,27 @@ def test_t9b_ry_frac_wins_on_product_hw() -> None:
 
 
 def test_t10_ank_rz_floor_binds_when_hw_tiny() -> None:
-    """T10: tiny hw -> ANK_RZ_FLOOR_M binds (before ceiling)."""
+    """T10: tiny hw -> ANK_RZ_FLOOR_M binds (before ceiling).
+
+    H=None + short measured span so 0080 width floors do not raise hw above
+    tiny; length floor via ank_hw alone leaves 0.16*len below tiny_hw.
+    """
     tiny_hw = 0.015
     assert ANK_RZ_FRAC_HALF_W * tiny_hw < ANK_RZ_FLOOR_M
-    report = _product_feet_report(half_width_m=tiny_hw, ank_z=0.15)
+    report = _product_feet_report(
+        half_width_m=tiny_hw,
+        ank_z=0.15,
+        heel_y=0.02,
+        toe_y=-0.02,
+    )
+    # H=None so stature width/length floors skip (isolate tiny-hw ank_rz path)
+    report = report.model_copy(update={"height_m": None})
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="wedge")
     ank = _ank(pkg.parts)
     assert ank.rz_m is not None
+    assert ank.rx_m is not None
+    # Width floors skipped enough that hw stays tiny (or near)
+    assert float(ank.rx_m) <= tiny_hw + 1e-5
     # Floor binds; ceiling at ank_z=0.15 is 0.09 > floor
     assert float(ank.rz_m) == pytest.approx(ANK_RZ_FLOOR_M, abs=1e-5)
 
@@ -348,9 +366,11 @@ def test_t11b_cap_lose_never_minus_tol_float() -> None:
 
     Tall ank_z + floor-stuck ank_rz (tiny hw) makes reach_need > rz_cap, then
     still_need after clamp exceeds rz_cap and emits 'heel_rz cap lose for contact'.
+    H=None so 0080 width floors skip (stature/hw raise would defeat tiny-hw path).
     """
     # reach_need > rz_cap when ank_z large and ank_rz ~ floor (tiny hw)
     report = _product_feet_report(half_width_m=0.02, ank_z=0.50)
+    report = report.model_copy(update={"height_m": None})
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="wedge")
     gap = _contact_overlap(pkg.parts)
     joined = "\n".join(pkg.messages)
@@ -394,9 +414,12 @@ def test_t12_ank_rz_ceiling_binds_synth() -> None:
 
 
 def test_t13_calf_floor_binds() -> None:
-    """T13: large RECIPE_calf_b r forces ANK_RZ_MIN_VS_CALF_B floor (AI2 P3-1)."""
+    """T13: RECIPE_calf_b feeds ank_rz via full post-0080 formula (AI2 P3-1).
+
+    Width floor may raise hw so frac path can exceed bare calf floor; assert
+    emitted rz matches min(max(frac, floor, calf*1.35), ceil) on floored hw.
+    """
     report = _product_feet_report(half_width_m=PRODUCT_HW_M, ank_z=PRODUCT_ANK_Z_M)
-    # calf_r * 1.35 must beat frac (0.0526) and stay under ceiling (0.60*ank_z≈0.0788)
     calf_r = 0.050
     calf_floor = calf_r * ANK_RZ_MIN_VS_CALF_B  # 0.0675
     assert calf_floor > ANK_RZ_FRAC_HALF_W * PRODUCT_HW_M
@@ -419,7 +442,20 @@ def test_t13_calf_floor_binds() -> None:
     )
     ank = _ank(parts)
     assert ank.rz_m is not None
-    assert float(ank.rz_m) == pytest.approx(calf_floor, abs=1e-5)
+    assert ank.rx_m is not None
+    floored_hw = float(ank.rx_m)
+    ceil = ANK_RZ_MAX_FRAC_ANK_Z * PRODUCT_ANK_Z_M
+    expect = min(
+        max(
+            ANK_RZ_FRAC_HALF_W * floored_hw,
+            ANK_RZ_FLOOR_M,
+            calf_floor,
+        ),
+        ceil,
+    )
+    assert float(ank.rz_m) == pytest.approx(expect, abs=1e-5)
+    # Calf term is present in the max before ceiling
+    assert max(ANK_RZ_FRAC_HALF_W * floored_hw, ANK_RZ_FLOOR_M, calf_floor) >= calf_floor
 
 
 # ---------------------------------------------------------------------------
