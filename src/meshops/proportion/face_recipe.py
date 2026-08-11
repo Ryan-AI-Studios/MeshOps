@@ -36,13 +36,13 @@ _NOSE_BASE_Z_FRAC: Final[float] = 0.33
 _LIP_Z_FRAC: Final[float] = 0.20  # authoring choice, not Loomis third
 _NOSE_TIP_Y_FRAC_RY: Final[float] = 0.15
 _EYE_RADIUS_FRAC_H: Final[float] = 0.08
-# 0055 — jaw soft mass ellipsoid freezes (public; use HeadBounds.H for Z fracs)
-JAW_RX_FRAC_HEAD_RX: Final[float] = 0.85
+# 0055 jaw soft mass ellipsoid; 0057 chin-strap polish (public; use HeadBounds.H for Z fracs)
+JAW_RX_FRAC_HEAD_RX: Final[float] = 0.74  # was 0.85 — 0057
 JAW_RY_FRAC_HEAD_RY: Final[float] = 0.55
 JAW_RZ_FRAC_H: Final[float] = 0.15
 JAW_Z_CENTER_FRAC_H: Final[float] = 0.13
-JAW_Y_BIAS_FRAC_RY: Final[float] = 0.05
-JAW_X_BULGE_ALLOW_M: Final[float] = 0.015
+JAW_Y_BIAS_FRAC_RY: Final[float] = 0.08  # was 0.05 — 0057
+JAW_X_BULGE_ALLOW_M: Final[float] = 0.006  # was 0.015 — 0057
 _HAIR_SHORT_RZ_FRAC: Final[float] = 0.25
 _BUN_R_FRAC_H: Final[float] = 0.12
 _LONG_PROXY_LEN_FRAC_H: Final[float] = 0.45
