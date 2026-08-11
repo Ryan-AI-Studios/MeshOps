@@ -25,6 +25,8 @@ schema stay 1.4.0.
 0067: breast_soft athletic rx cap + teardrop axes + sternum X (before hang); schema stay 1.4.0.
 0050: neck column forward tilt (p0/p1) + head/face co-move + radius ceiling vs head.rx;
 schema stay 1.4.0.
+0059: neck diameter ceiling 0.40*head.rx + base soft ellipsoid + SCM r from neck.r;
+schema stay 1.4.0.
 0052: glute_soft seat mass (ry floor + rear +Y) before 0036 outer align; schema stay 1.4.0.
 0053: pelvis bucket shelf scale (oval ry/rx/rz + trap half_depth/z-span); schema stay 1.4.0.
 """
@@ -183,7 +185,15 @@ BREAST_X_SHOULDER_MAX_FRAC: Final[float] = 0.45
 BREAST_ATTACH_Y_SCALE: Final[float] = 1.0  # B12 — do not re-anchor Y to chest
 # 0050 B1/B5: neck column forward tilt about +X (tip -Y) + radius ceiling vs head.rx.
 NECK_FORWARD_TILT_DEG: Final[float] = 12.0
-NECK_R_MAX_FRAC_HEAD_RX: Final[float] = 0.55
+NECK_R_MAX_FRAC_HEAD_RX: Final[float] = 0.40  # 0059 B1 — was 0.55
+# 0059 B2/B3: neck base soft ellipsoid + SCM radius scale from neck.r
+NECK_BASE_RX_FRAC_R: Final[float] = 1.25
+NECK_BASE_RY_FRAC_R: Final[float] = 0.90
+NECK_BASE_RZ_FRAC_R: Final[float] = 0.55
+NECK_BASE_Z_BURY_FRAC_RZ: Final[float] = 0.30
+SCM_R_FRAC_NECK_R: Final[float] = 0.38
+SCM_R_FLOOR_M: Final[float] = 0.008
+SCM_R_CAP_M: Final[float] = 0.018
 _NECK_HEAD_ATTACHED_TOKENS: Final[tuple[str, ...]] = (
     "jaw",
     "brow_soft",
@@ -3943,6 +3953,8 @@ def build_blockout_recipe(
 
     # 0050: mild forward neck tilt + head co-move + radius ceiling (after face kit if any)
     _apply_neck_column_priors(parts, messages)
+    # 0059: neck base soft + SCM radius scale (after 0050 priors; post-ceiling neck.r)
+    _apply_neck_diameter_base(parts, messages)
 
     # 5-6 shoulder bridges
     for p in _build_shoulder_bridges(report, resolved, messages, skeleton=skeleton):
@@ -4326,6 +4338,84 @@ def _apply_neck_column_priors(parts: list[RecipePart], messages: list[str]) -> N
     messages.append("neck_column_tilt_applied: true")
     messages.append(f"neck_column_tip_dy_m={dy_tip}")
     messages.append(f"neck_column_head_comove: {str(moved_head).lower()}")
+
+
+def _apply_neck_diameter_base(parts: list[RecipePart], messages: list[str]) -> None:
+    """0059: neck base soft ellipsoid + SCM radius scale from post-ceiling neck.r.
+
+    When RECIPE_neck is present (face flag irrelevant): ensure one midline
+    RECIPE_neck_base_soft ellipsoid (role=neck), idempotent update if present.
+    When sternomastoid parts present and neck.r finite: scale dual SCM radii via
+    model_copy. No neck → quiet skip (no base, no SCM scale).
+    """
+    neck = next(
+        (
+            p
+            for p in parts
+            if p.name == "RECIPE_neck"
+            and p.kind == "cylinder"
+            and p.p0 is not None
+            and len(p.p0) >= 3
+            and p.radius_m is not None
+            and math.isfinite(float(p.radius_m))
+            and float(p.radius_m) > 0.0
+        ),
+        None,
+    )
+    if neck is None:
+        return
+
+    assert neck.p0 is not None
+    r = float(neck.radius_m)  # type: ignore[arg-type]
+    p0 = [float(c) for c in neck.p0]
+    rx = NECK_BASE_RX_FRAC_R * r
+    ry = NECK_BASE_RY_FRAC_R * r
+    rz = NECK_BASE_RZ_FRAC_R * r
+    cx = 0.0
+    cy = p0[1]
+    cz = p0[2] - NECK_BASE_Z_BURY_FRAC_RZ * rz
+    center = [cx, cy, cz]
+    placement = neck.placement
+
+    base_idxs = [i for i, p in enumerate(parts) if p.name == "RECIPE_neck_base_soft"]
+    if base_idxs:
+        bi = base_idxs[0]
+        parts[bi] = parts[bi].model_copy(
+            update={
+                "center": center,
+                "rx_m": rx,
+                "ry_m": ry,
+                "rz_m": rz,
+                "role": "neck",
+                "kind": "ellipsoid",
+                "placement": placement,
+            }
+        )
+    else:
+        parts.append(
+            RecipePart(
+                name="RECIPE_neck_base_soft",
+                role="neck",
+                kind="ellipsoid",
+                center=center,
+                rx_m=rx,
+                ry_m=ry,
+                rz_m=rz,
+                placement=placement,
+                label="RECIPE_neck_base_soft",
+            )
+        )
+    messages.append(f"neck_base_soft_applied: true rx={rx:.4f} ry={ry:.4f} rz={rz:.4f} z={cz:.4f}")
+
+    r_scm = min(SCM_R_CAP_M, max(SCM_R_FLOOR_M, SCM_R_FRAC_NECK_R * r))
+    scm_scaled = False
+    for j, p in enumerate(parts):
+        if "sternomastoid" not in p.name.lower():
+            continue
+        parts[j] = parts[j].model_copy(update={"radius_m": r_scm})
+        scm_scaled = True
+    if scm_scaled:
+        messages.append(f"scm_radius_scaled: true r={r_scm:.4f} frac={SCM_R_FRAC_NECK_R}")
 
 
 def _scale_part_radii(part: RecipePart, factor: float) -> None:
@@ -6138,6 +6228,10 @@ __all__ = [
     "KNEE_SOFT_RZ_FRAC",
     "LIMB_DISTAL_SOFT_SCALE",
     "MIDLINE_X_TOL_M",
+    "NECK_BASE_RX_FRAC_R",
+    "NECK_BASE_RY_FRAC_R",
+    "NECK_BASE_RZ_FRAC_R",
+    "NECK_BASE_Z_BURY_FRAC_RZ",
     "NECK_FORWARD_TILT_DEG",
     "NECK_NAPE_CLEARANCE_M",
     "NECK_R_MAX_FRAC_HEAD_RX",
@@ -6154,6 +6248,9 @@ __all__ = [
     "RECIPE_HONESTY",
     "RECIPE_ID",
     "RECIPE_SCHEMA_VERSION",
+    "SCM_R_CAP_M",
+    "SCM_R_FLOOR_M",
+    "SCM_R_FRAC_NECK_R",
     "THIGH_ADDUCTION_MAX_MEDIAL_M",
     "THIGH_DIST_SHAFT_SCALE",
     "THIGH_PROX_SHAFT_SCALE",
@@ -6196,6 +6293,7 @@ __all__ = [
     "_apply_glute_seat_mass",
     "_apply_join_ready_overlaps",
     "_apply_neck_column_priors",
+    "_apply_neck_diameter_base",
     "_apply_scap_plane",
     "_apply_shoulder_girdle_softs",
     "_apply_thigh_adduction",
