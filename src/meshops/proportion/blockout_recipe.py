@@ -165,9 +165,17 @@ THIGH_ADDUCTION_MAX_MEDIAL_M: Final[float] = 0.030
 # 0047 B1 + 0065: torso oval depth + front pinch freezes
 TORSO_OVAL_RY_CHEST_FRAC: Final[float] = 0.85  # was 0.95
 TORSO_OVAL_RY_WAIST_FRAC: Final[float] = 0.58  # was 0.72
-TORSO_OVAL_RY_HIP_FRAC: Final[float] = 0.80  # ≠ PELVIS_OVAL_RY_FRAC_HALF_HIP (0.60)
-TORSO_OVAL_RZ_SPAN_FRAC: Final[float] = 0.22  # fence 0040
+TORSO_OVAL_RY_HIP_FRAC: Final[float] = 0.70  # was 0.80; 0073 anti-stack vs chest ball
+# 0073 B1: layer-asymmetric rz fracs (replace equal span*0.22 tire stack)
+TORSO_OVAL_RZ_CHEST_FRAC: Final[float] = 0.28
+TORSO_OVAL_RZ_WAIST_FRAC: Final[float] = 0.16
+TORSO_OVAL_RZ_HIP_FRAC: Final[float] = 0.24
+# 0073 B4: legacy equal-span symbol — documentation fence only; emit must NOT use it
+TORSO_OVAL_RZ_SPAN_FRAC: Final[float] = 0.22  # fence 0040 / mean reference
 TORSO_OVAL_RZ_FLOOR_M: Final[float] = 0.025
+# 0073 B2: pairwise vertical overlap floor + cumulative grow cap per layer
+TORSO_OVAL_OVERLAP_FLOOR_M: Final[float] = 0.055
+TORSO_OVAL_RZ_GROW_CAP_M: Final[float] = 0.030
 TORSO_WAIST_RX_MAX_FRAC_CHEST: Final[float] = 0.80
 TORSO_WAIST_PINCH_TAPER_GATE: Final[float] = 0.10
 TORSO_CHEST_Y_REAR_BIAS_FRAC_RY: Final[float] = 0.28
@@ -2379,6 +2387,13 @@ def _build_torso_ovals(
             TORSO_WAIST_RX_MAX_FRAC_CHEST * rx_by[chest_key],
         )
 
+    # 0073 B1: per-layer rz fracs (not equal TORSO_OVAL_RZ_SPAN_FRAC).
+    rz_frac_by: dict[str, float] = {
+        "RECIPE_torso_oval_chest": TORSO_OVAL_RZ_CHEST_FRAC,
+        "RECIPE_torso_oval_waist": TORSO_OVAL_RZ_WAIST_FRAC,
+        "RECIPE_torso_oval_hip": TORSO_OVAL_RZ_HIP_FRAC,
+    }
+    hip_key = "RECIPE_torso_oval_hip"
     ry_chest: float | None = None
     ry_waist: float | None = None
     ry_hip: float | None = None
@@ -2388,9 +2403,8 @@ def _build_torso_ovals(
     for name, z_norm in layers:
         z_m = z_top - z_norm * span
         hw = rx_by[name]
-        # Vertical radius must exceed half layer spacing (0.35*span/2) so chest/waist/hip
-        # ovals overlap. 0.12 left a belly gap; 0.18 barely kissed; 0.22 ≈ 4cm overlap.
-        rz = max(TORSO_OVAL_RZ_FLOOR_M, span * TORSO_OVAL_RZ_SPAN_FRAC)
+        # 0073 B1 planned rz (pre-grow); B2 may increase only.
+        rz = max(TORSO_OVAL_RZ_FLOOR_M, span * rz_frac_by[name])
         center_y = y
         if name.endswith("_chest"):
             ry = half_chest * TORSO_OVAL_RY_CHEST_FRAC
@@ -2420,6 +2434,70 @@ def _build_torso_ovals(
                 label=name,
             )
         )
+
+    # 0073 B2: pairwise overlap floor; grow preference waist→hip→chest (not thinnest).
+    # Cumulative per-layer grow cap; max 3 outer passes; never shrink. B15: also on front_plane.
+    by_torso = {p.name: p for p in parts}
+    part_c = by_torso.get(chest_key)
+    part_w = by_torso.get(waist_key)
+    part_h = by_torso.get(hip_key)
+    ov_cw = 0.0
+    ov_wh = 0.0
+    if (
+        part_c is not None
+        and part_w is not None
+        and part_h is not None
+        and part_c.center is not None
+        and part_w.center is not None
+        and part_h.center is not None
+        and part_c.rz_m is not None
+        and part_w.rz_m is not None
+        and part_h.rz_m is not None
+    ):
+        rz_map: dict[str, float] = {
+            chest_key: float(part_c.rz_m),
+            waist_key: float(part_w.rz_m),
+            hip_key: float(part_h.rz_m),
+        }
+        z_c = float(part_c.center[2])
+        z_w = float(part_w.center[2])
+        z_h = float(part_h.center[2])
+        dz_cw = abs(z_c - z_w)
+        dz_wh = abs(z_w - z_h)
+        grown: dict[str, float] = {
+            chest_key: 0.0,
+            waist_key: 0.0,
+            hip_key: 0.0,
+        }
+        # Preference order: waist → hip → chest (AI2 P2-1).
+        prefer = (waist_key, hip_key, chest_key)
+        part_by = {chest_key: part_c, waist_key: part_w, hip_key: part_h}
+        for _ in range(3):
+            ov_cw = rz_map[chest_key] + rz_map[waist_key] - dz_cw
+            ov_wh = rz_map[waist_key] + rz_map[hip_key] - dz_wh
+            if min(ov_cw, ov_wh) >= TORSO_OVAL_OVERLAP_FLOOR_M:
+                break
+            short_pair = (chest_key, waist_key) if ov_cw <= ov_wh else (waist_key, hip_key)
+            short_ov = ov_cw if ov_cw <= ov_wh else ov_wh
+            for cand in prefer:
+                if cand in short_pair and grown[cand] < TORSO_OVAL_RZ_GROW_CAP_M:
+                    need = TORSO_OVAL_OVERLAP_FLOOR_M - short_ov
+                    delta = min(need, TORSO_OVAL_RZ_GROW_CAP_M - grown[cand])
+                    if delta <= 0.0:
+                        break
+                    rz_map[cand] += delta
+                    grown[cand] += delta
+                    part_by[cand].rz_m = rz_map[cand]
+                    break
+        ov_cw = rz_map[chest_key] + rz_map[waist_key] - dz_cw
+        ov_wh = rz_map[waist_key] + rz_map[hip_key] - dz_wh
+        # 0073 B10: form silhouette inventory (post-B2 rz + pairwise overlaps).
+        messages.append(
+            "torso form silhouette: "
+            f"rz=c/w/h={rz_map[chest_key]:.4f}/{rz_map[waist_key]:.4f}/{rz_map[hip_key]:.4f} "
+            f"overlap_cw={ov_cw:.4f} overlap_wh={ov_wh:.4f}"
+        )
+
     if ry_chest is not None and ry_waist is not None and ry_hip is not None:
         messages.append(
             "torso depth taper: chest/waist/hip "
@@ -6260,11 +6338,16 @@ __all__ = [
     "THIGH_SPLIT_T",
     "THIGH_TILT_DEG_CAP",
     "TORSO_CHEST_Y_REAR_BIAS_FRAC_RY",
+    "TORSO_OVAL_OVERLAP_FLOOR_M",
     "TORSO_OVAL_RY_CHEST_FRAC",
     "TORSO_OVAL_RY_HIP_FRAC",
     "TORSO_OVAL_RY_WAIST_FRAC",
+    "TORSO_OVAL_RZ_CHEST_FRAC",
     "TORSO_OVAL_RZ_FLOOR_M",
+    "TORSO_OVAL_RZ_GROW_CAP_M",
+    "TORSO_OVAL_RZ_HIP_FRAC",
     "TORSO_OVAL_RZ_SPAN_FRAC",
+    "TORSO_OVAL_RZ_WAIST_FRAC",
     "TORSO_WAIST_PINCH_TAPER_GATE",
     "TORSO_WAIST_RX_MAX_FRAC_CHEST",
     "TRAP_LAT_FRAC",
