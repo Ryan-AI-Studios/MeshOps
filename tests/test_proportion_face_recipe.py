@@ -298,6 +298,8 @@ def test_face__classifier_b5_tokens() -> None:
         ("RECIPE_nose_soft", "head"),
         ("RECIPE_ear_soft_l", "head"),
         ("RECIPE_lip_soft", "head"),
+        ("RECIPE_cheek_soft_l", "head"),
+        ("RECIPE_cheek_soft_r", "head"),
         ("RECIPE_hair_mass", "head"),
         ("RECIPE_hair_mass_bun", "head"),
         ("RECIPE_sternomastoid_soft_l", "neck"),
@@ -453,15 +455,16 @@ def test_face__hair_short_and_long_proxy() -> None:
 
 
 def test_face__nose_tip_y_freeze() -> None:
-    """B7: nose tip Y = head_center_y - 0.15 * head_ry."""
+    """B7/0058: nose front surface Y = head_center_y - 0.15 * head_ry (ellipsoid, not p1)."""
     report = _full_torso_report()
     pkg = build_blockout_recipe(report, limbs=False, face=True)
     head = next(p for p in pkg.parts if p.name == "RECIPE_head")
     nose = next(p for p in pkg.parts if p.name == "RECIPE_nose_soft")
     assert head.center is not None and head.ry_m is not None
-    assert nose.p1 is not None
+    assert nose.kind == "ellipsoid"
+    assert nose.center is not None and nose.ry_m is not None
     expected_tip_y = float(head.center[1]) - 0.15 * float(head.ry_m)
-    assert nose.p1[1] == pytest.approx(expected_tip_y, abs=1e-6)
+    assert float(nose.center[1]) - float(nose.ry_m) == pytest.approx(expected_tip_y, abs=1e-6)
 
 
 def test_face__neckline_v_proxy() -> None:

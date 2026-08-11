@@ -252,6 +252,8 @@ def classify_part_name(name: str) -> tuple[ConstraintRole, Side]:
         return "head", side
     if "lip_soft" in lower:
         return "head", side
+    if "cheek_soft" in lower:
+        return "head", side
     if "hair_mass" in lower:
         return "head", side
     if "sternomastoid" in lower:
@@ -1023,6 +1025,7 @@ _AXIAL_EXEMPT_NAME_TOKENS: Final[tuple[str, ...]] = (
     "nose_soft",
     "ear_soft",
     "lip_soft",
+    "cheek_soft",
     "hair_mass",
     "neckline",
     "sternomastoid",
