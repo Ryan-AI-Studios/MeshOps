@@ -2209,11 +2209,13 @@ def test_recipe__axial_chest_y_prefers_mid_not_front() -> None:
     """0032 pin: shoulders y null + chest_front=-0.13 + mid=0 → axial Y≈0, not front.
 
     0050: neck tip leans -Y by L*sin(tilt); base p0 stays mid.
-    0065: chest oval alone gets full3d rear bias; waist/hip stay mid.
+    0065: chest oval full3d rear bias; 0074: waist/hip also get layer rear bias (not front).
     """
     from meshops.proportion.blockout_recipe import (
         NECK_FORWARD_TILT_DEG,
         TORSO_CHEST_Y_REAR_BIAS_FRAC_RY,
+        TORSO_HIP_Y_REAR_BIAS_FRAC_RY,
+        TORSO_WAIST_Y_REAR_BIAS_FRAC_RY,
     )
 
     report = _axial_pin_report(chest_front_y=-0.13, chest_mid_y=0.0, shoulder_y=None)
@@ -2228,10 +2230,18 @@ def test_recipe__axial_chest_y_prefers_mid_not_front() -> None:
     assert ovals
     for o in ovals:
         assert o.center is not None
+        ry = float(o.ry_m or 0.0)
         if o.name == "RECIPE_torso_oval_chest":
             # 0065 B5: full3d chest rear bias (mid=0 → cy = bias * ry)
-            ry = float(o.ry_m or 0.0)
             expected_cy = 0.0 + TORSO_CHEST_Y_REAR_BIAS_FRAC_RY * ry
+            assert o.center[1] == pytest.approx(expected_cy, abs=1e-6)
+        elif o.name == "RECIPE_torso_oval_waist":
+            # 0074 B7: full3d waist rear bias
+            expected_cy = 0.0 + TORSO_WAIST_Y_REAR_BIAS_FRAC_RY * ry
+            assert o.center[1] == pytest.approx(expected_cy, abs=1e-6)
+        elif o.name == "RECIPE_torso_oval_hip":
+            # 0074 B8: full3d hip rear bias
+            expected_cy = 0.0 + TORSO_HIP_Y_REAR_BIAS_FRAC_RY * ry
             assert o.center[1] == pytest.approx(expected_cy, abs=1e-6)
         else:
             assert o.center[1] == pytest.approx(0.0, abs=1e-6)

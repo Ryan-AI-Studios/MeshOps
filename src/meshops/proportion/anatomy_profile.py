@@ -38,6 +38,7 @@ ProfileRecipeRole = Literal[
     "trap_soft",
     "pec_soft",
     "scap_soft",
+    "mid_back_soft",
     "bicep_soft",
     "clavicle",
 ]

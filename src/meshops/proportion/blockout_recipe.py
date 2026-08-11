@@ -142,6 +142,15 @@ SCAP_RZ_FRAC_RX: Final[float] = 1.15
 SCAP_REAR_PAST_M: Final[float] = 0.012
 SCAP_LAT_FRAC: Final[float] = 0.45
 SCAP_Z_DROP_FRAC_H: Final[float] = 0.055
+# 0074 B2-B6 / B17: mid_back_soft plate + rear plane past waist oval (after 0066 scap).
+MID_BACK_RX_MIN_FRAC_H: Final[float] = 0.038
+MID_BACK_RY_FRAC_RX: Final[float] = 0.38
+MID_BACK_RY_MIN_FRAC_H: Final[float] = 0.014
+MID_BACK_RZ_FRAC_RX: Final[float] = 1.30
+MID_BACK_REAR_PAST_M: Final[float] = 0.022
+MID_BACK_LAT_FRAC: Final[float] = 0.38
+MID_BACK_Z_DROP_FRAC_H: Final[float] = 0.14
+MID_BACK_BELOW_SCAP_M: Final[float] = 0.008
 # 0046 B6: thigh proximal soft at hip (no dist_soft - 0045 B13).
 # 0069: THIGH_PROX_SOFT_SCALE kept for fence/import smoke; superseded for product emit
 # (isotropic RECIPE_prox_soft_thigh_* replaced by anisotropic RECIPE_hip_soft_*).
@@ -179,6 +188,9 @@ TORSO_OVAL_RZ_GROW_CAP_M: Final[float] = 0.030
 TORSO_WAIST_RX_MAX_FRAC_CHEST: Final[float] = 0.80
 TORSO_WAIST_PINCH_TAPER_GATE: Final[float] = 0.10
 TORSO_CHEST_Y_REAR_BIAS_FRAC_RY: Final[float] = 0.28
+# 0074 B7/B8: mild waist/hip full3d rear bias (cy only — do not change ry).
+TORSO_WAIST_Y_REAR_BIAS_FRAC_RY: Final[float] = 0.42
+TORSO_HIP_Y_REAR_BIAS_FRAC_RY: Final[float] = 0.22
 # 0049 B1: breast_soft vertical hang floor (center Z drop as fraction of rz).
 BREAST_HANG_Z_DROP_FRAC_RZ: Final[float] = 0.55
 # 0049 D2: unit min hang drop vs pre-anchor (softer than B1; waist soft-clamp threshold).
@@ -275,6 +287,7 @@ RecipeRole = Literal[
     "trap_soft",
     "pec_soft",
     "scap_soft",
+    "mid_back_soft",
     "bicep_soft",
     "clavicle",
     # 0028 face / hair / neckline; 0058 cheek_soft
@@ -1847,6 +1860,181 @@ def _apply_scap_plane(
         )
 
 
+def _apply_mid_back_plane(
+    parts: list[RecipePart],
+    report: ProportionReport,
+    m: _ResolvedMetrics,
+    messages: list[str],
+) -> None:
+    """0074: mid_back_soft plate axes + rear Y past waist oval (after 0066 scap).
+
+    Mutates *parts* in place. B9: role mid_back_soft + ellipsoid + center only.
+    Quiet skip when no mid_back_soft (no profile / limbs-only).
+    """
+    _ = report  # signature parity with scap/girdle helpers
+    idxs = [
+        i
+        for i, p in enumerate(parts)
+        if p.role == "mid_back_soft"
+        and p.kind == "ellipsoid"
+        and p.center is not None
+        and len(p.center) >= 3
+    ]
+    if not idxs:
+        return
+
+    h = m.height_m
+    h_f: float | None = None
+    if h is not None and math.isfinite(float(h)) and float(h) > 0.0:
+        h_f = float(h)
+
+    # B2 SoT: exact name RECIPE_torso_oval_waist (mirror 0066 chest SoT)
+    waist: RecipePart | None = None
+    for p in parts:
+        if p.name == "RECIPE_torso_oval_waist":
+            waist = p
+            break
+    waist_rear: float | None = None
+    waist_z: float | None = None
+    if (
+        waist is not None
+        and waist.center is not None
+        and len(waist.center) >= 3
+        and waist.ry_m is not None
+        and math.isfinite(float(waist.ry_m))
+    ):
+        waist_rear = float(waist.center[1]) + float(waist.ry_m)
+        waist_z = float(waist.center[2])
+
+    # B17 SoT: scap outer rear mean (for anti-cape cap)
+    scap_outers: list[float] = []
+    for p in parts:
+        if (
+            p.role == "scap_soft"
+            and p.kind == "ellipsoid"
+            and p.center is not None
+            and len(p.center) >= 2
+            and p.ry_m is not None
+            and math.isfinite(float(p.ry_m))
+        ):
+            scap_outers.append(float(p.center[1]) + float(p.ry_m))
+    scap_outer_rear: float | None = None
+    if scap_outers:
+        scap_outer_rear = sum(scap_outers) / float(len(scap_outers))
+
+    # B3 plate axes per mid_back (rx floor; ry/rz from rx)
+    for i in idxs:
+        p = parts[i]
+        rx = float(p.rx_m) if p.rx_m is not None and math.isfinite(float(p.rx_m)) else 0.0
+        rz = float(p.rz_m) if p.rz_m is not None and math.isfinite(float(p.rz_m)) else 0.0
+        if h_f is not None:
+            rx = max(rx, MID_BACK_RX_MIN_FRAC_H * h_f)
+        ry = MID_BACK_RY_FRAC_RX * rx
+        if h_f is not None:
+            ry = max(ry, MID_BACK_RY_MIN_FRAC_H * h_f)
+        rz = max(rz, MID_BACK_RZ_FRAC_RX * rx)
+        p.rx_m = rx
+        p.ry_m = ry
+        p.rz_m = rz
+
+    # B6 dual-mean equalize axes first (so B2 uses shared ry)
+    n = float(len(idxs))
+    mean_rx = sum(float(parts[i].rx_m or 0.0) for i in idxs) / n
+    mean_ry = sum(float(parts[i].ry_m or 0.0) for i in idxs) / n
+    mean_rz = sum(float(parts[i].rz_m or 0.0) for i in idxs) / n
+    for i in idxs:
+        parts[i].rx_m = mean_rx
+        parts[i].ry_m = mean_ry
+        parts[i].rz_m = mean_rz
+
+    sh = m.shoulder_hw
+    for i in idxs:
+        p = parts[i]
+        assert p.center is not None
+        c = list(p.center)
+        ry = float(p.ry_m or 0.0)
+
+        # B2 rear Y SoT vs waist rear
+        if waist_rear is not None:
+            cy = waist_rear + MID_BACK_REAR_PAST_M - ry
+        else:
+            # Weaker fallback when no waist oval (AI2 P2-3)
+            pre_y = float(c[1])
+            cy = max(abs(pre_y), 0.90 * ry)
+        # B17 anti-cape: outer must stay below scap outer - margin
+        if scap_outer_rear is not None:
+            outer_cap = scap_outer_rear - MID_BACK_BELOW_SCAP_M
+            if cy + ry > outer_cap:
+                cy = outer_cap - ry
+        c[1] = abs(cy)
+
+        # B4 lateral X
+        name = p.name or ""
+        side: str | None = None
+        if name.endswith("_l"):
+            side = "l"
+        elif name.endswith("_r"):
+            side = "r"
+        if side in ("l", "r") and sh is not None and math.isfinite(float(sh)) and float(sh) > 1e-9:
+            sign = -1.0 if side == "l" else 1.0
+            c[0] = sign * float(sh) * MID_BACK_LAT_FRAC
+
+        # B5 Z: prefer exact waist oval Z; fallback shoulder_z drop
+        if waist_z is not None and math.isfinite(waist_z):
+            c[2] = waist_z
+        elif m.shoulder_z is not None and math.isfinite(float(m.shoulder_z)) and h_f is not None:
+            c[2] = float(m.shoulder_z) - MID_BACK_Z_DROP_FRAC_H * h_f
+
+        p.center = c
+
+    # B6 equalize |cx|, Y, Z (preserve side signs)
+    centers_eq: list[list[float]] = []
+    for i in idxs:
+        ci = parts[i].center
+        assert ci is not None
+        centers_eq.append(list(ci))
+    mean_abs_cx = sum(abs(float(c[0])) for c in centers_eq) / n
+    mean_y = sum(float(c[1]) for c in centers_eq) / n
+    mean_z = sum(float(c[2]) for c in centers_eq) / n
+    for i in idxs:
+        p = parts[i]
+        assert p.center is not None
+        c = list(p.center)
+        name = p.name or ""
+        if name.endswith("_l"):
+            sign = -1.0
+        elif name.endswith("_r"):
+            sign = 1.0
+        else:
+            sign = -1.0 if float(c[0]) < 0.0 else 1.0
+        c[0] = sign * mean_abs_cx
+        c[1] = mean_y
+        c[2] = mean_z
+        p.center = c
+
+    # B14 messages
+    messages.append("mid_back_plane_applied: true")
+    messages.append(f"mid_back_plane_past_m={MID_BACK_REAR_PAST_M}")
+    messages.append(f"mid_back_plane_lat_frac={MID_BACK_LAT_FRAC}")
+    for i in idxs:
+        p = parts[i]
+        assert p.center is not None
+        c = p.center
+        name = p.name or ""
+        if name.endswith("_l"):
+            side_tag = "l"
+        elif name.endswith("_r"):
+            side_tag = "r"
+        else:
+            side_tag = "?"
+        outer = float(c[1]) + float(p.ry_m or 0.0)
+        messages.append(
+            f"mid_back_soft_{side_tag}: c=({float(c[0]):.4f},{float(c[1]):.4f},{float(c[2]):.4f}) "
+            f"rx/ry/rz={float(p.rx_m or 0.0):.4f}/{float(p.ry_m or 0.0):.4f}/"
+            f"{float(p.rz_m or 0.0):.4f} outer_rear={outer:.4f}"
+        )
+
+
 def _build_deltoids(
     report: ProportionReport,
     m: _ResolvedMetrics,
@@ -2400,9 +2588,15 @@ def _build_torso_ovals(
             ry = half_chest * TORSO_OVAL_RY_WAIST_FRAC
             ry_waist = ry
             rx_waist_emit = hw
+            # 0074 B7: mild full3d rear bias (cy only; ry unchanged).
+            if placement == "full3d":
+                center_y = y + TORSO_WAIST_Y_REAR_BIAS_FRAC_RY * ry
         else:  # hip
             ry = half_hip * TORSO_OVAL_RY_HIP_FRAC
             ry_hip = ry
+            # 0074 B8: mild full3d rear bias (cy only; ry unchanged).
+            if placement == "full3d":
+                center_y = y + TORSO_HIP_Y_REAR_BIAS_FRAC_RY * ry
         parts.append(
             RecipePart(
                 name=name,
@@ -2484,6 +2678,13 @@ def _build_torso_ovals(
         messages.append(
             "torso depth taper: chest/waist/hip "
             f"ry={ry_chest:.4f}/{ry_waist:.4f}/{ry_hip:.4f} (anti-snowman)"
+        )
+    # 0074 B14: waist/hip rear bias inventory when full3d applied.
+    if placement == "full3d":
+        messages.append(
+            "torso mid-back: "
+            f"waist_rear_bias={TORSO_WAIST_Y_REAR_BIAS_FRAC_RY} "
+            f"hip_rear_bias={TORSO_HIP_Y_REAR_BIAS_FRAC_RY}"
         )
     # 0065 B12: front pinch inventory (waist/chest rx + chest front/rear poles).
     if (
@@ -3682,13 +3883,21 @@ def _emit_one_profile_part(
                 messages.append(f"{name} skipped: missing joint")
                 return None
 
-    elif role in ("breast_soft", "pec_soft", "scap_soft", "glute_soft"):
-        # Anchor at spine_high / pelvis then offset L/R + Y rule
+    elif role in ("breast_soft", "pec_soft", "scap_soft", "mid_back_soft", "glute_soft"):
+        # Anchor at spine_high / spine_mid / pelvis then offset L/R + Y rule
         if role == "glute_soft":
             anchor = _joint_xyz(joints.get("pelvis"))
             if anchor is None and m.hip_z is not None:
                 hip_y_anchor = m.hip_y if m.hip_y is not None else 0.0
                 anchor = [0.0, hip_y_anchor, m.hip_z]
+        elif role == "mid_back_soft":
+            # 0074 B13: prefer spine_mid (waist-ish Z); fallback spine_high
+            anchor = _joint_xyz(joints.get("spine_mid")) or _joint_xyz(joints.get("spine_high"))
+            chest_y_anchor = m.chest_y if m.chest_y is not None else 0.0
+            if anchor is None and m.chest_z is not None:
+                anchor = [0.0, chest_y_anchor, m.chest_z]
+            elif anchor is None and m.shoulder_z is not None:
+                anchor = [0.0, chest_y_anchor, m.shoulder_z]
         else:
             anchor = _joint_xyz(joints.get("spine_high")) or _joint_xyz(joints.get("spine_mid"))
             chest_y_anchor = m.chest_y if m.chest_y is not None else 0.0
@@ -3747,10 +3956,16 @@ def _emit_one_profile_part(
             half = _half_gap_glute(report, m, template_applied)
             offset = half + max(rx, 0.02) * 0.55
             center[0] = sign * offset
-        elif role in ("trap_soft", "scap_soft", "deltoid_soft", "bicep_soft"):
-            # keep mid/joint x; mild lateral bias for traps/scap if near zero
+        elif role in ("trap_soft", "scap_soft", "mid_back_soft", "deltoid_soft", "bicep_soft"):
+            # keep mid/joint x; mild lateral bias for traps/scap/mid_back if near zero
             if abs(center[0]) < 1e-6:
-                lat = (m.shoulder_hw or 0.15) * (0.35 if role == "trap_soft" else 0.45)
+                if role == "trap_soft":
+                    lat_frac = 0.35
+                elif role == "mid_back_soft":
+                    lat_frac = MID_BACK_LAT_FRAC
+                else:
+                    lat_frac = 0.45
+                lat = (m.shoulder_hw or 0.15) * lat_frac
                 center[0] = sign * lat
         else:
             if abs(center[0]) < 1e-6:
@@ -3765,7 +3980,12 @@ def _emit_one_profile_part(
                 if by is not None:
                     mag = abs(float(by))
             center[1] = -abs(mag) if mag != 0.0 else -abs(ry) * 0.3
-        if "y_back_pos" in rules or role in ("glute_soft", "scap_soft", "trap_soft"):
+        if "y_back_pos" in rules or role in (
+            "glute_soft",
+            "scap_soft",
+            "mid_back_soft",
+            "trap_soft",
+        ):
             mag = abs(center[1]) if center[1] != 0.0 else abs(ry) * 0.4
             if template_applied is not None and role == "glute_soft":
                 gy = template_applied.constants.glute_y_m
@@ -3787,6 +4007,7 @@ def _emit_one_profile_part(
             "trap_soft",
             "pec_soft",
             "scap_soft",
+            "mid_back_soft",
             "bicep_soft",
         )
         and role not in _MIDLINE_EXEMPT_ROLES
@@ -4134,7 +4355,10 @@ def build_blockout_recipe(
     # 0066: scap_soft plate + rear past chest oval (after 0061 girdle; before arm muscle / breast)
     _apply_scap_plane(parts, report, resolved, messages)
 
-    # 0063: bicep + triceps (after profile + 0060/0061/0066; before breast hang)
+    # 0074: mid_back_soft plate + rear past waist oval (after 0066 scap; before arm muscle / breast)
+    _apply_mid_back_plane(parts, report, resolved, messages)
+
+    # 0063: bicep + triceps (after profile + 0060/0061/0066/0074; before breast hang)
     _apply_arm_muscle_softs(parts, messages)
 
     # 0067 B4: athletic tear + sternum on dual breast_soft (before hang Z / tilt)
@@ -6348,6 +6572,14 @@ __all__ = [
     "KNEE_SOFT_RZ_FRAC",
     "LIMB_DISTAL_SOFT_SCALE",
     "MIDLINE_X_TOL_M",
+    "MID_BACK_BELOW_SCAP_M",
+    "MID_BACK_LAT_FRAC",
+    "MID_BACK_REAR_PAST_M",
+    "MID_BACK_RX_MIN_FRAC_H",
+    "MID_BACK_RY_FRAC_RX",
+    "MID_BACK_RY_MIN_FRAC_H",
+    "MID_BACK_RZ_FRAC_RX",
+    "MID_BACK_Z_DROP_FRAC_H",
     "NECK_BASE_RX_FRAC_R",
     "NECK_BASE_RY_FRAC_R",
     "NECK_BASE_RZ_FRAC_R",
@@ -6378,6 +6610,7 @@ __all__ = [
     "THIGH_SPLIT_T",
     "THIGH_TILT_DEG_CAP",
     "TORSO_CHEST_Y_REAR_BIAS_FRAC_RY",
+    "TORSO_HIP_Y_REAR_BIAS_FRAC_RY",
     "TORSO_OVAL_OVERLAP_FLOOR_M",
     "TORSO_OVAL_RY_CHEST_FRAC",
     "TORSO_OVAL_RY_HIP_FRAC",
@@ -6390,6 +6623,7 @@ __all__ = [
     "TORSO_OVAL_RZ_WAIST_FRAC",
     "TORSO_WAIST_PINCH_TAPER_GATE",
     "TORSO_WAIST_RX_MAX_FRAC_CHEST",
+    "TORSO_WAIST_Y_REAR_BIAS_FRAC_RY",
     "TRAP_LAT_FRAC",
     "TRAP_NAPE_Z_BIAS_FRAC_H",
     "TRAP_RX_FLOOR_FRAC_H",
@@ -6417,6 +6651,7 @@ __all__ = [
     "_apply_deltoid_socket_bury",
     "_apply_glute_seat_mass",
     "_apply_join_ready_overlaps",
+    "_apply_mid_back_plane",
     "_apply_neck_column_priors",
     "_apply_neck_diameter_base",
     "_apply_scap_plane",
