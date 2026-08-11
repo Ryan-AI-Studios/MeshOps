@@ -238,6 +238,9 @@ def classify_part_name(name: str) -> tuple[ConstraintRole, Side]:
         return "shoulder_bridge", side
     if "scap" in lower:
         return "torso", side
+    # 0074: mid_back soft plates → torso (after scap token, before generic fallthrough).
+    if "mid_back" in lower:
+        return "torso", side
     # 0028 face kit tokens (B5): after 0027 softs, before generic fallthrough.
     # Prefer *_soft / multi-token forms (trap_soft lesson). Exact substrings.
     if "jaw" in lower:
@@ -1018,6 +1021,7 @@ def _check_calf_slant(
 # (ConstraintRole maps to shoulder_bridge; must not fail axial mid-plane).
 # 0066: scap rear surface plane is intentionally past chest rear (maps to torso);
 # soft exempt so C_axial does not thrash on rear-by-design Y (like clavicle).
+# 0074: mid_back rear plane past waist is intentionally rear-of-mid (maps to torso).
 _AXIAL_EXEMPT_NAME_TOKENS: Final[tuple[str, ...]] = (
     "jaw",
     "brow_soft",
@@ -1032,6 +1036,7 @@ _AXIAL_EXEMPT_NAME_TOKENS: Final[tuple[str, ...]] = (
     "neck_head_fuse",
     "clavicle",
     "scap",
+    "mid_back",
 )
 
 

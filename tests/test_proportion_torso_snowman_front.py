@@ -8,6 +8,7 @@ import pytest
 
 from meshops.proportion.blockout_recipe import (
     TORSO_CHEST_Y_REAR_BIAS_FRAC_RY,
+    TORSO_HIP_Y_REAR_BIAS_FRAC_RY,
     TORSO_OVAL_RY_CHEST_FRAC,
     TORSO_OVAL_RY_HIP_FRAC,
     TORSO_OVAL_RY_WAIST_FRAC,
@@ -15,6 +16,7 @@ from meshops.proportion.blockout_recipe import (
     TORSO_OVAL_RZ_SPAN_FRAC,
     TORSO_WAIST_PINCH_TAPER_GATE,
     TORSO_WAIST_RX_MAX_FRAC_CHEST,
+    TORSO_WAIST_Y_REAR_BIAS_FRAC_RY,
     _build_torso_ovals,
     _ResolvedMetrics,
     _waist_width_at,
@@ -267,7 +269,7 @@ def test_t3_ry_magnitudes_from_fracs() -> None:
 
 
 def test_t4_full3d_chest_rear_bias() -> None:
-    """T4: full3d - chest cy = y_mid + 0.28*ry; waist/hip cy = y_mid."""
+    """T4: full3d - chest/waist/hip cy = y_mid + layer rear bias * ry (0065 + 0074)."""
     y_mid = 0.0
     report = _full_torso_report(chest_mid_y=y_mid)
     pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
@@ -278,10 +280,14 @@ def test_t4_full3d_chest_rear_bias() -> None:
     assert chest.center is not None and chest.ry_m is not None
     ry = float(chest.ry_m)
     assert chest.center[1] == pytest.approx(y_mid + TORSO_CHEST_Y_REAR_BIAS_FRAC_RY * ry, abs=1e-9)
-    assert waist.center is not None
-    assert hip.center is not None
-    assert waist.center[1] == pytest.approx(y_mid, abs=1e-9)
-    assert hip.center[1] == pytest.approx(y_mid, abs=1e-9)
+    assert waist.center is not None and waist.ry_m is not None
+    assert hip.center is not None and hip.ry_m is not None
+    assert waist.center[1] == pytest.approx(
+        y_mid + TORSO_WAIST_Y_REAR_BIAS_FRAC_RY * float(waist.ry_m), abs=1e-9
+    )
+    assert hip.center[1] == pytest.approx(
+        y_mid + TORSO_HIP_Y_REAR_BIAS_FRAC_RY * float(hip.ry_m), abs=1e-9
+    )
     assert chest.placement == "full3d"
 
 

@@ -124,6 +124,20 @@
             "rz_frac_h": 0.045
           },
           "placement_rules": ["at_joint", "y_back_pos", "dual_lr"]
+        },
+        {
+          "role": "mid_back_soft",
+          "kind": "ellipsoid",
+          "side": "both",
+          "count": 1,
+          "parent_joint_id": "spine_mid",
+          "parent_joint_fallback": ["spine_high"],
+          "scale": {
+            "rx_frac_h": 0.038,
+            "ry_frac_h": 0.014,
+            "rz_frac_h": 0.050
+          },
+          "placement_rules": ["at_joint", "y_back_pos", "dual_lr"]
         }
       ]
     },

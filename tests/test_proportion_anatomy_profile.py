@@ -371,7 +371,14 @@ def test_profile__no_profiles_excludes_new_roles() -> None:
     pkg = build_blockout_recipe(report, limbs=True)
     roles = {p.role for p in pkg.parts}
     assert roles <= _BASELINE_ROLES_NO_PROFILE
-    for r in ("trap_soft", "pec_soft", "scap_soft", "bicep_soft", "clavicle"):
+    for r in (
+        "trap_soft",
+        "pec_soft",
+        "scap_soft",
+        "mid_back_soft",
+        "bicep_soft",
+        "clavicle",
+    ):
         assert r not in roles
 
 
@@ -408,6 +415,7 @@ def test_classifier__profile_roles() -> None:
         ("RECIPE_torso_trap", "torso"),  # bare trap must not steal 0019 default torso
         ("RECIPE_trap_soft_l", "neck"),
         ("RECIPE_scap_soft_r", "torso"),
+        ("RECIPE_mid_back_soft_l", "torso"),
         ("RECIPE_bicep_soft_l", "upper_arm"),
         ("RECIPE_clavicle_r", "shoulder_bridge"),
         ("RECIPE_pec_soft_l", "breast"),
