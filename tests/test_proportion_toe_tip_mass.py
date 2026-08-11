@@ -329,30 +329,35 @@ def test_t5_foot_constraints_pass() -> None:
 
 
 def test_t5b_snapshot_c_toe_forward_and_sole_z() -> None:
-    """T5b: snapshot C_toe_forward / C_toe_sole_z metrics (tip-pad geometry)."""
+    """T5b: C_toe_* metrics use tip-pad geometry (B16 min-Y SoT)."""
     report = _product_feet_report()
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     result = validate_constraints(pkg, report=report)
     by_id = {r.id: r for r in result.rules}
 
+    # Tip pads share tip_y / tip_z across digits; min-Y SoT is a tip pad (B16).
+    pad_l = _toe_tip(pkg.parts, 3, side="l")
+    pad_r = _toe_tip(pkg.parts, 3, side="r")
+    assert pad_l.center is not None and pad_r.center is not None
+    expect_y_l = float(pad_l.center[1])
+    expect_y_r = float(pad_r.center[1])
+    expect_z_l = float(pad_l.center[2])
+    expect_z_r = float(pad_r.center[2])
+
     forward = by_id["C_toe_forward_of_heel"]
     assert forward.status == "pass", forward.message
     f_metrics = forward.metrics or {}
-    if f_metrics:
-        assert any(
-            "toe" in k.lower() or "heel" in k.lower() or "y" in k.lower() or "delta" in k.lower()
-            for k in f_metrics
-        ), f"C_toe_forward metrics unexpected: {f_metrics}"
+    assert "toe_y_l" in f_metrics and "toe_y_r" in f_metrics, f_metrics
+    assert float(f_metrics["toe_y_l"]) == pytest.approx(expect_y_l, abs=1e-6)
+    assert float(f_metrics["toe_y_r"]) == pytest.approx(expect_y_r, abs=1e-6)
+    assert float(f_metrics["toe_y_l"]) < float(f_metrics["heel_y_l"]) - EPS
 
     sole = by_id["C_toe_sole_z"]
     assert sole.status == "pass", sole.message
     s_metrics = sole.metrics or {}
-    if s_metrics:
-        assert any(
-            "z" in k.lower() or "toe" in k.lower() or "plate" in k.lower() for k in s_metrics
-        ), f"C_toe_sole_z metrics empty of z/toe/plate keys: {s_metrics}"
-    else:
-        assert "toe" in sole.message.lower() or "plate" in sole.message.lower()
+    assert "toe_z_l" in s_metrics and "toe_z_r" in s_metrics, s_metrics
+    assert float(s_metrics["toe_z_l"]) == pytest.approx(expect_z_l, abs=1e-6)
+    assert float(s_metrics["toe_z_r"]) == pytest.approx(expect_z_r, abs=1e-6)
 
 
 # ---------------------------------------------------------------------------
