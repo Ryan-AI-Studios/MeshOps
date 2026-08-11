@@ -1961,12 +1961,14 @@ def _apply_mid_back_plane(
             # Weaker fallback when no waist oval (AI2 P2-3)
             pre_y = float(c[1])
             cy = max(abs(pre_y), 0.90 * ry)
-        # B17 anti-cape: outer must stay below scap outer - margin
+        # B17 anti-cape: outer must stay below scap outer - margin.
+        # Do NOT abs(cy) after the pull — a degenerate negative cy would flip
+        # positive and re-expand outer past the scap cap (Codex P3-001).
         if scap_outer_rear is not None:
             outer_cap = scap_outer_rear - MID_BACK_BELOW_SCAP_M
             if cy + ry > outer_cap:
                 cy = outer_cap - ry
-        c[1] = abs(cy)
+        c[1] = float(cy)
 
         # B4 lateral X
         name = p.name or ""

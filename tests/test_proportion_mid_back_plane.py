@@ -498,6 +498,28 @@ def test_t7_anti_cape_vs_scap() -> None:
         assert outer <= scap_outer - MID_BACK_BELOW_SCAP_M + 1e-6
 
 
+def test_t7b_anti_cape_no_abs_reexpand() -> None:
+    """T7b: anti-cape must not abs(cy) — negative pull would re-expand past cap."""
+    # Tiny scap outer + large ry → cy = outer_cap - ry can go negative.
+    # Old abs(cy) would flip positive and break outer <= scap_outer - margin.
+    scaps = _product_like_scaps(cy=0.02, ry=0.01)  # outer = 0.03
+    scap_outer = 0.03
+    waist = _waist_oval(cy=0.05, ry=0.05)  # rear 0.10
+    parts = [*_product_like_mid_backs(rx=0.10, ry=0.05), waist, *scaps]
+    msgs: list[str] = []
+    _apply_mid_back_plane(parts, _empty_report(), _empty_metrics(), msgs)
+    for p in parts:
+        if p.role != "mid_back_soft":
+            continue
+        assert p.center is not None and p.ry_m is not None
+        cy = float(p.center[1])
+        ry = float(p.ry_m)
+        outer = cy + ry
+        assert outer <= scap_outer - MID_BACK_BELOW_SCAP_M + 1e-6
+        # If abs had been applied, outer would be |cy|+ry and exceed cap.
+        assert outer != abs(cy) + ry or cy >= 0.0
+
+
 # ---------------------------------------------------------------------------
 # T8-T11 integration / fence / messages
 # ---------------------------------------------------------------------------
