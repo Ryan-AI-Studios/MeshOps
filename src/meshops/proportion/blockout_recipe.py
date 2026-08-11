@@ -201,6 +201,7 @@ _NECK_HEAD_ATTACHED_TOKENS: Final[tuple[str, ...]] = (
     "nose_soft",
     "ear_soft",
     "lip_soft",
+    "cheek_soft",
     "hair_mass",
     "neck_head_fuse",
 )
@@ -265,13 +266,14 @@ RecipeRole = Literal[
     "scap_soft",
     "bicep_soft",
     "clavicle",
-    # 0028 face / hair / neckline
+    # 0028 face / hair / neckline; 0058 cheek_soft
     "jaw",
     "brow_soft",
     "eye_soft",
     "nose_soft",
     "ear_soft",
     "lip_soft",
+    "cheek_soft",
     "hair_mass",
     "neckline",
     "sternomastoid_soft",

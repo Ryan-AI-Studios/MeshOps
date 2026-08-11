@@ -34,7 +34,6 @@ _EYE_Z_FRAC: Final[float] = 0.50
 _BROW_Z_FRAC: Final[float] = 0.67
 _NOSE_BASE_Z_FRAC: Final[float] = 0.33
 _LIP_Z_FRAC: Final[float] = 0.20  # authoring choice, not Loomis third
-_NOSE_TIP_Y_FRAC_RY: Final[float] = 0.15
 _EYE_RADIUS_FRAC_H: Final[float] = 0.08
 # 0055 jaw soft mass ellipsoid; 0057 chin-strap polish (public; use HeadBounds.H for Z fracs)
 JAW_RX_FRAC_HEAD_RX: Final[float] = 0.74  # was 0.85 — 0057
@@ -43,6 +42,37 @@ JAW_RZ_FRAC_H: Final[float] = 0.15
 JAW_Z_CENTER_FRAC_H: Final[float] = 0.13
 JAW_Y_BIAS_FRAC_RY: Final[float] = 0.08  # was 0.05 — 0057
 JAW_X_BULGE_ALLOW_M: Final[float] = 0.006  # was 0.015 — 0057
+# Jaw / legacy face plane (keep jaw 0057 placement; features use FEATURE_* plane)
+_JAW_FACE_Y_FRAC_RY: Final[float] = 0.40
+# 0058 face feature softs (public — export in __all__, P2-2)
+# FEATURE_FACE_Y: D7 Codex P1 — was 0.40 (features buried inside head shell).
+# Near-surface plane so eye/brow/lip/cheek read on solid workbench multi-view.
+FEATURE_FACE_Y_FRAC_RY: Final[float] = 0.90
+EYE_RX_FRAC_R: Final[float] = 1.00  # stay
+EYE_RY_FRAC_R: Final[float] = 0.95  # was 0.85 (B15 D7 left pad) / was 0.25
+EYE_RZ_FRAC_R: Final[float] = 0.45  # was 0.70
+
+NOSE_RX_FRAC_H: Final[float] = 0.045
+NOSE_RY_FRAC_H: Final[float] = 0.055
+NOSE_RZ_FRAC_H: Final[float] = 0.040
+# D7 surface-readable tip: was 0.15 (deep embed; invisible on solid head).
+# tip_y = head.y - NOSE_TIP_Y_FRAC_RY * head.ry; center_y = tip_y + nose_ry
+# front surface = center_y - nose_ry = tip_y; center_z ≈ nose_base_z - 0.01*H
+NOSE_TIP_Y_FRAC_RY: Final[float] = 0.98
+
+LIP_RX_FRAC_H: Final[float] = 0.12
+LIP_RY_FRAC_H: Final[float] = 0.035  # was 0.02
+LIP_RZ_FRAC_H: Final[float] = 0.025  # was 0.015
+
+BROW_R_FRAC_H: Final[float] = 0.028  # was 0.015
+BROW_HALF_LEN_FRAC_EYE_R: Final[float] = 1.1  # stay
+
+CHEEK_RX_FRAC_HEAD_RX: Final[float] = 0.28
+CHEEK_RY_FRAC_HEAD_RY: Final[float] = 0.22
+CHEEK_RZ_FRAC_H: Final[float] = 0.06
+CHEEK_X_FRAC_HEAD_RX: Final[float] = 0.55
+CHEEK_Z_MIX: Final[float] = 0.50  # blend eye_z ↔ nose_base_z
+CHEEK_Y_BIAS_FRAC_RY: Final[float] = 0.05
 _HAIR_SHORT_RZ_FRAC: Final[float] = 0.25
 _BUN_R_FRAC_H: Final[float] = 0.12
 _LONG_PROXY_LEN_FRAC_H: Final[float] = 0.45
@@ -347,11 +377,12 @@ def _build_face_features(
     brow_z = z_chin + _BROW_Z_FRAC * h
     nose_base_z = z_chin + _NOSE_BASE_Z_FRAC * h
     lip_z = z_chin + _LIP_Z_FRAC * h
-    # Face forward -Y of head center
-    face_y = y - 0.40 * ry
+    # Jaw keeps legacy embed plane (0057 fence). Feature softs use near-surface plane (D7).
+    jaw_face_y = y - _JAW_FACE_Y_FRAC_RY * ry
+    feature_face_y = y - FEATURE_FACE_Y_FRAC_RY * ry
     # Inter-eye gap ~ one eye width; half-sep = 2 * eye_r
     eye_half_sep = 2.0 * eye_r
-    nose_tip_y = y - _NOSE_TIP_Y_FRAC_RY * ry
+    nose_tip_y = y - NOSE_TIP_Y_FRAC_RY * ry
 
     pj_head = _parent_joint("head", ["chin", "crown"], skeleton, role="eye_soft", messages=messages)
     # Prefer head for features; jaw prefers chin
@@ -373,7 +404,7 @@ def _build_face_features(
     jaw_ry = JAW_RY_FRAC_HEAD_RY * ry
     jaw_rz = JAW_RZ_FRAC_H * h
     jaw_z_c = z_chin + JAW_Z_CENTER_FRAC_H * h
-    jaw_y = face_y + JAW_Y_BIAS_FRAC_RY * ry
+    jaw_y = jaw_face_y + JAW_Y_BIAS_FRAC_RY * ry
     parts.append(
         _ellipsoid(
             "RECIPE_jaw",
@@ -396,52 +427,64 @@ def _build_face_features(
         bulge = float(jaw_rx) - head_x
         messages.append(f"face: jaw_vs_head_x_bulge_m={bulge:.4f} (allow={JAW_X_BULGE_ALLOW_M})")
 
-    # Brows L/R - thin horizontal capsules
-    brow_half_len = 1.1 * eye_r
-    brow_r = 0.015 * h
+    # Brows L/R - horizontal capsules (0058: BROW_R_FRAC_H floor)
+    brow_half_len = BROW_HALF_LEN_FRAC_EYE_R * eye_r
+    brow_r = BROW_R_FRAC_H * h
     for side, sx in (("l", -1.0), ("r", 1.0)):
         cx = sx * eye_half_sep
         parts.append(
             _capsule(
                 f"RECIPE_brow_soft_{side}",
                 "brow_soft",
-                [cx - brow_half_len, face_y, brow_z],
-                [cx + brow_half_len, face_y, brow_z],
+                [cx - brow_half_len, feature_face_y, brow_z],
+                [cx + brow_half_len, feature_face_y, brow_z],
                 brow_r,
                 placement=placement,
                 parent_joint=pj_feat,
             )
         )
+    messages.append(f"face: brow soft capsule r={brow_r:.4f} (floor frac={BROW_R_FRAC_H})")
 
-    # Eyes L/R - disk-ish ellipsoids (thin ry)
+    # Eyes L/R - product-like orbital pads (0058: depth ≥ height; near-surface plane)
+    eye_rx = EYE_RX_FRAC_R * eye_r
+    eye_ry = EYE_RY_FRAC_R * eye_r
+    eye_rz = EYE_RZ_FRAC_R * eye_r
     for side, sx in (("l", -1.0), ("r", 1.0)):
         parts.append(
             _ellipsoid(
                 f"RECIPE_eye_soft_{side}",
                 "eye_soft",
-                [sx * eye_half_sep, face_y, eye_z],
-                eye_r,
-                0.25 * eye_r,
-                0.70 * eye_r,
+                [sx * eye_half_sep, feature_face_y, eye_z],
+                eye_rx,
+                eye_ry,
+                eye_rz,
                 placement=placement,
                 parent_joint=pj_feat,
             )
         )
+    messages.append(f"face: eye soft axes rx={eye_rx:.4f} ry={eye_ry:.4f} rz={eye_rz:.4f}")
 
-    # Nose - capsule base -> tip (-Y)
+    # Nose - short wedge ellipsoid (0058; front surface Y = tip_y near head front)
+    nose_ry = NOSE_RY_FRAC_H * h
+    nose_rx = NOSE_RX_FRAC_H * h
+    nose_rz = NOSE_RZ_FRAC_H * h
+    nose_center_y = nose_tip_y + nose_ry
+    nose_center_z = nose_base_z - 0.01 * h
     parts.append(
-        _capsule(
+        _ellipsoid(
             "RECIPE_nose_soft",
             "nose_soft",
-            [0.0, y - 0.05 * ry, nose_base_z],
-            [0.0, nose_tip_y, nose_base_z - 0.02 * h],
-            0.025 * h,
+            [0.0, nose_center_y, nose_center_z],
+            nose_rx,
+            nose_ry,
+            nose_rz,
             placement=placement,
             parent_joint=pj_feat,
         )
     )
+    messages.append(f"face: nose soft ellipsoid rx={nose_rx:.4f} ry={nose_ry:.4f} rz={nose_rz:.4f}")
 
-    # Ears L/R - span brow→nose base Z, lateral ±rx
+    # Ears L/R - span brow→nose base Z, lateral ±rx (0028 stay)
     ear_z = (brow_z + nose_base_z) / 2.0
     ear_rz = max((brow_z - nose_base_z) / 2.0, 0.04 * h)
     ear_rx = 0.08 * h
@@ -460,18 +503,45 @@ def _build_face_features(
             )
         )
 
-    # Lip - closed-mouth thin bar (B16)
+    # Lip - closed-mouth readable bar (0058 floors; near-surface plane)
+    lip_rx = LIP_RX_FRAC_H * h
+    lip_ry = LIP_RY_FRAC_H * h
+    lip_rz = LIP_RZ_FRAC_H * h
     parts.append(
         _ellipsoid(
             "RECIPE_lip_soft",
             "lip_soft",
-            [0.0, face_y, lip_z],
-            0.12 * h,
-            0.02 * h,
-            0.015 * h,
+            [0.0, feature_face_y, lip_z],
+            lip_rx,
+            lip_ry,
+            lip_rz,
             placement=placement,
             parent_joint=pj_feat,
         )
+    )
+    messages.append(f"face: lip soft axes ry={lip_ry:.4f} rz={lip_rz:.4f}")
+
+    # Cheek - mild single pad per side (0058; not multi-pad photoreal)
+    cheek_rx = CHEEK_RX_FRAC_HEAD_RX * rx
+    cheek_ry = CHEEK_RY_FRAC_HEAD_RY * ry
+    cheek_rz = CHEEK_RZ_FRAC_H * h
+    cheek_z = CHEEK_Z_MIX * eye_z + (1.0 - CHEEK_Z_MIX) * nose_base_z
+    cheek_y = feature_face_y + CHEEK_Y_BIAS_FRAC_RY * ry
+    for side, sx in (("l", -1.0), ("r", 1.0)):
+        parts.append(
+            _ellipsoid(
+                f"RECIPE_cheek_soft_{side}",
+                "cheek_soft",
+                [sx * CHEEK_X_FRAC_HEAD_RX * rx, cheek_y, cheek_z],
+                cheek_rx,
+                cheek_ry,
+                cheek_rz,
+                placement=placement,
+                parent_joint=pj_feat,
+            )
+        )
+    messages.append(
+        f"face: cheek soft pads present L/R rx={cheek_rx:.4f} ry={cheek_ry:.4f} rz={cheek_rz:.4f}"
     )
 
     return parts
@@ -800,7 +870,19 @@ def build_face_parts(
 
 
 __all__ = [
+    "BROW_HALF_LEN_FRAC_EYE_R",
+    "BROW_R_FRAC_H",
+    "CHEEK_RX_FRAC_HEAD_RX",
+    "CHEEK_RY_FRAC_HEAD_RY",
+    "CHEEK_RZ_FRAC_H",
+    "CHEEK_X_FRAC_HEAD_RX",
+    "CHEEK_Y_BIAS_FRAC_RY",
+    "CHEEK_Z_MIX",
+    "EYE_RX_FRAC_R",
+    "EYE_RY_FRAC_R",
+    "EYE_RZ_FRAC_R",
     "FACE_KIT_SKIP_BOUNDS",
+    "FEATURE_FACE_Y_FRAC_RY",
     "HAIR_TIERS",
     "JAW_RX_FRAC_HEAD_RX",
     "JAW_RY_FRAC_HEAD_RY",
@@ -808,7 +890,14 @@ __all__ = [
     "JAW_X_BULGE_ALLOW_M",
     "JAW_Y_BIAS_FRAC_RY",
     "JAW_Z_CENTER_FRAC_H",
+    "LIP_RX_FRAC_H",
+    "LIP_RY_FRAC_H",
+    "LIP_RZ_FRAC_H",
     "NECKLINE_TIERS",
+    "NOSE_RX_FRAC_H",
+    "NOSE_RY_FRAC_H",
+    "NOSE_RZ_FRAC_H",
+    "NOSE_TIP_Y_FRAC_RY",
     "HeadBounds",
     "build_face_parts",
     "head_part_from_bounds",
