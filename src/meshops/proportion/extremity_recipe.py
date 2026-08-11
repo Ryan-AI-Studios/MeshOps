@@ -34,16 +34,30 @@ SOLE_THICKNESS_FRAC_H: Final[float] = 0.025  # was _PLATE_THICKNESS_FRAC_H 0.02
 SOLE_RZ_FRAC_OF_THICKNESS: Final[float] = 0.70  # was bare 0.55
 SOLE_RZ_FLOOR_M: Final[float] = 0.016  # was 0.012
 _HAND_LEN_FALLBACK_FRAC_H: Final[float] = 0.11
-# Hand constants — 0048 bulk + 0064 palm pad / digit taper (mitten fence unchanged)
+# Hand constants — 0048 bulk + 0064 palm pad / 0079 digit sausage (mitten fence unchanged)
 _PALM_WIDTH_FRAC_HAND: Final[float] = 0.62
 _PALM_THICKNESS_FRAC_HAND: Final[float] = 0.36  # 0064 B1 (was 0.30)
 _PALM_PAD_RY_FRAC_TH: Final[float] = 0.78  # 0064 B2 (was 0.65)
 _PALM_LEN_FRAC_HAND: Final[float] = 0.48
 _MITTEN_LEN_FRAC_HAND: Final[float] = 0.50
 _MITTEN_R_FRAC_PALM: Final[float] = 0.72  # fat mitt, not thin stick — DO NOT CHANGE
-# 0064 B3/B4 digit taper (replace uniform 1/5)
-_FINGER_SEG_FRACS_HAND: Final[tuple[float, float, float]] = (0.24, 0.18, 0.13)  # sum 0.55
-_FINGER_DISTAL_R_SCALE: Final[float] = 1.05  # distal seg only
+# 0079 hand digit sausage freezes (B1-B5, B16)
+_FINGER_SEG_FRACS_HAND: Final[tuple[float, float, float]] = (0.25, 0.18, 0.12)  # sum 0.55
+_FINGER_R_SCALES_SEG: Final[tuple[float, float, float]] = (1.00, 0.90, 0.82)
+_FINGER_DIGIT_L_SCALE: Final[dict[str, float]] = {
+    "index": 0.96,
+    "middle": 1.00,
+    "ring": 0.96,
+    "pinky": 0.88,
+}
+_FINGER_DIGIT_R_SCALE: Final[dict[str, float]] = {
+    "index": 0.94,
+    "middle": 1.00,
+    "ring": 0.96,
+    "pinky": 0.86,
+}
+_THUMB_DISTAL_L_SCALE: Final[float] = 0.78
+_THUMB_DISTAL_R_SCALE: Final[float] = 0.88
 _FINGER_R_FRAC_PALM: Final[float] = 0.16
 _FINGER_R_FLOOR_M: Final[float] = 0.006
 _FINGER_R_CAP_VS_HALF_W: Final[float] = 0.55
@@ -928,13 +942,18 @@ def build_hand_parts(
                 messages=msgs,
             )
         )
-    # B11: bulk message once when full digits emitted
+    # B10 / 0079: bulk + taper messages once when full digits emitted
     if fingers == "full" and parts:
         msgs.append(
             f"hand bulk: full digits r_frac={_FINGER_R_FRAC_PALM} "
             f"palm_w={_PALM_WIDTH_FRAC_HAND} splay={_FINGER_SPLAY_FRAC_HALF_W} "
             f"palm_th={_PALM_THICKNESS_FRAC_HAND} pad_ry={_PALM_PAD_RY_FRAC_TH} "
-            f"segs={_FINGER_SEG_FRACS_HAND} dist_r={_FINGER_DISTAL_R_SCALE} (anti-stick)"
+            f"segs={_FINGER_SEG_FRACS_HAND} anti-stick"
+        )
+        msgs.append(
+            f"hand taper: r_scales={_FINGER_R_SCALES_SEG} "
+            f"digit_L={dict(_FINGER_DIGIT_L_SCALE)} digit_R={dict(_FINGER_DIGIT_R_SCALE)} "
+            f"thumb_distal={_THUMB_DISTAL_L_SCALE}/{_THUMB_DISTAL_R_SCALE} anti-sausage"
         )
     return parts
 
@@ -1071,23 +1090,26 @@ def _build_hand_side(
         )
         return out
 
-    # fingers == full: 4 fingers x 3 capsules + thumb x 2 (0048 bulk + 0064 taper)
+    # fingers == full: 4 fingers x 3 capsules + thumb x 2 (0048 bulk + 0079 sausage)
     fr = min(
         max(_FINGER_R_FRAC_PALM * palm_w, _FINGER_R_FLOOR_M),
         _FINGER_R_CAP_VS_HALF_W * half_w,
     )
     # Lateral splay in X (B12: scale with bulk so grooves stay visible)
     splay = half_w * _FINGER_SPLAY_FRAC_HALF_W
-    # Perpendicular-ish offset in X for finger rows; phalanx L taper PP>MP>DP
+    # Per-digit L/R scales + per-seg r taper; B16 post-scale r floor
     for fi, fname in enumerate(_FINGER_NAMES):
+        digit_L = _FINGER_DIGIT_L_SCALE[fname]
+        digit_R = _FINGER_DIGIT_R_SCALE[fname]
         t = (fi - 1.5) / 1.5  # -1 ... +1-ish
         # Mirror lateral splay: left flips sign so fingers fan correctly in +X world
         dx = (-t if side == "l" else t) * splay * 0.5
         base = _add([palm_c[0] + dx, palm_c[1], palm_c[2]], axis, 0.12 * hand_len)
         along = 0.0
         for si in range(3):
-            seg_l = _FINGER_SEG_FRACS_HAND[si] * hand_len
-            r = fr * (_FINGER_DISTAL_R_SCALE if si == 2 else 1.0)
+            seg_l = _FINGER_SEG_FRACS_HAND[si] * hand_len * digit_L
+            r = fr * _FINGER_R_SCALES_SEG[si] * digit_R
+            r = max(r, _FINGER_R_FLOOR_M)  # B16 post-scale floor
             p0 = _add(base, axis, along)
             p1 = _add(base, axis, along + seg_l)
             along += seg_l
@@ -1102,9 +1124,11 @@ def _build_hand_side(
                 )
             )
 
-    # Thumb: 2 segs, bulk + lateral base + palm-plane pitch (B5 / AI1 P2)
-    thumb_seg = _THUMB_SEG_FRAC_HAND * hand_len
-    thumb_r = fr * _THUMB_R_SCALE_VS_FINGER
+    # Thumb: 2 segs, bulk + distal taper (B5) + lateral base + palm-plane pitch
+    thumb_seg0 = _THUMB_SEG_FRAC_HAND * hand_len
+    thumb_seg1 = thumb_seg0 * _THUMB_DISTAL_L_SCALE
+    thumb_r0 = max(fr * _THUMB_R_SCALE_VS_FINGER, _FINGER_R_FLOOR_M)
+    thumb_r1 = max(thumb_r0 * _THUMB_DISTAL_R_SCALE, _FINGER_R_FLOOR_M)
     oppose = _THUMB_OPPOSE_LATERAL if side == "l" else -_THUMB_OPPOSE_LATERAL
     # Palm-plane pitch: +Y when axis primarily -Z (A-pose hang) so thumb swings across palm front
     pitch = _THUMB_PALM_PITCH  # positive Y component
@@ -1119,22 +1143,27 @@ def _build_hand_side(
     # (open decision: geometry raise, not threshold-only harden).
     lat = half_w * _THUMB_BASE_LATERAL_FRAC_HALF_W
     outer_dx = splay * 0.5
-    lat = max(lat, outer_dx + 0.35 * (fr + thumb_r))
+    lat = max(lat, outer_dx + 0.35 * (fr + thumb_r0))
     thumb_base = _add(
         [palm_c[0] + (lat if side == "l" else -lat), palm_c[1], palm_c[2]],
         thumb_dir,
         0.05 * hand_len,
     )
+    thumb_lens = (thumb_seg0, thumb_seg1)
+    thumb_rs = (thumb_r0, thumb_r1)
+    along_t = 0.0
     for si in range(2):
-        p0 = _add(thumb_base, thumb_dir, si * thumb_seg)
-        p1 = _add(thumb_base, thumb_dir, (si + 1) * thumb_seg)
+        seg_l = thumb_lens[si]
+        p0 = _add(thumb_base, thumb_dir, along_t)
+        p1 = _add(thumb_base, thumb_dir, along_t + seg_l)
+        along_t += seg_l
         out.append(
             _capsule(
                 f"RECIPE_thumb_soft_{si}_{side}",
                 "thumb_soft",
                 p0,
                 p1,
-                thumb_r,
+                thumb_rs[si],
                 parent_joint=pj_digit,
             )
         )
@@ -1183,10 +1212,14 @@ __all__ = [
     "TOE_TIP_PAD_SCALE",
     "TOE_TIP_PAST_FRAC",
     "TOE_WEDGE_RZ_FRAC_SOLE",
-    "_FINGER_DISTAL_R_SCALE",
+    "_FINGER_DIGIT_L_SCALE",
+    "_FINGER_DIGIT_R_SCALE",
+    "_FINGER_R_SCALES_SEG",
     "_FINGER_SEG_FRACS_HAND",
     "_PALM_PAD_RY_FRAC_TH",
     "_PALM_THICKNESS_FRAC_HAND",
+    "_THUMB_DISTAL_L_SCALE",
+    "_THUMB_DISTAL_R_SCALE",
     "FingerTier",
     "ToeTier",
     "apply_foot_length_visual_floor",
