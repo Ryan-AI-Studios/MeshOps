@@ -281,9 +281,9 @@ def test_t5_c_no_dup_with_arms_elbow_bicep_triceps() -> None:
             "RECIPE_elbow_soft_l",
             kind="ellipsoid",
             center=[-0.25, 0.05, 1.10],
-            rx_m=0.0424,
-            ry_m=0.0424,
-            rz_m=0.0424,
+            rx_m=0.0470,
+            ry_m=0.0423,
+            rz_m=0.0367,
         ),
         _part(
             "RECIPE_bicep_soft_l",

@@ -93,9 +93,13 @@ FA_PROX_SHAFT_SCALE: Final[float] = 1.00  # B4
 FA_DIST_SHAFT_SCALE: Final[float] = 0.78  # B5
 FA_SPLIT_T: Final[float] = 0.50  # B6 / B15
 _ARM_SHAFT_R_FLOOR: Final[float] = 1e-4
-ELBOW_SOFT_SCALE: Final[float] = 1.10  # B10 — readable bulge, NOT 0.55
+ELBOW_SOFT_SCALE: Final[float] = 1.22  # 0081 B1 — was 1.10; must clear UA prox
+ELBOW_SOFT_RY_FRAC: Final[float] = 0.90  # 0081 B2 — world-axis de-sphere
+ELBOW_SOFT_RZ_FRAC: Final[float] = 0.78  # 0081 B2 — world-axis de-sphere
+ELBOW_SOFT_MAX_SCALE: Final[float] = 1.28  # 0081 B15 anti-Michelin cap vs adj
 ELBOW_SOFT_MIN_FRAC_H: Final[float] = 0.016
-WRIST_SOFT_PALM_RX_FRAC: Final[float] = 0.85  # B11
+WRIST_SOFT_PALM_RX_FRAC: Final[float] = 0.95  # 0081 B8 — was 0.85
+WRIST_SOFT_FA_DIST_SCALE: Final[float] = 1.20  # 0081 B9 — FA safety net
 # 0063 — arm muscle softs (bicep / triceps)
 BICEP_ARM_RX_SCALE: Final[float] = 0.78
 BICEP_RY_FRAC: Final[float] = 0.90
@@ -107,13 +111,14 @@ TRICEP_RY_FRAC: Final[float] = 0.88
 TRICEP_RZ_FRAC: Final[float] = 0.92
 TRICEP_REAR_PAST_M: Final[float] = 0.010
 TRICEP_ALONG_T: Final[float] = 0.50
-# --- Knee joint mass (0045 retune → 0071) ---
-KNEE_SOFT_FRAC: Final[float] = 1.10  # B1: scale vs SEAM adj (not full-leg max)
+# --- Knee joint mass (0045 retune → 0071 → 0081) ---
+KNEE_SOFT_FRAC: Final[float] = 1.18  # 0081 B6 — was 1.10; scale vs SEAM adj
 KNEE_SOFT_MIN_FRAC_H: Final[float] = 0.018  # B2: stature floor
 KNEE_SOFT_RY_FRAC: Final[float] = 0.90  # B3: depth de-sphere
-KNEE_SOFT_RZ_FRAC: Final[float] = 0.75  # B4: vertical de-sphere
+KNEE_SOFT_RZ_FRAC: Final[float] = 0.95  # 0081 B7 — was 0.75; axial sleeve (rz may > ry)
 KNEE_SOFT_OUTER_FRAC_RX: Final[float] = 0.06  # B5: outer center bias (* rx, signed)
 KNEE_SOFT_REAR_FRAC_RY: Final[float] = 0.10  # B6: rear +Y center bias (* ry)
+KNEE_SOFT_MAX_VS_THIGH_PROX: Final[float] = 1.25  # 0081 B15 anti-Michelin vs thigh prox
 # 0046 B1: deltoid scale vs upper_arm half-width (profile + base).
 # 0060: keep bulk; retune axes/outer + distal socket bury (X-Z only).
 DELT_ARM_RADIUS_SCALE: Final[float] = 1.35
@@ -3254,7 +3259,7 @@ def _append_knee_softs(
     height_m: float | None,
     messages: list[str],
 ) -> None:
-    """0045 B5 + 0071: seam-scaled anisotropic knee softs after limbs emit (pre-adduction)."""
+    """0045 B5 + 0071 + 0081: seam-scaled anisotropic knee softs (clamp base then aniso)."""
     for side in ("l", "r"):
         center_place = _knee_center_and_placement(report, side, skeleton)
         if center_place is None:
@@ -3267,6 +3272,11 @@ def _append_knee_softs(
             base = max(base, floor) if base is not None else floor
         if base is None:
             continue
+        # 0081 B15: clamp base vs thigh prox before aniso (never clamp rx after)
+        by = {p.name: p for p in parts}
+        thigh = by.get(f"RECIPE_limb_thigh_{side}")
+        if thigh is not None and thigh.radius_m is not None:
+            base = min(base, KNEE_SOFT_MAX_VS_THIGH_PROX * float(thigh.radius_m))
         rx = max(base, 1e-4)
         ry = max(base * KNEE_SOFT_RY_FRAC, 1e-4)
         rz = max(base * KNEE_SOFT_RZ_FRAC, 1e-4)
@@ -3360,10 +3370,10 @@ def _append_elbow_softs(
     height_m: float | None,
     messages: list[str],
 ) -> None:
-    """0062 B10: post-pass elbow soft ellipsoids (readable joint > adjacent shafts).
+    """0062 B10 + 0081: elbow soft ellipsoids past adjacent shafts; de-sphere ry/rz.
 
     Center from arm seam (ua_dist.p1 / ua.p1 / fa.p0) - not landmark-only front_plane
-    y=0 that can desync from full3d arms (AI2 P2-2). Scale 1.10x max adj (AI2 P2-1).
+    y=0 that can desync from full3d arms (AI2 P2-2). Scale 1.22x max adj with B15 cap.
     """
     _ = report, skeleton  # reserved for future landmark fallback; seam-first is binding
     for side in ("l", "r"):
@@ -3392,9 +3402,14 @@ def _append_elbow_softs(
         if not adj_cands:
             continue
         adj = max(adj_cands)
-        r = ELBOW_SOFT_SCALE * adj  # 1.10x - must exceed adjacent shafts
+        # 0081 B15: r = min(max(scale*adj, floor_H), MAX*adj) then aniso
+        r = ELBOW_SOFT_SCALE * adj
         if height_m is not None and height_m > 0:
             r = max(r, ELBOW_SOFT_MIN_FRAC_H * float(height_m))
+        r = min(r, ELBOW_SOFT_MAX_SCALE * adj)
+        rx = max(r, 1e-4)
+        ry = max(r * ELBOW_SOFT_RY_FRAC, 1e-4)
+        rz = max(r * ELBOW_SOFT_RZ_FRAC, 1e-4)
         placement: Literal["full3d", "front_plane"] = (
             "full3d" if math.isfinite(float(seam[1])) else "front_plane"
         )
@@ -3406,21 +3421,21 @@ def _append_elbow_softs(
                 role="limb_segment",
                 kind="ellipsoid",
                 center=seam,
-                rx_m=r,
-                ry_m=r,
-                rz_m=r,
+                rx_m=rx,
+                ry_m=ry,
+                rz_m=rz,
                 placement=placement,
                 label=name,
             ),
         )
-        messages.append(f"elbow_soft_{side}: r={r:.4f}")
+        messages.append(f"elbow_soft_{side}: rx={rx:.4f} ry={ry:.4f} rz={rz:.4f}")
 
 
 def _apply_wrist_palm_floor(
     parts: list[RecipePart],
     messages: list[str],
 ) -> None:
-    """0062 B11: raise wrist dist_soft to max(current, fa_dist, 0.85*palm.rx).
+    """0062 B11 + 0081: raise wrist dist_soft to max(current, fa_dist*1.20, palm*0.95).
 
     Re-pin soft center to arm_taper_dist_fa.p1 (true wrist) when present.
     """
@@ -3431,25 +3446,37 @@ def _apply_wrist_palm_floor(
             continue
         fa_dist = by.get(f"RECIPE_arm_taper_dist_fa_{side}")
         palm = by.get(f"RECIPE_palm_{side}")
-        r = 0.0
-        if soft.rx_m is not None:
-            r = max(r, float(soft.rx_m))
+        r = float(soft.rx_m) if soft.rx_m is not None else 0.0
+        prev = r
+        fa_floor: float | None = None
         if fa_dist is not None and fa_dist.radius_m is not None:
-            r = max(r, float(fa_dist.radius_m))
+            fa_floor = float(fa_dist.radius_m) * WRIST_SOFT_FA_DIST_SCALE
+            r = max(r, fa_floor)
         palm_floor: float | None = None
         if palm is not None and palm.rx_m is not None:
             palm_floor = WRIST_SOFT_PALM_RX_FRAC * float(palm.rx_m)
             r = max(r, palm_floor)
         if r <= 0.0:
             continue
-        prev = float(soft.rx_m) if soft.rx_m is not None else 0.0
         soft.rx_m = r
         soft.ry_m = r
         soft.rz_m = r
         if fa_dist is not None and fa_dist.p1 is not None:
             soft.center = list(fa_dist.p1)
-        if palm_floor is not None and r >= palm_floor - 1e-12 and r > prev + 1e-12:
-            messages.append(f"wrist_soft_{side}: palm_floor r={r:.4f} (0.85*palm.rx)")
+        if r <= prev + 1e-12:
+            continue
+        # B14: palm path uses const frac; FA-floor msg when FA strictly determines r
+        fa_wins = (
+            fa_floor is not None
+            and r >= fa_floor - 1e-12
+            and (palm_floor is None or fa_floor > palm_floor + 1e-12)
+        )
+        if fa_wins:
+            messages.append(f"wrist_soft_{side}: fa_floor r={r:.4f}")
+        elif palm_floor is not None and r >= palm_floor - 1e-12:
+            messages.append(
+                f"wrist_soft_{side}: palm_floor r={r:.4f} ({WRIST_SOFT_PALM_RX_FRAC:.2f}*palm.rx)"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -4280,7 +4307,7 @@ def build_blockout_recipe(
             resolved.height_m,
             messages,
         )
-        # 0062 B10: elbow soft post-pass (seam center + 1.10x adj)
+        # 0062 B10 + 0081: elbow soft post-pass (seam center + 1.22x adj, de-sphere)
         _append_elbow_softs(
             parts,
             report,
@@ -4303,7 +4330,9 @@ def build_blockout_recipe(
             messages=messages,
         ):
             _append_part(parts, p)
-        # 0062 B11: wrist bead continuous with FA distal + mild palm half-width floor
+    # 0062 B11 + 0081: wrist bead FA floor (always) + palm floor when palms present.
+    # Call outside hands= so FA*1.20 safety net applies with hands=False (T6 / T_wrist_fa).
+    if limbs:
         _apply_wrist_palm_floor(parts, messages)
     if feet:
         from meshops.proportion.extremity_recipe import build_foot_parts
@@ -6539,7 +6568,10 @@ __all__ = [
     "DELT_OUTER_X_FRAC",
     "DELT_RY_FRAC",
     "DELT_RZ_FRAC",
+    "ELBOW_SOFT_MAX_SCALE",
     "ELBOW_SOFT_MIN_FRAC_H",
+    "ELBOW_SOFT_RY_FRAC",
+    "ELBOW_SOFT_RZ_FRAC",
     "ELBOW_SOFT_SCALE",
     "FA_DIST_SHAFT_SCALE",
     "FA_PROX_SHAFT_SCALE",
@@ -6567,6 +6599,7 @@ __all__ = [
     "HIP_SOFT_Z_DROP_FRAC_H",
     "JSON_BASENAME",
     "KNEE_SOFT_FRAC",
+    "KNEE_SOFT_MAX_VS_THIGH_PROX",
     "KNEE_SOFT_MIN_FRAC_H",
     "KNEE_SOFT_OUTER_FRAC_RX",
     "KNEE_SOFT_REAR_FRAC_RY",
@@ -6641,6 +6674,7 @@ __all__ = [
     "UA_DIST_SHAFT_SCALE",
     "UA_PROX_SHAFT_SCALE",
     "UA_SPLIT_T",
+    "WRIST_SOFT_FA_DIST_SCALE",
     "WRIST_SOFT_PALM_RX_FRAC",
     "_BASELINE_ROLES_NO_PROFILE",
     "_MICHELIN_FRAC",
