@@ -203,8 +203,8 @@ def test_t0_public_freezes_exported_in_bands() -> None:
     assert 0.52 <= TORSO_OVAL_RY_WAIST_FRAC <= 0.64
     assert 0.80 <= TORSO_OVAL_RY_CHEST_FRAC <= 0.90
     assert 0.20 <= TORSO_CHEST_Y_REAR_BIAS_FRAC_RY <= 0.35
-    assert TORSO_OVAL_RY_HIP_FRAC == 0.80
-    assert TORSO_OVAL_RZ_SPAN_FRAC == 0.22
+    assert TORSO_OVAL_RY_HIP_FRAC == 0.70  # 0073 retarget (was 0.80)
+    assert TORSO_OVAL_RZ_SPAN_FRAC == 0.22  # B4 fence symbol only
     assert TORSO_OVAL_RZ_FLOOR_M == 0.025
     # exact freeze defaults
     assert TORSO_WAIST_RX_MAX_FRAC_CHEST == 0.80
@@ -249,7 +249,7 @@ def test_t2_male_taper_skips_hard_max() -> None:
 
 
 def test_t3_ry_magnitudes_from_fracs() -> None:
-    """T3: ry chest half*0.85; waist half*0.58; hip half*0.80."""
+    """T3: ry chest half*0.85; waist half*0.58; hip half*0.70."""
     half_chest = 0.12
     half_hip = 0.13
     report = _full_torso_report(chest_depth_m=0.24, hip_depth_m=0.26)
@@ -317,7 +317,14 @@ def test_t5_ry_order_and_hip_gt_pelvis() -> None:
 
 
 def test_t6_rz_span_and_layer_overlap() -> None:
-    """T6: rz = span*0.22 (+ floor) and adjacent layers overlap on Z."""
+    """T6: per-layer rz ≥ planned fracs; pairwise overlap ≥ OVERLAP_FLOOR (0073)."""
+    from meshops.proportion.blockout_recipe import (
+        TORSO_OVAL_OVERLAP_FLOOR_M,
+        TORSO_OVAL_RZ_CHEST_FRAC,
+        TORSO_OVAL_RZ_HIP_FRAC,
+        TORSO_OVAL_RZ_WAIST_FRAC,
+    )
+
     report = _full_torso_report()
     pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
     by = {p.name: p for p in pkg.parts}
@@ -332,20 +339,25 @@ def test_t6_rz_span_and_layer_overlap() -> None:
     chest_z = 0.72 * 1.72
     z_top = max(shoulder_z, chest_z)
     span = z_top - hip_z
-    expected_rz = max(TORSO_OVAL_RZ_FLOOR_M, span * TORSO_OVAL_RZ_SPAN_FRAC)
+    planned = {
+        "RECIPE_torso_oval_chest": max(TORSO_OVAL_RZ_FLOOR_M, span * TORSO_OVAL_RZ_CHEST_FRAC),
+        "RECIPE_torso_oval_waist": max(TORSO_OVAL_RZ_FLOOR_M, span * TORSO_OVAL_RZ_WAIST_FRAC),
+        "RECIPE_torso_oval_hip": max(TORSO_OVAL_RZ_FLOOR_M, span * TORSO_OVAL_RZ_HIP_FRAC),
+    }
     for name in names:
         p = by[name]
         assert p.rz_m is not None
-        assert float(p.rz_m) == pytest.approx(expected_rz, abs=1e-9)
+        assert float(p.rz_m) >= planned[name] - 1e-9
+    # Pairwise vertical overlap floor (0073 B2)
     for i in range(len(names) - 1):
         a = by[names[i]]
         b = by[names[i + 1]]
         assert a.center is not None and b.center is not None
         assert a.rz_m is not None and b.rz_m is not None
-        a_lo = float(a.center[2]) - float(a.rz_m)
-        b_hi = float(b.center[2]) + float(b.rz_m)
-        # adjacent layers touch or overlap
-        assert a_lo <= b_hi + 1e-9
+        ov = float(a.rz_m) + float(b.rz_m) - abs(float(a.center[2]) - float(b.center[2]))
+        assert ov >= TORSO_OVAL_OVERLAP_FLOOR_M - 1e-9
+    # Legacy SPAN_FRAC remains fence symbol only (not equal-triad emit)
+    assert TORSO_OVAL_RZ_SPAN_FRAC == 0.22
 
 
 def test_t7_dual_breasts_proud_of_chest_front() -> None:

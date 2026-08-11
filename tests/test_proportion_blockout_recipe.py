@@ -1625,25 +1625,50 @@ def _torso_oval_span_from_report(report: ProportionReport) -> float:
 
 
 def test_recipe__torso_oval_rz_span_022() -> None:
-    """T7 / B6 / 0047 B4: each torso oval rz == max(floor, span*span_frac)."""
+    """0073: layer-asymmetric rz ≥ planned fracs; pairwise overlap ≥ floor.
+
+    Legacy SPAN_FRAC=0.22 is documentation fence only (not used for emit).
+    Dropped equal-triad + span*0.20 floor (AI2 P2-4: waist planned 0.16*span).
+    """
     from meshops.proportion.blockout_recipe import (
+        TORSO_OVAL_OVERLAP_FLOOR_M,
+        TORSO_OVAL_RZ_CHEST_FRAC,
         TORSO_OVAL_RZ_FLOOR_M,
+        TORSO_OVAL_RZ_HIP_FRAC,
         TORSO_OVAL_RZ_SPAN_FRAC,
+        TORSO_OVAL_RZ_WAIST_FRAC,
     )
 
     report = _full_torso_report()
     pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
     span = _torso_oval_span_from_report(report)
-    expected_rz = max(TORSO_OVAL_RZ_FLOOR_M, span * TORSO_OVAL_RZ_SPAN_FRAC)
-    for name in (
+    planned = {
+        "RECIPE_torso_oval_chest": max(TORSO_OVAL_RZ_FLOOR_M, span * TORSO_OVAL_RZ_CHEST_FRAC),
+        "RECIPE_torso_oval_waist": max(TORSO_OVAL_RZ_FLOOR_M, span * TORSO_OVAL_RZ_WAIST_FRAC),
+        "RECIPE_torso_oval_hip": max(TORSO_OVAL_RZ_FLOOR_M, span * TORSO_OVAL_RZ_HIP_FRAC),
+    }
+    by = {p.name: p for p in pkg.parts}
+    for name, p_rz in planned.items():
+        part = by[name]
+        assert part.rz_m is not None
+        assert float(part.rz_m) >= p_rz - 1e-9
+    # Not equal triad
+    rzs = [float(by[n].rz_m or 0.0) for n in planned]
+    assert not (abs(rzs[0] - rzs[1]) < 1e-6 and abs(rzs[1] - rzs[2]) < 1e-6)
+    # Pairwise overlap floor
+    layers = (
         "RECIPE_torso_oval_chest",
         "RECIPE_torso_oval_waist",
         "RECIPE_torso_oval_hip",
-    ):
-        part = next(p for p in pkg.parts if p.name == name)
-        assert part.rz_m is not None
-        assert float(part.rz_m) >= span * 0.20
-        assert float(part.rz_m) == pytest.approx(expected_rz, abs=1e-9)
+    )
+    for i in range(len(layers) - 1):
+        a = by[layers[i]]
+        b = by[layers[i + 1]]
+        assert a.center is not None and b.center is not None
+        assert a.rz_m is not None and b.rz_m is not None
+        ov = float(a.rz_m) + float(b.rz_m) - abs(float(a.center[2]) - float(b.center[2]))
+        assert ov >= TORSO_OVAL_OVERLAP_FLOOR_M - 1e-9
+    assert TORSO_OVAL_RZ_SPAN_FRAC == 0.22
 
 
 def test_recipe__torso_oval_layer_overlap() -> None:

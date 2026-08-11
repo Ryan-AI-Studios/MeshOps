@@ -226,7 +226,7 @@ def test_t4_strict_ry_hip_gt_ry_pelvis() -> None:
     ry_h = float(by["RECIPE_torso_oval_hip"].ry_m or 0.0)
     ry_p = float(by["RECIPE_pelvis_oval"].ry_m or 0.0)
     assert ry_h > ry_p + 1e-9
-    # Expected: 0.13*0.80 = 0.104; 0.13*0.60 = 0.078
+    # Expected: 0.13*0.70 = 0.091; 0.13*0.60 = 0.078 (0073 hip ry)
     half_hip = _hip_half()
     assert ry_h == pytest.approx(half_hip * TORSO_OVAL_RY_HIP_FRAC, abs=1e-9)
     assert ry_p == pytest.approx(half_hip * PELVIS_OVAL_RY_FRAC_HALF_HIP, abs=1e-9)
@@ -314,10 +314,10 @@ def test_t8_0052_glute_seat_constants_still_exist() -> None:
 
 
 def test_t9_torso_oval_fracs_unchanged_0047() -> None:
-    """T9: torso chest/waist/hip ry fracs (0047 + 0065 retarget 0.85/0.58/0.80)."""
+    """T9: torso chest/waist/hip ry fracs (0047 + 0065 + 0073: 0.85/0.58/0.70)."""
     assert TORSO_OVAL_RY_CHEST_FRAC == 0.85
     assert TORSO_OVAL_RY_WAIST_FRAC == 0.58
-    assert TORSO_OVAL_RY_HIP_FRAC == 0.80
+    assert TORSO_OVAL_RY_HIP_FRAC == 0.70
     report = _full_torso_report()
     pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
     by = {p.name: p for p in pkg.parts}
