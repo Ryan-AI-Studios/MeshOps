@@ -37,8 +37,8 @@ _LIP_Z_FRAC: Final[float] = 0.20  # authoring choice, not Loomis third
 _EYE_RADIUS_FRAC_H: Final[float] = 0.08
 # 0055 jaw soft mass ellipsoid; 0057 chin-strap polish (public; use HeadBounds.H for Z fracs)
 JAW_RX_FRAC_HEAD_RX: Final[float] = 0.74  # was 0.85 — 0057
-JAW_RY_FRAC_HEAD_RY: Final[float] = 0.55
-JAW_RZ_FRAC_H: Final[float] = 0.15
+JAW_RY_FRAC_HEAD_RY: Final[float] = 0.42  # was 0.55 — 0078 left chin shelf
+JAW_RZ_FRAC_H: Final[float] = 0.13  # was 0.15 — 0078 face U-band height
 JAW_Z_CENTER_FRAC_H: Final[float] = 0.13
 JAW_Y_BIAS_FRAC_RY: Final[float] = 0.08  # was 0.05 — 0057
 JAW_X_BULGE_ALLOW_M: Final[float] = 0.006  # was 0.015 — 0057
@@ -60,9 +60,9 @@ NOSE_RZ_FRAC_H: Final[float] = 0.040
 # front surface = center_y - nose_ry = tip_y; center_z ≈ nose_base_z - 0.01*H
 NOSE_TIP_Y_FRAC_RY: Final[float] = 0.98
 
-LIP_RX_FRAC_H: Final[float] = 0.12
-LIP_RY_FRAC_H: Final[float] = 0.035  # was 0.02
-LIP_RZ_FRAC_H: Final[float] = 0.025  # was 0.015
+LIP_RX_FRAC_H: Final[float] = 0.10  # was 0.12 — 0078 pad thin
+LIP_RY_FRAC_H: Final[float] = 0.022  # was 0.035 — 0078 pad thin
+LIP_RZ_FRAC_H: Final[float] = 0.016  # was 0.025 — 0078 pad thin
 
 BROW_R_FRAC_H: Final[float] = 0.028  # was 0.015
 BROW_HALF_LEN_FRAC_EYE_R: Final[float] = 1.1  # stay
@@ -519,7 +519,7 @@ def _build_face_features(
             parent_joint=pj_feat,
         )
     )
-    messages.append(f"face: lip soft axes ry={lip_ry:.4f} rz={lip_rz:.4f}")
+    messages.append(f"face: lip soft axes rx={lip_rx:.4f} ry={lip_ry:.4f} rz={lip_rz:.4f}")
 
     # Cheek - mild single pad per side (0058; not multi-pad photoreal)
     cheek_rx = CHEEK_RX_FRAC_HEAD_RX * rx

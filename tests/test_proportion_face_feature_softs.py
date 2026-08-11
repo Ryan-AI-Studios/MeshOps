@@ -224,9 +224,9 @@ def test_feature_softs__t0_constants_and_all() -> None:
     assert pytest.approx(0.055) == NOSE_RY_FRAC_H
     assert pytest.approx(0.040) == NOSE_RZ_FRAC_H
     assert pytest.approx(0.98) == NOSE_TIP_Y_FRAC_RY  # surface-readable tip (was 0.15 embed)
-    assert pytest.approx(0.12) == LIP_RX_FRAC_H
-    assert pytest.approx(0.035) == LIP_RY_FRAC_H
-    assert pytest.approx(0.025) == LIP_RZ_FRAC_H
+    assert pytest.approx(0.10) == LIP_RX_FRAC_H
+    assert pytest.approx(0.022) == LIP_RY_FRAC_H
+    assert pytest.approx(0.016) == LIP_RZ_FRAC_H
     assert pytest.approx(0.028) == BROW_R_FRAC_H
     assert pytest.approx(1.1) == BROW_HALF_LEN_FRAC_EYE_R
     assert pytest.approx(0.28) == CHEEK_RX_FRAC_HEAD_RX
