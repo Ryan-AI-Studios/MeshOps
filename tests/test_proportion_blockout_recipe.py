@@ -334,26 +334,22 @@ def test_recipe__deltoid_michelin() -> None:
 
 
 def test_recipe__midline_junk_skipped() -> None:
-    """Free soft below crotch near midline is not emitted."""
-    # Inject a junk-like situation: iliac would be OK off midline;
-    # force a breast soft at midline below crotch by faking CS-like path.
-    # Use glute/breast builders with very small offset — instead test filter
-    # via a constructed package path: build with crotch and check message
-    # for any free soft that would land mid-line below crotch.
-    # Direct unit: hip_hw tiny so iliac centers nearly midline at low z.
+    """Free soft below crotch near midline is not emitted (0077: iliac always skip)."""
+    # 0077 B1: base never emits iliac_soft; message is declutter skip (not midline).
+    # Dual-token accept: midline below crotch OR iliac_soft skipped: 0077 (AI2 P2-1).
     report = _full_torso_report(
         hip_x=0.02,  # mean |x| = 0.02 < 0.05
         hip_z=0.40,  # below crotch
         crotch_z=0.86,
         shoulder_z=1.38,
     )
-    # iliac soft at hip_hw*0.9 = 0.018 < MIDLINE_X_TOL → skipped
     pkg = build_blockout_recipe(report, limbs=False)
     assert MIDLINE_X_TOL_M == 0.05
     iliac = [p for p in pkg.parts if p.role == "iliac_soft"]
-    # Both iliac should be midline-blocked
     assert len(iliac) == 0
-    assert any("midline below crotch skipped" in m for m in pkg.messages)
+    assert any(
+        "midline below crotch skipped" in m or "iliac_soft skipped: 0077" in m for m in pkg.messages
+    )
 
 
 def test_recipe__crotch_fallback_message() -> None:
