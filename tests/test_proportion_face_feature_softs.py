@@ -22,6 +22,7 @@ from meshops.proportion.face_recipe import (
     EYE_RX_FRAC_R,
     EYE_RY_FRAC_R,
     EYE_RZ_FRAC_R,
+    FEATURE_FACE_Y_FRAC_RY,
     JAW_RX_FRAC_HEAD_RX,
     JAW_X_BULGE_ALLOW_M,
     JAW_Y_BIAS_FRAC_RY,
@@ -31,6 +32,7 @@ from meshops.proportion.face_recipe import (
     NOSE_RX_FRAC_H,
     NOSE_RY_FRAC_H,
     NOSE_RZ_FRAC_H,
+    NOSE_TIP_Y_FRAC_RY,
 )
 from meshops.proportion.models import (
     DepthBand,
@@ -193,9 +195,11 @@ _PUBLIC_FEATURE_CONSTS: tuple[str, ...] = (
     "EYE_RX_FRAC_R",
     "EYE_RY_FRAC_R",
     "EYE_RZ_FRAC_R",
+    "FEATURE_FACE_Y_FRAC_RY",
     "NOSE_RX_FRAC_H",
     "NOSE_RY_FRAC_H",
     "NOSE_RZ_FRAC_H",
+    "NOSE_TIP_Y_FRAC_RY",
     "LIP_RX_FRAC_H",
     "LIP_RY_FRAC_H",
     "LIP_RZ_FRAC_H",
@@ -213,11 +217,13 @@ _PUBLIC_FEATURE_CONSTS: tuple[str, ...] = (
 def test_feature_softs__t0_constants_and_all() -> None:
     """T0: Constants match freezes; all public names in face_recipe.__all__."""
     assert pytest.approx(1.00) == EYE_RX_FRAC_R
-    assert pytest.approx(0.85) == EYE_RY_FRAC_R
+    assert pytest.approx(0.95) == EYE_RY_FRAC_R  # B15 D7 left pad (was 0.85)
     assert pytest.approx(0.45) == EYE_RZ_FRAC_R
+    assert pytest.approx(0.90) == FEATURE_FACE_Y_FRAC_RY  # D7 near-surface plane
     assert pytest.approx(0.045) == NOSE_RX_FRAC_H
     assert pytest.approx(0.055) == NOSE_RY_FRAC_H
     assert pytest.approx(0.040) == NOSE_RZ_FRAC_H
+    assert pytest.approx(0.98) == NOSE_TIP_Y_FRAC_RY  # surface-readable tip (was 0.15 embed)
     assert pytest.approx(0.12) == LIP_RX_FRAC_H
     assert pytest.approx(0.035) == LIP_RY_FRAC_H
     assert pytest.approx(0.025) == LIP_RZ_FRAC_H
@@ -257,7 +263,7 @@ def test_feature_softs__t2_nose_ellipsoid() -> None:
     # H ≈ 2 * head.rz for full3d ellipsoid head
     h = 2.0 * float(head.rz_m)
     assert float(nose.rx_m) >= 0.040 * h - 1e-9
-    expected_tip_y = float(head.center[1]) - 0.15 * float(head.ry_m)
+    expected_tip_y = float(head.center[1]) - NOSE_TIP_Y_FRAC_RY * float(head.ry_m)
     assert float(nose.center[1]) - float(nose.ry_m) == pytest.approx(expected_tip_y, abs=1e-6)
 
 
@@ -357,13 +363,13 @@ def test_feature_softs__cheek_center_geometry() -> None:
     rx = float(head.rx_m)
     ry = float(head.ry_m)
     h = 2.0 * float(head.rz_m)
-    face_y = float(head.center[1]) - 0.40 * ry
+    feature_face_y = float(head.center[1]) - FEATURE_FACE_Y_FRAC_RY * ry
     # z_chin from head: z_c - rz
     z_chin = float(head.center[2]) - float(head.rz_m)
     eye_z = z_chin + 0.50 * h
     nose_base_z = z_chin + 0.33 * h
     expected_z = CHEEK_Z_MIX * eye_z + (1.0 - CHEEK_Z_MIX) * nose_base_z
-    expected_y = face_y + CHEEK_Y_BIAS_FRAC_RY * ry
+    expected_y = feature_face_y + CHEEK_Y_BIAS_FRAC_RY * ry
     assert cheek_l.center[0] == pytest.approx(-CHEEK_X_FRAC_HEAD_RX * rx, abs=1e-6)
     assert cheek_r.center[0] == pytest.approx(CHEEK_X_FRAC_HEAD_RX * rx, abs=1e-6)
     assert cheek_l.center[1] == pytest.approx(expected_y, abs=1e-6)

@@ -455,7 +455,9 @@ def test_face__hair_short_and_long_proxy() -> None:
 
 
 def test_face__nose_tip_y_freeze() -> None:
-    """B7/0058: nose front surface Y = head_center_y - 0.15 * head_ry (ellipsoid, not p1)."""
+    """B7/0058: nose front surface Y via NOSE_TIP_Y_FRAC_RY (ellipsoid, not p1)."""
+    from meshops.proportion.face_recipe import NOSE_TIP_Y_FRAC_RY
+
     report = _full_torso_report()
     pkg = build_blockout_recipe(report, limbs=False, face=True)
     head = next(p for p in pkg.parts if p.name == "RECIPE_head")
@@ -463,7 +465,7 @@ def test_face__nose_tip_y_freeze() -> None:
     assert head.center is not None and head.ry_m is not None
     assert nose.kind == "ellipsoid"
     assert nose.center is not None and nose.ry_m is not None
-    expected_tip_y = float(head.center[1]) - 0.15 * float(head.ry_m)
+    expected_tip_y = float(head.center[1]) - NOSE_TIP_Y_FRAC_RY * float(head.ry_m)
     assert float(nose.center[1]) - float(nose.ry_m) == pytest.approx(expected_tip_y, abs=1e-6)
 
 
