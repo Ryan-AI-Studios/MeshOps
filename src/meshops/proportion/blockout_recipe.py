@@ -132,6 +132,14 @@ TRAP_NAPE_Z_BIAS_FRAC_H: Final[float] = 0.010
 TRAP_Y_NEAR_ZERO: Final[float] = 1e-4
 TRAP_Y_BACK_FRAC_RY: Final[float] = 0.4
 NECK_NAPE_CLEARANCE_M: Final[float] = 0.005
+# 0066 B1-B5: scap_soft plate axes + rear plane past chest oval (post 0061 girdle).
+SCAP_RX_MIN_FRAC_H: Final[float] = 0.040  # AI2 P2-2 — pack wins; NOT 0.048
+SCAP_RY_FRAC_RX: Final[float] = 0.42
+SCAP_RY_MIN_FRAC_H: Final[float] = 0.016  # safety net for tiny rx only
+SCAP_RZ_FRAC_RX: Final[float] = 1.15
+SCAP_REAR_PAST_M: Final[float] = 0.012
+SCAP_LAT_FRAC: Final[float] = 0.45
+SCAP_Z_DROP_FRAC_H: Final[float] = 0.055
 # 0046 B6: thigh proximal soft at hip (no dist_soft - 0045 B13).
 # 0069: THIGH_PROX_SOFT_SCALE kept for fence/import smoke; superseded for product emit
 # (isotropic RECIPE_prox_soft_thigh_* replaced by anisotropic RECIPE_hip_soft_*).
@@ -1651,6 +1659,168 @@ def _apply_shoulder_girdle_softs(
             f"trap_soft_{side}: floors rx/ry/rz="
             f"{float(trap.rx_m or 0.0):.4f}/{float(trap.ry_m or 0.0):.4f}/"
             f"{float(trap.rz_m or 0.0):.4f} nape_z={float(c[2]):.4f} cx={float(c[0]):.4f}"
+        )
+
+
+def _apply_scap_plane(
+    parts: list[RecipePart],
+    report: ProportionReport,
+    m: _ResolvedMetrics,
+    messages: list[str],
+) -> None:
+    """0066: scap_soft plate axes + rear Y past chest oval (after 0061 girdle).
+
+    Mutates *parts* in place. B6: role scap_soft + ellipsoid + center only.
+    Quiet skip when no scap_soft (no profile / limbs-only).
+    """
+    _ = report  # signature parity with girdle/breast helpers
+    idxs = [
+        i
+        for i, p in enumerate(parts)
+        if p.role == "scap_soft"
+        and p.kind == "ellipsoid"
+        and p.center is not None
+        and len(p.center) >= 3
+    ]
+    if not idxs:
+        return
+
+    h = m.height_m
+    h_f: float | None = None
+    if h is not None and math.isfinite(float(h)) and float(h) > 0.0:
+        h_f = float(h)
+
+    # B2 SoT: exact name RECIPE_torso_oval_chest (AI2 P3-3)
+    chest: RecipePart | None = None
+    for p in parts:
+        if p.name == "RECIPE_torso_oval_chest":
+            chest = p
+            break
+    chest_rear: float | None = None
+    if (
+        chest is not None
+        and chest.center is not None
+        and len(chest.center) >= 2
+        and chest.ry_m is not None
+        and math.isfinite(float(chest.ry_m))
+    ):
+        chest_rear = float(chest.center[1]) + float(chest.ry_m)
+
+    # B1 plate axes per scap (rx floor pack-wins; ry/rz from rx)
+    for i in idxs:
+        p = parts[i]
+        rx = float(p.rx_m) if p.rx_m is not None and math.isfinite(float(p.rx_m)) else 0.0
+        rz = float(p.rz_m) if p.rz_m is not None and math.isfinite(float(p.rz_m)) else 0.0
+        if h_f is not None:
+            rx = max(rx, SCAP_RX_MIN_FRAC_H * h_f)
+        ry = SCAP_RY_FRAC_RX * rx
+        if h_f is not None:
+            ry = max(ry, SCAP_RY_MIN_FRAC_H * h_f)
+        rz = max(rz, SCAP_RZ_FRAC_RX * rx)
+        p.rx_m = rx
+        p.ry_m = ry
+        p.rz_m = rz
+
+    # B5 dual-mean equalize axes first (so B2 uses shared ry)
+    n = float(len(idxs))
+    mean_rx = sum(float(parts[i].rx_m or 0.0) for i in idxs) / n
+    mean_ry = sum(float(parts[i].ry_m or 0.0) for i in idxs) / n
+    mean_rz = sum(float(parts[i].rz_m or 0.0) for i in idxs) / n
+    for i in idxs:
+        parts[i].rx_m = mean_rx
+        parts[i].ry_m = mean_ry
+        parts[i].rz_m = mean_rz
+
+    sh = m.shoulder_hw
+    for i in idxs:
+        p = parts[i]
+        assert p.center is not None
+        c = list(p.center)
+        ry = float(p.ry_m or 0.0)
+
+        # B2 rear Y SoT
+        if chest_rear is not None:
+            cy = chest_rear + SCAP_REAR_PAST_M - ry
+        else:
+            pre_y = float(c[1])
+            half = m.chest_half_depth
+            if half is None or not math.isfinite(float(half)):
+                half_f = 0.12 * (h_f if h_f is not None else 1.7)
+            else:
+                half_f = float(half)
+            cy = max(abs(pre_y), 0.85 * half_f, 0.90 * ry)
+        c[1] = abs(cy)
+
+        # B3 lateral X
+        name = p.name or ""
+        side: str | None = None
+        if name.endswith("_l"):
+            side = "l"
+        elif name.endswith("_r"):
+            side = "r"
+        if side in ("l", "r") and sh is not None and math.isfinite(float(sh)) and float(sh) > 1e-9:
+            sign = -1.0 if side == "l" else 1.0
+            c[0] = sign * float(sh) * SCAP_LAT_FRAC
+
+        # B4 Z from m.shoulder_z (not clavicle lateral — P3-2)
+        if m.shoulder_z is not None and math.isfinite(float(m.shoulder_z)) and h_f is not None:
+            c[2] = float(m.shoulder_z) - SCAP_Z_DROP_FRAC_H * h_f
+
+        p.center = c
+
+    # B5 equalize |cx|, Y, Z (preserve side signs)
+    centers_eq: list[list[float]] = []
+    for i in idxs:
+        ci = parts[i].center
+        assert ci is not None
+        centers_eq.append(list(ci))
+    mean_abs_cx = sum(abs(float(c[0])) for c in centers_eq) / n
+    mean_y = sum(float(c[1]) for c in centers_eq) / n
+    mean_z = sum(float(c[2]) for c in centers_eq) / n
+    for i in idxs:
+        p = parts[i]
+        assert p.center is not None
+        c = list(p.center)
+        name = p.name or ""
+        if name.endswith("_l"):
+            sign = -1.0
+        elif name.endswith("_r"):
+            sign = 1.0
+        else:
+            sign = -1.0 if float(c[0]) < 0.0 else 1.0
+        c[0] = sign * mean_abs_cx
+        c[1] = mean_y
+        c[2] = mean_z
+        p.center = c
+
+    # B12 messages
+    messages.append("scap_plane_applied: true")
+    messages.append(f"scap_plane_past_m={SCAP_REAR_PAST_M}")
+    messages.append(f"scap_plane_lat_frac={SCAP_LAT_FRAC}")
+    messages.append(f"scap_plane_z_drop={SCAP_Z_DROP_FRAC_H}")
+    if chest_rear is not None:
+        messages.append(f"scap_plane_chest_rear={chest_rear:.6f}")
+    else:
+        messages.append("scap_plane_chest_rear=None")
+    messages.append(f"scap_plane_rx={mean_rx:.6f}")
+    messages.append(f"scap_plane_ry={mean_ry:.6f}")
+    messages.append(f"scap_plane_rz={mean_rz:.6f}")
+    for i in idxs:
+        p = parts[i]
+        assert p.center is not None
+        c = p.center
+        name = p.name or ""
+        if name.endswith("_l"):
+            side_tag = "l"
+        elif name.endswith("_r"):
+            side_tag = "r"
+        else:
+            side_tag = "?"
+        outer = float(c[1]) + float(p.ry_m or 0.0)
+        messages.append(
+            f"scap_soft_{side_tag}: c=({float(c[0]):.4f},{float(c[1]):.4f},{float(c[2]):.4f}) "
+            f"rx/ry/rz={float(p.rx_m or 0.0):.4f}/{float(p.ry_m or 0.0):.4f}/"
+            f"{float(p.rz_m or 0.0):.4f} outer_rear={outer:.4f}"
         )
 
 
@@ -3884,10 +4054,13 @@ def build_blockout_recipe(
     # 0060: deltoid socket bury along UA X-Z (after base/profile delts + limbs; before breast hang)
     _apply_deltoid_socket_bury(parts, messages)
 
-    # 0061: clavicle radius/shelf + trap floors/nape (after 0060 bury; before breast hang)
+    # 0061: clavicle radius/shelf + trap floors/nape (after 0060 bury; before 0066 scap plane)
     _apply_shoulder_girdle_softs(parts, report, resolved, messages)
 
-    # 0063: bicep scale+front past + triceps append (after profile + 0060/0061; before breast hang)
+    # 0066: scap_soft plate + rear past chest oval (after 0061 girdle; before arm muscle / breast)
+    _apply_scap_plane(parts, report, resolved, messages)
+
+    # 0063: bicep + triceps (after profile + 0060/0061/0066; before breast hang)
     _apply_arm_muscle_softs(parts, messages)
 
     # 0067 B4: athletic tear + sternum on dual breast_soft (before hang Z / tilt)
@@ -6023,6 +6196,7 @@ __all__ = [
     "_apply_glute_seat_mass",
     "_apply_join_ready_overlaps",
     "_apply_neck_column_priors",
+    "_apply_scap_plane",
     "_apply_shoulder_girdle_softs",
     "_apply_thigh_adduction",
     "_apply_wrist_palm_floor",

@@ -1014,6 +1014,8 @@ def _check_calf_slant(
 # (forward of chest_mid by design). Core RECIPE_head / RECIPE_neck still checked.
 # 0061: clavicle front-shelf ridge is intentionally on chest front surface
 # (ConstraintRole maps to shoulder_bridge; must not fail axial mid-plane).
+# 0066: scap rear surface plane is intentionally past chest rear (maps to torso);
+# soft exempt so C_axial does not thrash on rear-by-design Y (like clavicle).
 _AXIAL_EXEMPT_NAME_TOKENS: Final[tuple[str, ...]] = (
     "jaw",
     "brow_soft",
@@ -1026,6 +1028,7 @@ _AXIAL_EXEMPT_NAME_TOKENS: Final[tuple[str, ...]] = (
     "sternomastoid",
     "neck_head_fuse",
     "clavicle",
+    "scap",
 )
 
 
