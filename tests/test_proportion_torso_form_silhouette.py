@@ -20,6 +20,7 @@ from meshops.proportion.blockout_recipe import (
     TORSO_OVAL_RZ_WAIST_FRAC,
     TORSO_WAIST_PINCH_TAPER_GATE,
     TORSO_WAIST_RX_MAX_FRAC_CHEST,
+    RecipePart,
     _build_torso_ovals,
     _ResolvedMetrics,
     build_blockout_recipe,
@@ -209,18 +210,18 @@ def _planned_rz(span: float) -> dict[str, float]:
     }
 
 
-def _pair_overlaps(by: dict[str, object]) -> tuple[float, float]:
+def _pair_overlaps(by: dict[str, RecipePart]) -> tuple[float, float]:
     c = by[_CHEST]
     w = by[_WAIST]
     h = by[_HIP]
-    assert c.center is not None and w.center is not None and h.center is not None  # type: ignore[attr-defined]
-    assert c.rz_m is not None and w.rz_m is not None and h.rz_m is not None  # type: ignore[attr-defined]
-    z_c = float(c.center[2])  # type: ignore[index]
-    z_w = float(w.center[2])  # type: ignore[index]
-    z_h = float(h.center[2])  # type: ignore[index]
-    rz_c = float(c.rz_m)  # type: ignore[arg-type]
-    rz_w = float(w.rz_m)  # type: ignore[arg-type]
-    rz_h = float(h.rz_m)  # type: ignore[arg-type]
+    assert c.center is not None and w.center is not None and h.center is not None
+    assert c.rz_m is not None and w.rz_m is not None and h.rz_m is not None
+    z_c = float(c.center[2])
+    z_w = float(w.center[2])
+    z_h = float(h.center[2])
+    rz_c = float(c.rz_m)
+    rz_w = float(w.rz_m)
+    rz_h = float(h.rz_m)
     ov_cw = rz_c + rz_w - abs(z_c - z_w)
     ov_wh = rz_w + rz_h - abs(z_w - z_h)
     return ov_cw, ov_wh
