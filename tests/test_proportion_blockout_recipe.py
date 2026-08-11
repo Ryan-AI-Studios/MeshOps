@@ -724,18 +724,19 @@ def test_recipe__t3_thigh_no_dist_soft() -> None:
 
 
 def test_recipe__t4_arm_dist_soft_scale() -> None:
-    """0045 T4 + 0062: forearm dist_soft only; soft @ arm_taper_dist_fa.p1; mid*0.78."""
+    """0045 T4 + 0062 + 0081: forearm dist_soft @ fa p1; max(mid*0.78, fa*1.20)."""
     from meshops.proportion.blockout_recipe import (
         FA_PROX_SHAFT_SCALE,
         LIMB_DISTAL_SOFT_SCALE,
         UA_PROX_SHAFT_SCALE,
+        WRIST_SOFT_FA_DIST_SCALE,
     )
 
     arm_hw = 0.04
     report = _limb_mass_report(arm_hw=arm_hw)
     pkg = build_blockout_recipe(report, limbs=True)
     by_name = {p.name: p for p in pkg.parts}
-    expected_soft = max(arm_hw * LIMB_DISTAL_SOFT_SCALE, 1e-4)
+    mid_emit = max(arm_hw * LIMB_DISTAL_SOFT_SCALE, 1e-4)
     # 0062 B9: no UA dist_soft (elbow owns joint)
     for side in ("l", "r"):
         assert f"RECIPE_dist_soft_upper_arm_{side}" not in by_name
@@ -744,7 +745,7 @@ def test_recipe__t4_arm_dist_soft_scale() -> None:
         # Prox only (radius may equal mid*1.0)
         assert ua.radius_m == pytest.approx(arm_hw * UA_PROX_SHAFT_SCALE, abs=1e-9)
         assert f"RECIPE_arm_taper_dist_ua_{side}" in by_name
-    # Forearm: soft at true wrist (fa taper p1), not limb mid
+    # Forearm: soft at true wrist (fa taper p1), not limb mid; 0081 FA floor
     for side in ("l", "r"):
         band = f"forearm_{side}"
         shaft = by_name[f"RECIPE_limb_{band}"]
@@ -754,6 +755,8 @@ def test_recipe__t4_arm_dist_soft_scale() -> None:
         assert soft.kind == "ellipsoid"
         assert soft.role == "limb_segment"
         assert shaft.radius_m == pytest.approx(arm_hw * FA_PROX_SHAFT_SCALE, abs=1e-9)
+        fa_floor = float(fa_dist.radius_m) * WRIST_SOFT_FA_DIST_SCALE  # type: ignore[arg-type]
+        expected_soft = max(mid_emit, fa_floor)
         assert soft.rx_m == pytest.approx(expected_soft, abs=1e-9)
         assert soft.ry_m == pytest.approx(expected_soft, abs=1e-9)
         assert soft.rz_m == pytest.approx(expected_soft, abs=1e-9)
@@ -768,10 +771,11 @@ def test_recipe__t4_arm_dist_soft_scale() -> None:
 
 
 def test_recipe__t5_knee_soft_radius_mixed_thigh_calf() -> None:
-    """0071 T5 pin: knee_soft rx = 1.10*seam; seam=max(taper_dist else thigh, calf_a)."""
+    """0071/0081 T5 pin: knee_soft rx = 1.18*seam (B15 clamp base); seam=max(dist, calf_a)."""
     from meshops.proportion.blockout_recipe import (
         CALF_PROX_END_SCALE,
         KNEE_SOFT_FRAC,
+        KNEE_SOFT_MAX_VS_THIGH_PROX,
         KNEE_SOFT_MIN_FRAC_H,
         KNEE_SOFT_RY_FRAC,
         KNEE_SOFT_RZ_FRAC,
@@ -798,6 +802,7 @@ def test_recipe__t5_knee_soft_radius_mixed_thigh_calf() -> None:
         # Seam: prefer taper_dist over prox; include calf_a
         seam = max(float(dist.radius_m), float(calf_a.rx_m))  # type: ignore[arg-type]
         base = max(KNEE_SOFT_FRAC * seam, KNEE_SOFT_MIN_FRAC_H * height_m)
+        base = min(base, KNEE_SOFT_MAX_VS_THIGH_PROX * float(thigh.radius_m))  # type: ignore[arg-type]
         assert float(calf_a.rx_m) == pytest.approx(  # type: ignore[arg-type]
             calf_hw * CALF_PROX_END_SCALE, abs=1e-9
         )

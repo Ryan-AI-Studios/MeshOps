@@ -377,9 +377,10 @@ def test_t6_adduction_chain_knee_delta() -> None:
 
 
 def test_t7_knee_soft_max_path() -> None:
-    """T7 (0071): knee_soft scale uses SEAM adj, not full-leg max(prox, dist, calf_a)."""
+    """T7 (0071/0081): knee_soft scale uses SEAM adj, not full-leg max(prox, dist, calf_a)."""
     from meshops.proportion.blockout_recipe import (
         KNEE_SOFT_FRAC,
+        KNEE_SOFT_MAX_VS_THIGH_PROX,
         KNEE_SOFT_MIN_FRAC_H,
         _knee_seam_radius_m,
     )
@@ -408,6 +409,7 @@ def test_t7_knee_soft_max_path() -> None:
         assert full_adj == pytest.approx(float(prox.radius_m), abs=1e-9)  # type: ignore[arg-type]
         assert seam == pytest.approx(float(dist.radius_m), abs=1e-9)  # type: ignore[arg-type]
         expected = max(KNEE_SOFT_FRAC * seam, KNEE_SOFT_MIN_FRAC_H * height_m)
+        expected = min(expected, KNEE_SOFT_MAX_VS_THIGH_PROX * float(prox.radius_m))  # type: ignore[arg-type]
         assert knee.rx_m == pytest.approx(expected, abs=1e-9)
         # Helpers: full max for fence; seam for scale path
         helper_adj = _knee_adj_radius_m(pkg.parts, side, report)

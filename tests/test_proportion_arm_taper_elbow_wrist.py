@@ -8,7 +8,10 @@ from typing import Any
 import pytest
 
 from meshops.proportion.blockout_recipe import (
+    ELBOW_SOFT_MAX_SCALE,
     ELBOW_SOFT_MIN_FRAC_H,
+    ELBOW_SOFT_RY_FRAC,
+    ELBOW_SOFT_RZ_FRAC,
     ELBOW_SOFT_SCALE,
     FA_DIST_SHAFT_SCALE,
     FA_PROX_SHAFT_SCALE,
@@ -17,6 +20,7 @@ from meshops.proportion.blockout_recipe import (
     UA_DIST_SHAFT_SCALE,
     UA_PROX_SHAFT_SCALE,
     UA_SPLIT_T,
+    WRIST_SOFT_FA_DIST_SCALE,
     WRIST_SOFT_PALM_RX_FRAC,
     _apply_join_ready_overlaps,
     _build_arm_tapered,
@@ -157,7 +161,7 @@ def _part(
 
 
 def test_t0_const_freezes() -> None:
-    """T0: scales/split; ELBOW_SOFT_SCALE==1.10; WRIST floor; bands forearm-only."""
+    """T0: scales/split; ELBOW_SOFT_SCALE==1.22; WRIST floors; bands forearm-only."""
     assert UA_PROX_SHAFT_SCALE == 1.0
     assert UA_DIST_SHAFT_SCALE == 0.88
     assert UA_SPLIT_T == 0.5
@@ -166,9 +170,13 @@ def test_t0_const_freezes() -> None:
     assert FA_SPLIT_T == 0.5
     assert UA_DIST_SHAFT_SCALE < UA_PROX_SHAFT_SCALE
     assert FA_DIST_SHAFT_SCALE < FA_PROX_SHAFT_SCALE
-    assert ELBOW_SOFT_SCALE == 1.10
+    assert ELBOW_SOFT_SCALE == 1.22
     assert ELBOW_SOFT_MIN_FRAC_H == 0.016
-    assert WRIST_SOFT_PALM_RX_FRAC == 0.85
+    assert ELBOW_SOFT_RY_FRAC == 0.90
+    assert ELBOW_SOFT_RZ_FRAC == 0.78
+    assert ELBOW_SOFT_MAX_SCALE == 1.28
+    assert WRIST_SOFT_PALM_RX_FRAC == 0.95
+    assert WRIST_SOFT_FA_DIST_SCALE == 1.20
     assert LIMB_DISTAL_SOFT_SCALE == 0.78
     from meshops.proportion.blockout_recipe import _LIMB_DIST_SOFT_BANDS
 
@@ -280,9 +288,9 @@ def test_t5_no_dup_with_split_elbow_wrist() -> None:
             "RECIPE_elbow_soft_l",
             kind="ellipsoid",
             center=[-0.25, 0.05, 1.10],
-            rx_m=0.0424,
-            ry_m=0.0424,
-            rz_m=0.0424,
+            rx_m=0.0470,
+            ry_m=0.0423,
+            rz_m=0.0367,
         ),
         _part(
             "RECIPE_dist_soft_forearm_l",
@@ -300,23 +308,27 @@ def test_t5_no_dup_with_split_elbow_wrist() -> None:
 
 
 def test_t6_wrist_soft_center_and_scale() -> None:
-    """T6: soft.center == fa taper p1; soft ~ mid*0.78 (before palm if no hands)."""
+    """T6: soft.center == fa taper p1; soft == max(mid*0.78, fa_dist*1.20) no hands."""
     arm_hw = 0.04
     report = _limb_mass_report(ua_hw=arm_hw, fa_hw=arm_hw)
     pkg = build_blockout_recipe(report, limbs=True, hands=False)
     by_name = {p.name: p for p in pkg.parts}
-    expected = max(arm_hw * LIMB_DISTAL_SOFT_SCALE, 1e-4)
     for side in ("l", "r"):
         fa_dist = by_name[f"RECIPE_arm_taper_dist_fa_{side}"]
         soft = by_name[f"RECIPE_dist_soft_forearm_{side}"]
         assert soft.center is not None and fa_dist.p1 is not None
         for i in range(3):
             assert float(soft.center[i]) == pytest.approx(float(fa_dist.p1[i]), abs=1e-9)
+        mid_emit = max(arm_hw * LIMB_DISTAL_SOFT_SCALE, 1e-4)
+        fa_floor = float(fa_dist.radius_m) * WRIST_SOFT_FA_DIST_SCALE  # type: ignore[arg-type]
+        expected = max(mid_emit, fa_floor)
         assert soft.rx_m == pytest.approx(expected, abs=1e-9)
+        # Product-class pin: ~0.03744 not mid*0.78 alone (0.0312)
+        assert expected == pytest.approx(0.03744, abs=1e-5)
 
 
 def test_t7_elbow_soft_readable() -> None:
-    """T7: elbow r == max(1.10*max(ua_dist,fa_prox), 0.016*H) and r > max shafts."""
+    """T7: elbow rx == min(max(scale*adj, floor_H), MAX*adj); ry/rz aniso; > shafts."""
     height_m = 1.72
     ua_hw = 0.0438
     fa_hw = 0.0350
@@ -328,8 +340,12 @@ def test_t7_elbow_soft_readable() -> None:
         ua_dist = by_name[f"RECIPE_arm_taper_dist_ua_{side}"]
         fa = by_name[f"RECIPE_limb_forearm_{side}"]
         adj = max(float(ua_dist.radius_m), float(fa.radius_m))  # type: ignore[arg-type]
-        expected = max(ELBOW_SOFT_SCALE * adj, ELBOW_SOFT_MIN_FRAC_H * height_m)
+        expected = ELBOW_SOFT_SCALE * adj
+        expected = max(expected, ELBOW_SOFT_MIN_FRAC_H * height_m)
+        expected = min(expected, ELBOW_SOFT_MAX_SCALE * adj)
         assert elbow.rx_m == pytest.approx(expected, abs=1e-9)
+        assert elbow.ry_m == pytest.approx(expected * ELBOW_SOFT_RY_FRAC, abs=1e-9)
+        assert elbow.rz_m == pytest.approx(expected * ELBOW_SOFT_RZ_FRAC, abs=1e-9)
         assert float(elbow.rx_m) > float(ua_dist.radius_m)  # type: ignore[arg-type]
         assert float(elbow.rx_m) > float(fa.radius_m)  # type: ignore[arg-type]
         # Seam center = ua_dist.p1
@@ -362,7 +378,7 @@ def test_t8_no_seam_or_no_limbs_skips_elbow() -> None:
 
 
 def test_t9_wrist_palm_floor() -> None:
-    """T9: with palm (hands=True), wrist soft >= 0.85*palm.rx + honesty message."""
+    """T9: with palm (hands=True), wrist soft >= 0.95*palm.rx + honesty message."""
     report = _limb_mass_report(include_hand_lms=True, fa_hw=0.0350)
     pkg = build_blockout_recipe(report, limbs=True, hands=True, fingers="mitten")
     by_name = {p.name: p for p in pkg.parts}
@@ -378,12 +394,15 @@ def test_t9_wrist_palm_floor() -> None:
         assert soft.center is not None and fa_dist.p1 is not None
         for i in range(3):
             assert float(soft.center[i]) == pytest.approx(float(fa_dist.p1[i]), abs=1e-9)
-        # R9/B12: palm-floor honesty message when floor raises the bead
-        assert any(f"wrist_soft_{side}: palm_floor" in m for m in pkg.messages)
+        # R9/B12: palm-floor honesty message uses const frac (not hard-coded 0.85)
+        palm_msgs = [m for m in pkg.messages if f"wrist_soft_{side}: palm_floor" in m]
+        assert palm_msgs
+        assert f"({WRIST_SOFT_PALM_RX_FRAC:.2f}*palm.rx)" in palm_msgs[0]
+        assert "0.85*palm" not in palm_msgs[0]
 
 
 def test_t10_product_like_mids() -> None:
-    """T10: product-like mids 0.0438/0.0350 → dist ≈ 0.0385/0.0273; elbow ≈ 0.0424."""
+    """T10: product-like mids 0.0438/0.0350 → dist ≈ 0.0385/0.0273; elbow ≈ 0.0470."""
     ua_mid = 0.0438
     fa_mid = 0.0350
     height_m = 1.72
@@ -400,20 +419,24 @@ def test_t10_product_like_mids() -> None:
         assert float(ua_dist.radius_m) == pytest.approx(0.038544, abs=1e-5)  # type: ignore[arg-type]
         assert float(fa.radius_m) == pytest.approx(0.0350, abs=1e-5)  # type: ignore[arg-type]
         assert float(fa_dist.radius_m) == pytest.approx(0.0273, abs=1e-5)  # type: ignore[arg-type]
-        # 1.10 * max(0.038544, 0.0350) = 0.0423984
-        assert float(elbow.rx_m) == pytest.approx(0.0424, abs=1e-4)  # type: ignore[arg-type]
+        # 1.22 * max(0.038544, 0.0350) = 0.04702368
+        adj = max(float(ua_dist.radius_m), float(fa.radius_m))  # type: ignore[arg-type]
+        expected = ELBOW_SOFT_SCALE * adj
+        assert float(elbow.rx_m) == pytest.approx(expected, abs=1e-4)  # type: ignore[arg-type]
+        assert float(elbow.rx_m) == pytest.approx(0.0470, abs=1e-4)  # type: ignore[arg-type]
 
 
 def test_t11_messages_shaft_taper_and_elbow() -> None:
-    """T11: messages shaft_taper + elbow_soft + wrist palm_floor (R9/B12)."""
+    """T11: messages shaft_taper + elbow_soft rx= + wrist palm_floor (R9/B12)."""
     report = _limb_mass_report(include_hand_lms=True, fa_hw=0.0350)
     pkg = build_blockout_recipe(report, limbs=True, hands=True, fingers="mitten")
     assert any("upper_arm_l: shaft_taper" in m for m in pkg.messages)
     assert any("upper_arm_r: shaft_taper" in m for m in pkg.messages)
     assert any("forearm_l: shaft_taper" in m for m in pkg.messages)
     assert any("forearm_r: shaft_taper" in m for m in pkg.messages)
-    assert any("elbow_soft_l: r=" in m for m in pkg.messages)
-    assert any("elbow_soft_r: r=" in m for m in pkg.messages)
+    assert any("elbow_soft_l: rx=" in m for m in pkg.messages)
+    assert any("elbow_soft_r: rx=" in m for m in pkg.messages)
+    assert not any(m.startswith("elbow_soft_l: r=") and "rx=" not in m for m in pkg.messages)
     assert any("wrist_soft_l: palm_floor" in m for m in pkg.messages)
     assert any("wrist_soft_r: palm_floor" in m for m in pkg.messages)
 
