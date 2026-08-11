@@ -194,7 +194,7 @@ def test_t0_public_freezes_export_expected_values() -> None:
     assert pytest.approx(0.12) == TOE_TIP_MAX_PAST_BALL_FRAC  # 0075 B2
     assert pytest.approx(1.15) == TOE_TIP_PAD_SCALE  # 0075 B5
     assert pytest.approx(0.32) == BALL_SOFT_RY_FRAC_HALF_DEPTH
-    assert pytest.approx(0.13) == FOOT_LEN_VISUAL_MIN_FRAC_H
+    assert pytest.approx(0.145) == FOOT_LEN_VISUAL_MIN_FRAC_H
 
 
 # ---------------------------------------------------------------------------
@@ -428,8 +428,8 @@ def test_t8_0056_ank_heel_contact_freezes_unchanged() -> None:
 
 
 def test_t9_length_floor_max_only_never_shrinks() -> None:
-    """T9: FOOT_LEN_VISUAL_MIN_FRAC_H=0.13 max-only; long measured never shrinks."""
-    assert pytest.approx(0.13) == FOOT_LEN_VISUAL_MIN_FRAC_H
+    """T9: FOOT_LEN_VISUAL_MIN_FRAC_H=0.145 max-only; long measured never shrinks."""
+    assert pytest.approx(0.145) == FOOT_LEN_VISUAL_MIN_FRAC_H
     floor = FOOT_LEN_VISUAL_MIN_FRAC_H * PRODUCT_H_M
     # Short measured lifts to floor
     short = apply_foot_length_visual_floor(

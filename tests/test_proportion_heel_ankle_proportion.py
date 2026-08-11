@@ -213,14 +213,17 @@ def test_t2_product_ank_ry_rx_anti_ball_anti_pea() -> None:
 
 
 def test_t3_product_ank_ry_frac_wins_floor() -> None:
-    """T3: 1.22*hw > 0.030 and emitted ank_ry approx frac path."""
+    """T3: 1.22*hw > 0.030 and emitted ank_ry approx frac path on floored hw."""
     assert ANK_RY_FRAC_HALF_W * PRODUCT_HW_M > ANK_RY_FLOOR_M
     report = _product_feet_report(half_width_m=PRODUCT_HW_M)
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     ank = _ank(pkg.parts)
     assert ank.ry_m is not None
-    frac_ry = ANK_RY_FRAC_HALF_W * PRODUCT_HW_M
+    assert ank.rx_m is not None
+    # 0080 width floor may raise hw above PRODUCT_HW; ry uses floored ank.rx
+    frac_ry = ANK_RY_FRAC_HALF_W * float(ank.rx_m)
     assert float(ank.ry_m) == pytest.approx(frac_ry, abs=1e-5)
+    assert float(ank.ry_m) >= ANK_RY_FLOOR_M - 1e-9
 
 
 def test_t4_product_ank_rz_rx_le_190() -> None:
@@ -356,8 +359,12 @@ def test_t10_ank_rz_ceiling_binds_synth() -> None:
 
 
 def test_t11_cap_lose_still_contact_ge_target() -> None:
-    """T11: still_need/cap-lose path keeps contact ≥ +0.005 (or non-float)."""
+    """T11: still_need/cap-lose path keeps contact ≥ +0.005 (or non-float).
+
+    H=None so 0080 width floors skip and tiny-hw ank_rz stays floor-class.
+    """
     report = _product_feet_report(half_width_m=0.02, ank_z=0.50)
+    report = report.model_copy(update={"height_m": None})
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="wedge")
     gap = _contact_overlap(pkg.parts)
     joined = "\n".join(pkg.messages)
