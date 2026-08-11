@@ -414,7 +414,7 @@ def test_neck_column__t5b_scm_base_fixed_tip_moves() -> None:
 
 
 def test_neck_column__t6_radius_ceiling_fat_neck() -> None:
-    """T6: fat neck no-template -> r <= 0.55*head.rx."""
+    """T6: fat neck no-template -> r <= 0.40*head.rx."""
     # Large measured neck half-width without template
     pkg = build_blockout_recipe(_report(neck_hw=0.12), limbs=False)
     neck = next(p for p in pkg.parts if p.name == "RECIPE_neck")
@@ -426,9 +426,9 @@ def test_neck_column__t6_radius_ceiling_fat_neck() -> None:
 
 
 def test_neck_column__t7_female_thin_no_clamp_message() -> None:
-    """T7: female thin path ratio <0.55 → no clamp message."""
+    """T7: female thin path ratio <0.40 → no clamp message (neck_hw=0.04 headroom)."""
     tpl = _female_template(neck_thickness_scale=0.72675)
-    pkg = build_blockout_recipe(_report(neck_hw=0.05), limbs=False, template_applied=tpl)
+    pkg = build_blockout_recipe(_report(neck_hw=0.04), limbs=False, template_applied=tpl)
     neck = next(p for p in pkg.parts if p.name == "RECIPE_neck")
     head = next(p for p in pkg.parts if p.name == "RECIPE_head")
     assert neck.radius_m is not None and head.rx_m is not None
@@ -457,10 +457,10 @@ def test_neck_column__t8_giraffe_still_clamps() -> None:
 
 
 def test_neck_column__t9_thickness_scale_before_ceiling() -> None:
-    """T9: thickness_scale multiplies pre-ceiling r."""
+    """T9: thickness_scale multiplies pre-ceiling r (neck_hw=0.04 clear headroom)."""
     scale = 0.72675
     tpl = _female_template(neck_thickness_scale=scale)
-    raw_hw = 0.05
+    raw_hw = 0.04
     pkg = build_blockout_recipe(_report(neck_hw=raw_hw), limbs=False, template_applied=tpl)
     neck = next(p for p in pkg.parts if p.name == "RECIPE_neck")
     head = next(p for p in pkg.parts if p.name == "RECIPE_head")
