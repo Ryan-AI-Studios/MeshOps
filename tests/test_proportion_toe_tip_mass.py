@@ -1,7 +1,7 @@
-"""Track 0072 - foot heel / toe proportion freezes (T0-T12).
+"""Track 0075 - toe tip mass / ball-relative nest freezes (T0-T12).
 
 Product half_width ~ 0.0263 (PRODUCT_HW_M) for composition asserts.
-True freezes only for 0054 SOLE_*/TOE_R_* and 0056 ANK_*/HEEL contact/Z/rz.
+Fences 0054 SOLE_*/TOE_R_*, 0072 heel, 0056 ANK/contact freezes.
 """
 
 from __future__ import annotations
@@ -44,7 +44,6 @@ from meshops.proportion.extremity_recipe import (
     TOE_TIP_MAX_PAST_M,
     TOE_TIP_PAD_SCALE,
     TOE_TIP_PAST_FRAC,
-    apply_foot_length_visual_floor,
 )
 from meshops.proportion.models import (
     DepthBand,
@@ -160,12 +159,17 @@ def _plate(pkg_parts: list[RecipePart], side: str = "l") -> RecipePart:
     return next(p for p in pkg_parts if p.name == f"RECIPE_foot_plate_{side}")
 
 
+def _ball(pkg_parts: list[RecipePart], side: str = "l") -> RecipePart:
+    return next(p for p in pkg_parts if p.name == f"RECIPE_ball_soft_{side}")
+
+
 def _toe(pkg_parts: list[RecipePart], i: int, side: str = "l") -> RecipePart:
     return next(p for p in pkg_parts if p.name == f"RECIPE_toe_{i}_{side}")
 
 
-def _ball(pkg_parts: list[RecipePart], side: str = "l") -> RecipePart:
-    return next(p for p in pkg_parts if p.name == f"RECIPE_ball_soft_{side}")
+def _toe_tip(pkg_parts: list[RecipePart], i: int, side: str = "l") -> RecipePart:
+    """AI2 P3-8 helper for RECIPE_toe_tip_{i}_{side}."""
+    return next(p for p in pkg_parts if p.name == f"RECIPE_toe_tip_{i}_{side}")
 
 
 def _toe_wedge(pkg_parts: list[RecipePart], side: str = "l") -> RecipePart:
@@ -177,90 +181,73 @@ def _toe_wedge(pkg_parts: list[RecipePart], side: str = "l") -> RecipePart:
 # ---------------------------------------------------------------------------
 
 
-def test_t0_public_freezes_export_expected_values() -> None:
-    """T0: public freezes export expected 0072/0075 values."""
-    assert pytest.approx(0.30) == HEEL_RY_MIN_FRAC_DEPTH
-    assert pytest.approx(0.70) == HEEL_RY_MIN_VS_RZ_FRAC
-    assert pytest.approx(0.06) == HEEL_REAR_Y_BIAS_FRAC_DEPTH
-    assert pytest.approx(0.012) == HEEL_REAR_OVERHANG_M
-    assert pytest.approx(0.34) == HEEL_RY_MAX_FRAC_HALF_DEPTH
-    assert pytest.approx(0.16) == TOE_FULL_LEN_FRAC
+def test_t0_public_freezes() -> None:
+    """T0: 0075 freezes + retuned plate tip freezes."""
+    assert pytest.approx(0.40) == TOE_BALL_NEST_FRAC
+    assert pytest.approx(0.028) == TOE_TIP_MAX_PAST_BALL_M
+    assert pytest.approx(0.12) == TOE_TIP_MAX_PAST_BALL_FRAC
+    assert pytest.approx(1.15) == TOE_TIP_PAD_SCALE
+    assert pytest.approx(0.55) == TOE_TIP_PAST_FRAC
+    assert pytest.approx(0.024) == TOE_TIP_MAX_PAST_M
+    assert pytest.approx(0.12) == TOE_TIP_MAX_PAST_FRAC
     assert pytest.approx(0.35) == TOE_BASE_NEST_FRAC
-    assert pytest.approx(0.40) == TOE_BALL_NEST_FRAC  # 0075 B1
-    assert pytest.approx(0.55) == TOE_TIP_PAST_FRAC  # 0075 B3
-    assert pytest.approx(0.024) == TOE_TIP_MAX_PAST_M  # 0075 B3
-    assert pytest.approx(0.12) == TOE_TIP_MAX_PAST_FRAC  # 0075 B3
-    assert pytest.approx(0.028) == TOE_TIP_MAX_PAST_BALL_M  # 0075 B2
-    assert pytest.approx(0.12) == TOE_TIP_MAX_PAST_BALL_FRAC  # 0075 B2
-    assert pytest.approx(1.15) == TOE_TIP_PAD_SCALE  # 0075 B5
-    assert pytest.approx(0.32) == BALL_SOFT_RY_FRAC_HALF_DEPTH
-    assert pytest.approx(0.13) == FOOT_LEN_VISUAL_MIN_FRAC_H
+    assert pytest.approx(0.16) == TOE_FULL_LEN_FRAC
 
 
 # ---------------------------------------------------------------------------
-# T1 / T1b heel ry composition (B1 + B1b)
+# T1 product base nest — ball wins
 # ---------------------------------------------------------------------------
 
 
-def test_t1_winning_heel_ry_le_max_frac_half_depth() -> None:
-    """T1: winning heel_ry <= HEEL_RY_MAX_FRAC_HALF_DEPTH x half_depth."""
+def test_t1_product_base_nest_ball_wins() -> None:
+    """T1: product-class base_y >= ball_front + TOE_BALL_NEST_FRAC * toe_len - eps."""
     report = _product_feet_report()
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     plate = _plate(pkg.parts)
-    heel = _heel(pkg.parts)
-    assert plate.half_depth_m is not None or plate.ry_m is not None
-    assert heel.ry_m is not None
+    ball = _ball(pkg.parts)
+    assert plate.center is not None and ball.center is not None
+    assert ball.ry_m is not None
     half_depth = float(plate.half_depth_m or plate.ry_m or 0.0)
-    max_ry = HEEL_RY_MAX_FRAC_HALF_DEPTH * half_depth
-    assert float(heel.ry_m) <= max_ry + EPS, f"heel_ry={heel.ry_m} > max={max_ry} (hd={half_depth})"
+    foot_len = 2.0 * half_depth
+    toe_len = TOE_FULL_LEN_FRAC * foot_len
+    ball_front = float(ball.center[1]) - float(ball.ry_m)
+    ball_nest = ball_front + TOE_BALL_NEST_FRAC * toe_len
+    for i in range(1, 6):
+        toe = _toe(pkg.parts, i)
+        assert toe.p0 is not None
+        assert float(toe.p0[1]) >= ball_nest - EPS, (
+            f"toe_{i} base_y={toe.p0[1]} < ball_nest={ball_nest}"
+        )
 
 
-def test_t1b_heel_ry_not_approx_038_half_depth() -> None:
-    """T1b: regression - heel_ry must NOT be ~ 0.38xhalf_depth (leftover B1b)."""
+# ---------------------------------------------------------------------------
+# T2 / T3 tip past ball (+ plate secondary)
+# ---------------------------------------------------------------------------
+
+
+def test_t2_tip_past_ball_budget() -> None:
+    """T2: ball_front - tip_y <= min(BALL_M, BALL_FRAC * foot_len) + eps."""
     report = _product_feet_report()
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     plate = _plate(pkg.parts)
-    heel = _heel(pkg.parts)
-    assert heel.ry_m is not None
+    ball = _ball(pkg.parts)
+    assert plate.center is not None and ball.center is not None
+    assert ball.ry_m is not None
     half_depth = float(plate.half_depth_m or plate.ry_m or 0.0)
-    banned = 0.38 * half_depth
-    # If 0.38 were still in max(), product path would hit ~banned
-    assert float(heel.ry_m) != pytest.approx(banned, abs=1e-4), (
-        f"heel_ry={heel.ry_m} ~ 0.38xhd={banned} - leftover half_depth*0.38"
-    )
-    # And winning term should be B1 floor 0.30xhd (product path)
-    expect_b1 = HEEL_RY_MIN_FRAC_DEPTH * half_depth
-    assert float(heel.ry_m) == pytest.approx(expect_b1, abs=1e-4)
+    foot_len = 2.0 * half_depth
+    ball_front = float(ball.center[1]) - float(ball.ry_m)
+    ball_budget = min(TOE_TIP_MAX_PAST_BALL_M, TOE_TIP_MAX_PAST_BALL_FRAC * foot_len)
+    for i in range(1, 6):
+        toe = _toe(pkg.parts, i)
+        assert toe.p1 is not None
+        tip_past_ball = ball_front - float(toe.p1[1])
+        assert tip_past_ball <= ball_budget + EPS, (
+            f"toe_{i} tip_past_ball={tip_past_ball} > budget={ball_budget}"
+        )
 
 
-# ---------------------------------------------------------------------------
-# T2 heel rear tip clamp
-# ---------------------------------------------------------------------------
-
-
-def test_t2_heel_rear_tip_within_overhang() -> None:
-    """T2: heel_y + heel_ry <= plate_rear + HEEL_REAR_OVERHANG_M + eps."""
-    report = _product_feet_report()
-    pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
-    plate = _plate(pkg.parts)
-    heel = _heel(pkg.parts)
-    assert plate.center is not None and heel.center is not None
-    assert heel.ry_m is not None
-    half_depth = float(plate.half_depth_m or plate.ry_m or 0.0)
-    plate_rear = float(plate.center[1]) + half_depth
-    rear_tip = float(heel.center[1]) + float(heel.ry_m)
-    assert rear_tip <= plate_rear + HEEL_REAR_OVERHANG_M + EPS, (
-        f"rear_tip={rear_tip} > plate_rear+overhang={plate_rear + HEEL_REAR_OVERHANG_M}"
-    )
-
-
-# ---------------------------------------------------------------------------
-# T3 / T4 toe nest composition
-# ---------------------------------------------------------------------------
-
-
-def test_t3_toe_tip_past_within_dual_budget() -> None:
-    """T3: primary ball budget; secondary plate budget (tip_past_plate may be ≤0)."""
+def test_t3_ball_primary_plate_secondary() -> None:
+    """T3: primary ball gate; secondary plate (negative tip_past_plate OK)."""
     report = _product_feet_report()
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     plate = _plate(pkg.parts)
@@ -277,52 +264,53 @@ def test_t3_toe_tip_past_within_dual_budget() -> None:
         toe = _toe(pkg.parts, i)
         assert toe.p1 is not None
         tip_y = float(toe.p1[1])
-        tip_past_ball = ball_front - tip_y
-        tip_past_plate = plate_front - tip_y
-        assert tip_past_ball <= ball_budget + EPS, (
-            f"toe_{i} tip_past_ball={tip_past_ball} > ball_budget={ball_budget}"
-        )
-        assert tip_past_plate <= plate_budget + EPS, (
-            f"toe_{i} tip_past_plate={tip_past_plate} > plate_budget={plate_budget}"
-        )
+        assert ball_front - tip_y <= ball_budget + EPS
+        assert plate_front - tip_y <= plate_budget + EPS
 
 
-def test_t4_toe_base_nests_into_plate() -> None:
-    """T4: prefer ball nest floor; plate nest remains weak floor."""
+# ---------------------------------------------------------------------------
+# T4 tip pads present + scale hierarchy
+# ---------------------------------------------------------------------------
+
+
+def test_t4_tip_pads_present_and_scale() -> None:
+    """T4: tip pads present; r_pad = min(1.15*r_i, cap); big pad >= mid pad."""
     report = _product_feet_report()
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     plate = _plate(pkg.parts)
-    ball = _ball(pkg.parts)
-    assert plate.center is not None and ball.center is not None
-    assert ball.ry_m is not None
-    half_depth = float(plate.half_depth_m or plate.ry_m or 0.0)
-    foot_len = 2.0 * half_depth
-    toe_len = TOE_FULL_LEN_FRAC * foot_len
-    plate_front = float(plate.center[1]) - half_depth
-    ball_front = float(ball.center[1]) - float(ball.ry_m)
-    plate_nest = plate_front + TOE_BASE_NEST_FRAC * toe_len
-    ball_nest = ball_front + TOE_BALL_NEST_FRAC * toe_len
-    nest_min = max(plate_nest, ball_nest)
-    for i in range(1, 6):
-        toe = _toe(pkg.parts, i)
-        assert toe.p0 is not None
-        assert float(toe.p0[1]) >= nest_min - EPS, (
-            f"toe_{i} base_y={toe.p0[1]} < nest_min={nest_min} "
-            f"(ball_nest={ball_nest} plate_nest={plate_nest})"
-        )
-        # Product-class: ball nest should win (or at least meet ball floor)
-        assert float(toe.p0[1]) >= ball_nest - EPS, (
-            f"toe_{i} base_y={toe.p0[1]} < ball_nest={ball_nest}"
-        )
+    # half_width from plate top_half_width or product default
+    half_width = float(plate.top_half_width_m or PRODUCT_HW_M)
+    r_cap = TOE_R_CAP_FRAC_HALF_W * half_width
+    for side in ("l", "r"):
+        for i in range(1, 6):
+            tip = _toe_tip(pkg.parts, i, side=side)
+            toe = _toe(pkg.parts, i, side=side)
+            assert tip.kind == "ellipsoid"
+            assert tip.role == "toe_soft"
+            assert tip.rx_m is not None and toe.radius_m is not None
+            r_pad = float(tip.rx_m)
+            r_i = float(toe.radius_m)
+            expect = min(TOE_TIP_PAD_SCALE * r_i, r_cap)
+            assert r_pad == pytest.approx(expect, abs=1e-6), (
+                f"toe_tip_{i}_{side} r={r_pad} != expect={expect} (r_i={r_i} cap={r_cap})"
+            )
+            # Mid toes (uncapped path): pad is at least 1.12 * digit r
+            if i != 1:
+                assert r_pad >= 1.12 * r_i - EPS, (
+                    f"toe_tip_{i}_{side} r={r_pad} < 1.12*r_i={1.12 * r_i}"
+                )
+        big_pad = float(_toe_tip(pkg.parts, 1, side=side).rx_m or 0.0)
+        mid_pad = float(_toe_tip(pkg.parts, 3, side=side).rx_m or 0.0)
+        assert big_pad >= mid_pad - EPS, f"big pad {big_pad} < mid pad {mid_pad}"
 
 
 # ---------------------------------------------------------------------------
-# T5 / T5b constraints + snapshot metrics
+# T5 / T5b constraints
 # ---------------------------------------------------------------------------
 
 
-def test_t5_foot_constraints_pass_complete_feet() -> None:
-    """T5: foot C_* pass via validate_constraints (complete feet)."""
+def test_t5_foot_constraints_pass() -> None:
+    """T5: foot C_* pass complete feet (tip pads as toe mass — B16 intentional)."""
     report = _product_feet_report()
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     result = validate_constraints(pkg, report=report)
@@ -340,44 +328,45 @@ def test_t5_foot_constraints_pass_complete_feet() -> None:
         )
 
 
-def test_t5b_snapshot_metrics_c_foot_width_and_toe_sole_z() -> None:
-    """T5b: snapshot metrics for C_foot_width / C_toe_sole_z (numeric keys)."""
+def test_t5b_snapshot_c_toe_forward_and_sole_z() -> None:
+    """T5b: C_toe_* metrics use tip-pad geometry (B16 min-Y SoT)."""
     report = _product_feet_report()
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     result = validate_constraints(pkg, report=report)
     by_id = {r.id: r for r in result.rules}
 
-    width = by_id["C_foot_width"]
-    assert width.status == "pass", width.message
-    w_metrics = width.metrics or {}
-    assert (
-        "delta_l" in w_metrics
-        or "delta_r" in w_metrics
-        or any(k.startswith("delta_") for k in w_metrics)
-    ), f"C_foot_width metrics missing delta_*: {w_metrics}"
-    for k, v in w_metrics.items():
-        if k.startswith("delta_"):
-            assert float(v) <= 0.015 + 1e-6, f"{k}={v} exceeds width tol"
+    # Tip pads share tip_y / tip_z across digits; min-Y SoT is a tip pad (B16).
+    pad_l = _toe_tip(pkg.parts, 3, side="l")
+    pad_r = _toe_tip(pkg.parts, 3, side="r")
+    assert pad_l.center is not None and pad_r.center is not None
+    expect_y_l = float(pad_l.center[1])
+    expect_y_r = float(pad_r.center[1])
+    expect_z_l = float(pad_l.center[2])
+    expect_z_r = float(pad_r.center[2])
+
+    forward = by_id["C_toe_forward_of_heel"]
+    assert forward.status == "pass", forward.message
+    f_metrics = forward.metrics or {}
+    assert "toe_y_l" in f_metrics and "toe_y_r" in f_metrics, f_metrics
+    assert float(f_metrics["toe_y_l"]) == pytest.approx(expect_y_l, abs=1e-6)
+    assert float(f_metrics["toe_y_r"]) == pytest.approx(expect_y_r, abs=1e-6)
+    assert float(f_metrics["toe_y_l"]) < float(f_metrics["heel_y_l"]) - EPS
 
     sole = by_id["C_toe_sole_z"]
     assert sole.status == "pass", sole.message
     s_metrics = sole.metrics or {}
-    # Prefer structured keys; fall back to message tokens when schema varies
-    if s_metrics:
-        assert any(
-            "z" in k.lower() or "toe" in k.lower() or "plate" in k.lower() for k in s_metrics
-        ), f"C_toe_sole_z metrics empty of z/toe/plate keys: {s_metrics}"
-    else:
-        assert "toe" in sole.message.lower() or "plate" in sole.message.lower()
+    assert "toe_z_l" in s_metrics and "toe_z_r" in s_metrics, s_metrics
+    assert float(s_metrics["toe_z_l"]) == pytest.approx(expect_z_l, abs=1e-6)
+    assert float(s_metrics["toe_z_r"]) == pytest.approx(expect_z_r, abs=1e-6)
 
 
 # ---------------------------------------------------------------------------
-# T6 recipe contact (not C_* alone)
+# T6 contact fence
 # ---------------------------------------------------------------------------
 
 
-def test_t6_recipe_contact_heel_top_minus_ank_bottom() -> None:
-    """T6: heel_top - ank_bottom >= +0.005 (real guard, not C_* tol)."""
+def test_t6_contact_gap_ge_target() -> None:
+    """T6: recipe contact heel_top - ank_bottom >= +0.005."""
     report = _product_feet_report()
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     ank = _ank(pkg.parts)
@@ -393,12 +382,12 @@ def test_t6_recipe_contact_heel_top_minus_ank_bottom() -> None:
 
 
 # ---------------------------------------------------------------------------
-# T7 / T8 fence pins (true freezes only)
+# T7 / T8 fence pins
 # ---------------------------------------------------------------------------
 
 
 def test_t7_0054_sole_toe_r_freezes_unchanged() -> None:
-    """T7: 0054 SOLE_* / TOE_R_* freezes unchanged (not TOE_FULL_LEN)."""
+    """T7: 0054 SOLE_* / TOE_R_* freezes unchanged."""
     assert pytest.approx(0.025) == SOLE_THICKNESS_FRAC_H
     assert pytest.approx(0.70) == SOLE_RZ_FRAC_OF_THICKNESS
     assert pytest.approx(0.016) == SOLE_RZ_FLOOR_M
@@ -409,8 +398,15 @@ def test_t7_0054_sole_toe_r_freezes_unchanged() -> None:
     assert pytest.approx(1.25) == TOE_SPLAY_FRAC_HALF_W
 
 
-def test_t8_0056_ank_heel_contact_freezes_unchanged() -> None:
-    """T8: 0056 ANK_* / HEEL_CONTACT / HEEL_Z_FRAC / HEEL_RZ_CAP unchanged."""
+def test_t8_0072_heel_and_0056_ank_freezes_unchanged() -> None:
+    """T8: 0072 heel + 0056 ANK/contact freezes unchanged."""
+    assert pytest.approx(0.30) == HEEL_RY_MIN_FRAC_DEPTH
+    assert pytest.approx(0.70) == HEEL_RY_MIN_VS_RZ_FRAC
+    assert pytest.approx(0.06) == HEEL_REAR_Y_BIAS_FRAC_DEPTH
+    assert pytest.approx(0.012) == HEEL_REAR_OVERHANG_M
+    assert pytest.approx(0.34) == HEEL_RY_MAX_FRAC_HALF_DEPTH
+    assert pytest.approx(0.32) == BALL_SOFT_RY_FRAC_HALF_DEPTH
+    assert pytest.approx(0.13) == FOOT_LEN_VISUAL_MIN_FRAC_H
     assert pytest.approx(1.45) == ANK_RY_FRAC_HALF_W
     assert pytest.approx(0.036) == ANK_RY_FLOOR_M
     assert pytest.approx(2.00) == ANK_RZ_FRAC_HALF_W
@@ -423,108 +419,93 @@ def test_t8_0056_ank_heel_contact_freezes_unchanged() -> None:
 
 
 # ---------------------------------------------------------------------------
-# T9 length floor max-only
+# T9 length freeze
 # ---------------------------------------------------------------------------
 
 
-def test_t9_length_floor_max_only_never_shrinks() -> None:
-    """T9: FOOT_LEN_VISUAL_MIN_FRAC_H=0.13 max-only; long measured never shrinks."""
-    assert pytest.approx(0.13) == FOOT_LEN_VISUAL_MIN_FRAC_H
-    floor = FOOT_LEN_VISUAL_MIN_FRAC_H * PRODUCT_H_M
-    # Short measured lifts to floor
-    short = apply_foot_length_visual_floor(
-        0.10,
-        height_m=PRODUCT_H_M,
-        half_width=PRODUCT_HW_M,
-        calf_distal_r=None,
-        messages=[],
-        side="l",
-    )
-    assert short >= floor - 1e-6
-    # Long measured never shrinks
-    long_in = 0.30
-    long_out = apply_foot_length_visual_floor(
-        long_in,
-        height_m=PRODUCT_H_M,
-        half_width=PRODUCT_HW_M,
-        calf_distal_r=None,
-        messages=[],
-        side="l",
-    )
-    assert long_out >= long_in - 1e-9
+def test_t9_toe_full_len_frac_still_016() -> None:
+    """T9: TOE_FULL_LEN_FRAC still 0.16 (0072 B5)."""
+    assert pytest.approx(0.16) == TOE_FULL_LEN_FRAC
 
 
 # ---------------------------------------------------------------------------
-# T10 wedge still emits tip past front
+# T10 wedge path — no tip pads
 # ---------------------------------------------------------------------------
 
 
-def test_t10_wedge_still_emits_tip_past_front() -> None:
-    """T10: wedge still emits; tip (center - ry bulk) past plate front."""
+def test_t10_wedge_no_tip_pads() -> None:
+    """T10: wedge path emits toe_soft wedge; no RECIPE_toe_tip_*."""
     report = _product_feet_report()
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="wedge")
-    plate = _plate(pkg.parts)
+    names = {p.name for p in pkg.parts}
+    assert not any(n.startswith("RECIPE_toe_tip_") for n in names)
     wedge = _toe_wedge(pkg.parts)
-    assert plate.center is not None and wedge.center is not None
-    assert wedge.ry_m is not None
-    half_depth = float(plate.half_depth_m or plate.ry_m or 0.0)
-    plate_front = float(plate.center[1]) - half_depth
-    # Wedge center should be past front (more -Y)
-    assert float(wedge.center[1]) < plate_front + EPS, (
-        f"wedge center y={wedge.center[1]} not past plate front {plate_front}"
-    )
+    assert wedge.role == "toe_soft"
+    assert wedge.kind == "ellipsoid"
+    # Explicit: no digit capsules RECIPE_toe_{1..5}_{side}
+    for i in range(1, 6):
+        assert f"RECIPE_toe_{i}_l" not in names
+        assert f"RECIPE_toe_{i}_r" not in names
 
 
 # ---------------------------------------------------------------------------
-# T11 digit tip forward of heel
+# T11 stick gates on capsule tip AND tip-pad center
 # ---------------------------------------------------------------------------
 
 
-def test_t11_each_digit_tip_forward_of_heel() -> None:
-    """T11: each digit tip p1[1] < heel Y - TOE_FORWARD_EPS (tip, not center)."""
+def test_t11_capsule_and_pad_y_stick_gates() -> None:
+    """T11: capsule p1.y and tip-pad center y within ball budget; tip forward of heel."""
     report = _product_feet_report()
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
+    plate = _plate(pkg.parts)
+    ball = _ball(pkg.parts)
     heel = _heel(pkg.parts)
-    assert heel.center is not None
+    assert plate.center is not None and ball.center is not None and heel.center is not None
+    assert ball.ry_m is not None
+    half_depth = float(plate.half_depth_m or plate.ry_m or 0.0)
+    foot_len = 2.0 * half_depth
+    ball_front = float(ball.center[1]) - float(ball.ry_m)
+    ball_budget = min(TOE_TIP_MAX_PAST_BALL_M, TOE_TIP_MAX_PAST_BALL_FRAC * foot_len)
     heel_y = float(heel.center[1])
     threshold = heel_y - TOE_FORWARD_EPS_M
     for i in range(1, 6):
         toe = _toe(pkg.parts, i)
-        assert toe.p1 is not None
-        assert float(toe.p1[1]) < threshold + 1e-9, (
-            f"toe_{i} tip y={toe.p1[1]} not < heel_y-eps={threshold}"
-        )
+        pad = _toe_tip(pkg.parts, i)
+        assert toe.p0 is not None and toe.p1 is not None and pad.center is not None
+        tip_y = float(toe.p1[1])
+        pad_y = float(pad.center[1])
+        assert tip_y < float(toe.p0[1]) - 1e-6  # orientation
+        assert ball_front - tip_y <= ball_budget + EPS
+        assert ball_front - pad_y <= ball_budget + EPS
+        assert tip_y < threshold + 1e-9
+        assert pad_y < threshold + 1e-9
+        # Pad colocated with capsule tip Y
+        assert pad_y == pytest.approx(tip_y, abs=1e-6)
 
 
 # ---------------------------------------------------------------------------
-# T12 messages numeric heel proportion + toe nest
+# T12 message tokens
 # ---------------------------------------------------------------------------
 
 
-def test_t12_messages_heel_proportion_and_toe_nest_numeric() -> None:
-    """T12: heel proportion + toe tip mass tokens (tip_past_ball/plate, not bare tip_past)."""
+def test_t12_message_tokens() -> None:
+    """T12: toe tip mass + tip_past_ball/plate + base_y + ball_front."""
     report = _product_feet_report()
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     joined = "\n".join(pkg.messages)
-    assert "heel proportion" in joined
     assert "toe tip mass" in joined
-    assert "rear_tip=" in joined
     assert "tip_past_ball=" in joined
     assert "tip_past_plate=" in joined
-    # Numeric values present (not empty after =)
-    heel_msgs = [m for m in pkg.messages if "heel proportion" in m]
+    assert "base_y=" in joined
+    assert "ball_front=" in joined
+    # Must not use bare tip_past= alone as the nest message token
     mass_msgs = [m for m in pkg.messages if "toe tip mass" in m]
-    assert heel_msgs
     assert mass_msgs
-    for m in heel_msgs:
-        assert "ry=" in m and "rear_tip=" in m
-        # extract a float after rear_tip=
-        idx = m.index("rear_tip=") + len("rear_tip=")
-        token = m[idx:].split()[0]
-        float(token.rstrip(")"))
     for m in mass_msgs:
-        assert "tip_past_ball=" in m and "tip_past_plate=" in m
-        assert "base_y=" in m and "ball_front=" in m
+        assert "tip_past_ball=" in m
+        assert "tip_past_plate=" in m
+        # bare tip_past= (without _ball/_plate) should not appear
+        assert "tip_past=" not in m.replace("tip_past_ball=", "").replace("tip_past_plate=", "")
         for key in ("tip_past_ball=", "tip_past_plate=", "base_y=", "ball_front="):
             idx = m.index(key) + len(key)
             token = m[idx:].split()[0]

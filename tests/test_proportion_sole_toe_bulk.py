@@ -26,6 +26,8 @@ from meshops.proportion.extremity_recipe import (
     TOE_R_FLOOR_M,
     TOE_R_FRAC_HALF_W,
     TOE_SPLAY_FRAC_HALF_W,
+    TOE_TIP_MAX_PAST_FRAC,
+    TOE_TIP_MAX_PAST_M,
     TOE_WEDGE_RZ_FRAC_SOLE,
     apply_foot_length_visual_floor,
 )
@@ -311,19 +313,26 @@ def test_t8_foot_len_freezes_importable_and_floor() -> None:
 
 
 def test_t9_full_toe_tip_past_plate_front() -> None:
-    """T9: full toe p1.y (tip) < plate front y (past -Y)."""
+    """T9: tip within plate budget (may be rear of plate after 0075 B2); tip more -Y than base."""
     report = _product_feet_report()
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     plate = _plate(pkg.parts)
     assert plate.center is not None
     half_d = float(plate.half_depth_m or plate.ry_m or 0.0)
+    foot_len = 2.0 * half_d
     plate_front = float(plate.center[1]) - half_d
+    plate_budget = min(TOE_TIP_MAX_PAST_M, TOE_TIP_MAX_PAST_FRAC * foot_len)
     for i in range(1, 6):
         toe = _toe(pkg.parts, i)
-        assert toe.p1 is not None
-        assert float(toe.p1[1]) < plate_front + EPS, (
-            f"toe_{i} tip y={toe.p1[1]} not past plate front {plate_front}"
+        assert toe.p0 is not None and toe.p1 is not None
+        tip_y = float(toe.p1[1])
+        base_y = float(toe.p0[1])
+        # Budget-agnostic: tip_past_plate may be negative (tip rear of plate — OK)
+        assert plate_front - tip_y <= plate_budget + EPS, (
+            f"toe_{i} tip_past_plate={plate_front - tip_y} > budget={plate_budget}"
         )
+        # Capsule orientation: tip more distal (-Y) than base
+        assert tip_y < base_y - 1e-6, f"toe_{i} tip_y={tip_y} not < base_y={base_y}"
 
 
 # ---------------------------------------------------------------------------

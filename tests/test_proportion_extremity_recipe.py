@@ -539,6 +539,8 @@ def test_ext__classifier_b5() -> None:
         ("RECIPE_thumb_soft_1_l", "unknown"),
         ("RECIPE_toe_1_l", "unknown"),
         ("RECIPE_toe_5_r", "unknown"),
+        ("RECIPE_toe_tip_1_l", "unknown"),  # 0075 tip pads
+        ("RECIPE_toe_tip_5_r", "unknown"),
     ]
     for name, expected in cases:
         role, _side = classify_part_name(name)
@@ -722,13 +724,15 @@ def test_ext__toes_full_ball_and_beads() -> None:
     by_role = pkg.counts.get("by_role") or {}
     # arch_soft + ball_soft per side (organic foot masses)
     assert by_role.get("ball_soft", 0) == 4
-    # 5 toes x 2 sides + no wedge
-    assert by_role.get("toe_soft", 0) == 10
+    # 0075: 5 capsules + 5 tip pads per side = 20 toe_soft
+    assert by_role.get("toe_soft", 0) == 20
     names = {p.name for p in pkg.parts}
     assert "RECIPE_ball_soft_l" in names
     assert "RECIPE_arch_soft_l" in names
     assert "RECIPE_toe_1_l" in names
     assert "RECIPE_toe_5_r" in names
+    assert "RECIPE_toe_tip_1_l" in names
+    assert "RECIPE_toe_tip_5_r" in names
     # Soft toe names must not contain "foot"
     for n in names:
         if "toe_" in n or "ball_soft" in n or "arch_soft" in n:

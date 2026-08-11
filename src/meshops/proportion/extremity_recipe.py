@@ -63,9 +63,13 @@ TOE_R_CAP_FRAC_HALF_W: Final[float] = 0.45
 TOE_BIG_SCALE: Final[float] = 1.20
 TOE_FULL_LEN_FRAC: Final[float] = 0.16  # 0072 B5 (was 0.26 stick-class)
 TOE_BASE_NEST_FRAC: Final[float] = 0.35  # 0072 B6 nest INTO plate (+Y from front)
-TOE_TIP_PAST_FRAC: Final[float] = 0.90  # 0072 B6 tip past plate front
-TOE_TIP_MAX_PAST_M: Final[float] = 0.038  # 0072 B12 absolute tip budget
-TOE_TIP_MAX_PAST_FRAC: Final[float] = 0.15  # 0072 B12 proportional tip budget
+TOE_BALL_NEST_FRAC: Final[float] = 0.40  # 0075 B1 nest INTO ball (+Y from ball front)
+TOE_TIP_PAST_FRAC: Final[float] = 0.55  # 0075 B3 (was 0.90 stick-class past plate)
+TOE_TIP_MAX_PAST_M: Final[float] = 0.024  # 0075 B3 plate absolute tip budget (was 0.038)
+TOE_TIP_MAX_PAST_FRAC: Final[float] = 0.12  # 0075 B3 plate proportional tip budget (was 0.15)
+TOE_TIP_MAX_PAST_BALL_M: Final[float] = 0.028  # 0075 B2 ball absolute tip budget
+TOE_TIP_MAX_PAST_BALL_FRAC: Final[float] = 0.12  # 0075 B2 ball proportional tip budget
+TOE_TIP_PAD_SCALE: Final[float] = 1.15  # 0075 B5 tip pad mass vs digit r
 TOE_SPLAY_FRAC_HALF_W: Final[float] = 1.25
 TOE_MIN_CENTER_SPACING_VS_R: Final[float] = 1.0  # soft B15
 TOE_WEDGE_RZ_FRAC_SOLE: Final[float] = 0.85
@@ -816,24 +820,36 @@ def _build_foot_side(
         )
         return out
 
-    # toes == full: 5 toe capsules (0054 radius freezes + 0072 B5-B6 nest)
+    # toes == full: 5 toe capsules + tip pads (0054 r + 0072 len + 0075 nest/tip mass)
     toe_len = TOE_FULL_LEN_FRAC * foot_len
     base_r = min(
         max(TOE_R_FRAC_HALF_W * half_width, TOE_R_FLOOR_M),
         TOE_R_CAP_FRAC_HALF_W * half_width,
     )
     splay = half_width * TOE_SPLAY_FRAC_HALF_W
-    # B6: base nests INTO plate (+Y from front); tip past front (-Y)
-    base_y = plate_front_y + TOE_BASE_NEST_FRAC * toe_len
+    # B1: ball-relative base nest wins over plate-only nest
+    ball_front_y = ball_y - ball_ry
+    plate_nest_y = plate_front_y + TOE_BASE_NEST_FRAC * toe_len
+    ball_nest_y = ball_front_y + TOE_BALL_NEST_FRAC * toe_len
+    base_y = max(plate_nest_y, ball_nest_y)
+    # B3 raw tip + B2 dual rear-only clamp past ball/plate + inversion guard
     tip_y = plate_front_y - TOE_TIP_PAST_FRAC * toe_len
-    tip_past = plate_front_y - tip_y
+    ball_budget = min(TOE_TIP_MAX_PAST_BALL_M, TOE_TIP_MAX_PAST_BALL_FRAC * foot_len)
+    plate_budget = min(TOE_TIP_MAX_PAST_M, TOE_TIP_MAX_PAST_FRAC * foot_len)
+    tip_y = max(tip_y, ball_front_y - ball_budget, plate_front_y - plate_budget)
+    tip_y = min(tip_y, base_y - 1e-6)
+    tip_past_ball = ball_front_y - tip_y
+    tip_past_plate = plate_front_y - tip_y
     messages.append(
         f"foot_{side}: toe bulk full r={base_r:.4f} "
         f"(frac_hw={TOE_R_FRAC_HALF_W} floor={TOE_R_FLOOR_M})"
     )
     messages.append(
-        f"foot_{side}: toe nest tip_past={tip_past:.4f} base_y={base_y:.4f} (toe_len={toe_len:.4f})"
+        f"foot_{side}: toe tip mass tip_past_ball={tip_past_ball:.4f} "
+        f"tip_past_plate={tip_past_plate:.4f} base_y={base_y:.4f} "
+        f"ball_front={ball_front_y:.4f}"
     )
+    tip_z = toe_z * 0.85
     for i in range(1, 6):
         # 1=medial ... 5=lateral; sign by side
         t = (i - 3) / 3.0  # -2/3 ... +2/3
@@ -843,7 +859,7 @@ def _build_foot_side(
         r_i = base_r * (TOE_BIG_SCALE if i == 1 else 1.0)
         r_i = min(r_i, TOE_R_CAP_FRAC_HALF_W * half_width)  # cap big toe too
         base = [plate_x + dx, base_y, toe_z]
-        tip = [plate_x + dx, tip_y, toe_z * 0.85]
+        tip = [plate_x + dx, tip_y, tip_z]
         out.append(
             _capsule(
                 f"RECIPE_toe_{i}_{side}",
@@ -851,6 +867,21 @@ def _build_foot_side(
                 base,
                 tip,
                 r_i,
+                parent_joint=pj_toe,
+            )
+        )
+        # B5: tip pad mass — sole-class ellipsoid at capsule tip (no dual-radius schema)
+        r_pad = TOE_TIP_PAD_SCALE * r_i
+        r_pad = min(r_pad, TOE_R_CAP_FRAC_HALF_W * half_width)  # AI2 P3-6
+        rz_pad = min(r_pad, max(sole_rz * 0.85, r_i))
+        out.append(
+            _ellipsoid(
+                f"RECIPE_toe_tip_{i}_{side}",
+                "toe_soft",
+                [plate_x + dx, tip_y, tip_z],
+                r_pad,
+                r_pad,
+                rz_pad,
                 parent_joint=pj_toe,
             )
         )
@@ -1131,6 +1162,7 @@ __all__ = [
     "SOLE_RZ_FLOOR_M",
     "SOLE_RZ_FRAC_OF_THICKNESS",
     "SOLE_THICKNESS_FRAC_H",
+    "TOE_BALL_NEST_FRAC",
     "TOE_BASE_NEST_FRAC",
     "TOE_BIG_SCALE",
     "TOE_FULL_LEN_FRAC",
@@ -1140,8 +1172,11 @@ __all__ = [
     "TOE_R_FRAC_HALF_W",
     "TOE_SPLAY_FRAC_HALF_W",
     "TOE_TIERS",
+    "TOE_TIP_MAX_PAST_BALL_FRAC",
+    "TOE_TIP_MAX_PAST_BALL_M",
     "TOE_TIP_MAX_PAST_FRAC",
     "TOE_TIP_MAX_PAST_M",
+    "TOE_TIP_PAD_SCALE",
     "TOE_TIP_PAST_FRAC",
     "TOE_WEDGE_RZ_FRAC_SOLE",
     "_FINGER_DISTAL_R_SCALE",
