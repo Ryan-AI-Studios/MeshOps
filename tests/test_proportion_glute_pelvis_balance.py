@@ -700,9 +700,33 @@ def test_t15_anisotropy_still() -> None:
 
 
 def test_rx_unchanged_no_inflate() -> None:
-    """B10 residual: rx left alone (lateral pea width not 0068 DoD)."""
+    """0077 closes 0068 B10: product-like hip_hw floors thin glute rx to 0.40*hip_hw.
+
+    Formerly asserted rx unchanged (0068 left lateral pea residual). Option (b)
+    product hip_hw=0.2224 so floor fires (0.40*0.2224=0.0890 > emit-prior 0.0694).
+    """
+    from meshops.proportion.blockout_recipe import (
+        GLUTE_RX_LAT_CAP_FRAC_HIP_HW,
+        GLUTE_RX_LAT_FLOOR_FRAC_HIP_HW,
+    )
+
+    product_hip_hw = 0.2224
     parts = _product_like_parts()
-    rx0 = [float(p.rx_m or 0.0) for p in parts if p.role == "glute_soft"]
-    _apply(parts, height_m=1.72)
-    for p, r0 in zip([p for p in parts if p.role == "glute_soft"], rx0, strict=True):
-        assert p.rx_m == pytest.approx(r0)
+    r0 = 0.0694
+    report = _report(
+        height_m=1.72,
+        depth_bands=[_band("glute", depth_m=0.269), _band("hip", depth_m=0.278)],
+        crotch_z=0.70,
+    )
+    messages: list[str] = []
+    m = _resolved(height_m=1.72)
+    m.hip_hw = product_hip_hw
+    _apply_glute_seat_mass(parts, report, m, messages)
+    floor = GLUTE_RX_LAT_FLOOR_FRAC_HIP_HW * product_hip_hw
+    cap = GLUTE_RX_LAT_CAP_FRAC_HIP_HW * product_hip_hw
+    for p in [p for p in parts if p.role == "glute_soft"]:
+        assert p.rx_m is not None
+        assert float(p.rx_m) == pytest.approx(floor, abs=1e-9)
+        assert float(p.rx_m) >= floor - 1e-9
+        assert float(p.rx_m) <= cap + 1e-9
+        assert float(p.rx_m) > r0  # was thin pea; now floored

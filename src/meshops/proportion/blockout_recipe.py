@@ -232,6 +232,9 @@ GLUTE_SEAT_RZ_OVER_H_MAX: Final[float] = 0.065
 # 0068 B15: composition accept allows (unit/product asserts; not hard mutator clamp).
 GLUTE_TOP_OVER_PELVIS_ALLOW_M: Final[float] = 0.025
 GLUTE_BOTTOM_UNDER_MID_M: Final[float] = 0.020
+# 0077: glute rx lateral floor/cap vs hip_hw (close 0068 B10 thin dual columns).
+GLUTE_RX_LAT_FLOOR_FRAC_HIP_HW: Final[float] = 0.40
+GLUTE_RX_LAT_CAP_FRAC_HIP_HW: Final[float] = 0.50
 # 0053: pelvis bucket scale (shelf, not mid-blob)
 PELVIS_OVAL_RY_FRAC_HALF_HIP: Final[float] = 0.60
 PELVIS_OVAL_RX_FRAC_HIP_HW: Final[float] = 1.00
@@ -1945,11 +1948,12 @@ def _build_soft_ovals(
     template_applied: TemplateAppliedPackage | None = None,
     skip_roles: frozenset[str] | set[str] | None = None,
 ) -> list[RecipePart]:
-    """Breast / glute / iliac soft ellipsoids when CS or depth available.
+    """Breast / glute soft ellipsoids when CS or depth available.
 
     Body frame (B1): breast center y = -abs(offset) (front -Y);
     glute center y = +abs(offset) (back +Y).
     skip_roles (0027): omit breast_soft / glute_soft when profile owns them.
+    0077: iliac_soft never emitted (skip message only; role retained for load).
     """
     parts: list[RecipePart] = []
     skip = frozenset(skip_roles or ())
@@ -2285,34 +2289,12 @@ def _build_soft_ovals(
         else:
             messages.append("glute softs skipped: no CS/depth/hip_hw")
 
-    # Iliac soft optional — needs H for z offset (no invent 1.7m)
-    if m.hip_hw is not None and m.hip_z is not None and h is not None:
-        for side, sign in (("l", -1.0), ("r", 1.0)):
-            center = [
-                sign * m.hip_hw * 0.9,
-                m.hip_y if m.hip_y is not None else 0.0,
-                m.hip_z + 0.02 * h,
-            ]
-            name = f"RECIPE_iliac_soft_{side}"
-            if _midline_blocked(center, "iliac_soft", crotch_z):
-                messages.append(f"midline below crotch skipped: {name}")
-                continue
-            r = m.hip_hw * 0.18
-            parts.append(
-                RecipePart(
-                    name=name,
-                    role="iliac_soft",
-                    kind="ellipsoid",
-                    center=center,
-                    rx_m=r,
-                    ry_m=r * 0.7,
-                    rz_m=r * 0.6,
-                    placement="full3d" if m.hip_y is not None else "front_plane",
-                    label=name,
-                )
-            )
-    elif m.hip_hw is not None and m.hip_z is not None and h is None:
-        messages.append("iliac softs skipped: need height_m for z offset")
+    # Iliac soft — 0077 hip declutter: never emit on any recipe path (base + profile).
+    # Role iliac_soft retained in RecipeRole/classifier for historical JSON load compat.
+    # Pelvis shelf + hip_soft own crest/lateral; no escape-hatch CLI in v1.
+    messages.append(
+        "iliac_soft skipped: 0077 hip declutter (pelvis shelf + hip_soft own crest/lateral)"
+    )
 
     return parts
 
@@ -3284,7 +3266,7 @@ def _profile_skip_roles(profile: AnatomyProfileDocument) -> set[str]:
         skip.add("breast_soft")
     if region_enabled(profile, "glutes"):
         skip.add("glute_soft")
-    # hips: do NOT skip iliac_soft (base owns iliac — C7)
+    # hips: 0077: base skips iliac; profiles still do not re-emit
     return skip
 
 
@@ -4051,7 +4033,7 @@ def build_blockout_recipe(
     else:
         messages.append("base deltoid_soft skipped (profile owns delts)")
 
-    # 11+ breast/glute/iliac
+    # 11+ breast/glute (0077: iliac skip only — no iliac parts)
     for p in _build_soft_ovals(
         report,
         resolved,
@@ -4942,16 +4924,20 @@ def _apply_glute_seat_mass(
     m: _ResolvedMetrics,
     messages: list[str],
 ) -> None:
-    """0052+0068: floor glute_soft seat ry/rz + rear +Y + Z under shelf (balance).
+    """0052+0068+0077: floor glute_soft seat ry/rz + rear +Y + Z under shelf + rx lat.
 
-    Mutates *parts* in place. Binding pipeline order (0068 plan section 3):
+    Mutates *parts* in place. Binding pipeline order (0068 plan section 3 + 0077 B3):
       1-2 ry floors + stature/anisotropy caps (0052)
       3   rz floor 0.72*ry then rz H ceiling 0.065*H
+      3b  0077: rx lateral floor 0.40*hip_hw then cap 0.50*hip_hw when hip_hw known;
+          if ry < GLUTE_SEAT_RY_FROM_RX * rx, re-apply ry (stature/anisotropy caps)
+          and rz floor (H cap) for seat depth honesty
       4-6 center_y composite floor -> beyond-ref -> y stature cap
       7-8 center_z drop 0.035*H (never raise; skip if H missing) + crotch clamp
       9   dual lock ry + center_y + center_z
-      10  messages incl. top/bottom vs pelvis composition
-    Quiet when no glute_soft. Never invents ry=0 when floors missing. Leaves rx unchanged.
+      10  messages incl. top/bottom vs pelvis composition + hip declutter
+    Quiet when no glute_soft. Never invents ry=0 when floors missing.
+    Does not set outer — 0036 realigns glute outer to hip_bridge after this pass.
     Authoring RECIPE only - never claims mesh/print success.
     """
     idxs = [i for i, p in enumerate(parts) if _is_glute_soft_ellipsoid(p)]
@@ -4970,6 +4956,17 @@ def _apply_glute_seat_mass(
             h_cand = float("nan")
         if math.isfinite(h_cand) and h_cand > 0.0:
             h_f = h_cand
+
+    hip_hw_f: float | None = None
+    rx_lat_floor: float | None = None
+    if m.hip_hw is not None:
+        try:
+            hw_cand = float(m.hip_hw)
+        except (TypeError, ValueError):
+            hw_cand = float("nan")
+        if math.isfinite(hw_cand) and hw_cand > 0.0:
+            hip_hw_f = hw_cand
+            rx_lat_floor = GLUTE_RX_LAT_FLOOR_FRAC_HIP_HW * hip_hw_f
 
     applied_depth_floor = False
     applied_rx_floor = False
@@ -5060,6 +5057,43 @@ def _apply_glute_seat_mass(
                 rz_h_capped = True
         p.rz_m = float(rz_work)
 
+        # 3b. 0077: glute rx lateral floor + cap vs hip_hw (close 0068 B10)
+        if hip_hw_f is not None and rx_lat_floor is not None:
+            rx_cap_lat = GLUTE_RX_LAT_CAP_FRAC_HIP_HW * hip_hw_f
+            rx_lat = 0.0
+            if p.rx_m is not None:
+                try:
+                    rx_lat_cand = float(p.rx_m)
+                except (TypeError, ValueError):
+                    rx_lat_cand = float("nan")
+                if math.isfinite(rx_lat_cand):
+                    rx_lat = rx_lat_cand
+            rx_lat = max(rx_lat, rx_lat_floor)
+            rx_lat = min(rx_lat, rx_cap_lat)
+            p.rx_m = rx_lat
+            rx = rx_lat
+            # Binding ry re-apply if seat went shallow after rx grow (AI2 P2-2)
+            if ry_final < GLUTE_SEAT_RY_FROM_RX * rx_lat:
+                ry_final = GLUTE_SEAT_RY_FROM_RX * rx_lat
+                if h_f is not None:
+                    ry_cap = GLUTE_SEAT_RY_CAP_FRAC_H * h_f
+                    if ry_final > ry_cap:
+                        ry_final = ry_cap
+                        ry_stature_capped = True
+                if ry_final / rx_lat > GLUTE_SEAT_RY_ANISOTROPY_MAX:
+                    ry_final = GLUTE_SEAT_RY_ANISOTROPY_MAX * rx_lat
+                    anisotropy_capped = True
+                p.ry_m = ry_final
+                if rz_work < GLUTE_SEAT_RZ_FRAC_RY * ry_final:
+                    rz_work = GLUTE_SEAT_RZ_FRAC_RY * ry_final
+                    rz_floor_applied = True
+                    if h_f is not None:
+                        rz_h_cap = GLUTE_SEAT_RZ_OVER_H_MAX * h_f
+                        if rz_work > rz_h_cap:
+                            rz_work = rz_h_cap
+                            rz_h_capped = True
+                    p.rz_m = float(rz_work)
+
         center = p.center
         if center is None or len(center) < 3:
             continue
@@ -5109,6 +5143,10 @@ def _apply_glute_seat_mass(
         p.center = [float(center[0]), float(cy), float(cz)]
         any_seated = True
         seated_idxs.append(i)
+
+    # 0077 B10: hip declutter telemetry only when glutes present + hip_hw known
+    if rx_lat_floor is not None:
+        messages.append(f"hip declutter: iliac=skip glute_rx_floor={rx_lat_floor:.4f}")
 
     if applied_depth_floor and half is not None:
         floor_d = GLUTE_SEAT_RY_FRAC_HALF_DEPTH * float(half)
@@ -6281,6 +6319,8 @@ __all__ = [
     "FA_PROX_SHAFT_SCALE",
     "FA_SPLIT_T",
     "GLUTE_BOTTOM_UNDER_MID_M",
+    "GLUTE_RX_LAT_CAP_FRAC_HIP_HW",
+    "GLUTE_RX_LAT_FLOOR_FRAC_HIP_HW",
     "GLUTE_SEAT_BEYOND_REF_Y",
     "GLUTE_SEAT_RY_ANISOTROPY_MAX",
     "GLUTE_SEAT_RY_CAP_FRAC_H",
