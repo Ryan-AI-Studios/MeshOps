@@ -321,6 +321,33 @@ HairTier = Literal["none", "short", "bun", "long_proxy"]
 NecklineTier = Literal["none", "crew", "v_proxy"]
 FingerTier = Literal["none", "mitten", "full"]
 ToeTier = Literal["none", "wedge", "full"]
+# 0082: soft density policy (default full — no cull).
+SoftDensity = Literal["full", "compact"]
+
+# B4: compact role cull set (exact tokens).
+COMPACT_CULL_ROLES: Final[frozenset[str]] = frozenset(
+    {
+        "brow_soft",
+        "eye_soft",
+        "ear_soft",
+        "cheek_soft",
+        "nose_soft",
+        "lip_soft",
+        "bicep_soft",
+        "mid_back_soft",
+        "sternomastoid_soft",
+        "trap_soft",
+        "clavicle",
+    }
+)
+# B5: compact name cull — startswith(prefix) only (P1-1: no rstrip or-branch).
+COMPACT_CULL_NAME_PREFIXES: Final[tuple[str, ...]] = (
+    "RECIPE_triceps_soft_",
+    "RECIPE_dist_soft_forearm_",
+    "RECIPE_toe_tip_",
+    "RECIPE_arch_soft_",
+)
+COMPACT_CULL_NAME_EXACT: Final[frozenset[str]] = frozenset({"RECIPE_neck_base_soft"})
 
 _MIDLINE_EXEMPT_ROLES: Final[frozenset[str]] = frozenset({"torso", "pelvis", "neck", "head"})
 # Pre-0027 role set snapshot for B11 (no profile → no trap/pec/scap/bicep/clavicle).
@@ -417,6 +444,42 @@ class BlockoutRecipePackage(BaseModel):
     metrics: RecipeMetrics = Field(default_factory=RecipeMetrics)
     # 0039 additive optional (schema stay 1.4.0); old JSON → False
     join_ready: bool = False
+    # 0082 additive optional (schema stay 1.4.0); old JSON → full
+    soft_density: SoftDensity = "full"
+
+
+# ---------------------------------------------------------------------------
+# 0082 — soft density cull helpers (after join_ready, before by_role)
+# ---------------------------------------------------------------------------
+
+
+def _is_compact_cull(part: RecipePart) -> bool:
+    """True when part is in compact B4 role set or B5 name set (P1-1 startswith only)."""
+    if part.role in COMPACT_CULL_ROLES:
+        return True
+    from meshops.proportion.constraints import strip_blender_suffix
+
+    name = strip_blender_suffix(part.name)
+    if name in COMPACT_CULL_NAME_EXACT:
+        return True
+    # P1-1: startswith only; never strip trailing underscore from prefix
+    return any(name.startswith(prefix) for prefix in COMPACT_CULL_NAME_PREFIXES)
+
+
+def _apply_soft_density_cull(
+    parts: list[RecipePart],
+) -> tuple[list[RecipePart], list[str]]:
+    """Filter secondary softs for compact density; return (kept, culled_names)."""
+    from meshops.proportion.constraints import strip_blender_suffix
+
+    kept: list[RecipePart] = []
+    culled: list[str] = []
+    for p in parts:
+        if _is_compact_cull(p):
+            culled.append(strip_blender_suffix(p.name))
+        else:
+            kept.append(p)
+    return kept, culled
 
 
 # ---------------------------------------------------------------------------
@@ -4097,6 +4160,7 @@ def build_blockout_recipe(
     glute: GluteMode = "oval",
     nofuse: bool = False,
     join_ready: bool = False,
+    soft_density: SoftDensity = "full",
     breast_tilt_deg: float | None = None,
     template_applied: TemplateAppliedPackage | None = None,
     profile: AnatomyProfileDocument | None = None,
@@ -4422,6 +4486,14 @@ def build_blockout_recipe(
         _apply_join_ready_overlaps(parts, messages)
         messages.append("join_ready=true")
 
+    # 0082: soft density cull after all post-passes (incl. join_ready), before empty/by_role
+    messages.append(f"soft_density={soft_density}")
+    if soft_density == "compact":
+        parts, culled_names = _apply_soft_density_cull(parts)
+        messages.append(f"soft_density=compact: culled={len(culled_names)}")
+        if culled_names:
+            messages.append("soft_density_culled_names=" + ",".join(sorted(culled_names)[:64]))
+
     if not parts:
         raise ProportionError(
             "nothing to emit: zero recipe parts after resolution",
@@ -4454,6 +4526,7 @@ def build_blockout_recipe(
         counts={"parts": len(parts), "by_role": by_role},
         metrics=metrics,
         join_ready=bool(join_ready),
+        soft_density=soft_density,
     )
 
 
@@ -6054,6 +6127,7 @@ def emit_bpy_script(package: BlockoutRecipePackage) -> str:
         parts_data.append(entry)
 
     join_ready_flag = bool(getattr(package, "join_ready", False))
+    soft_density_flag = getattr(package, "soft_density", "full") or "full"
     lines: list[str] = [
         "# setup_blockout_recipe.py — MeshOps track 0019",
         f"# honesty: {RECIPE_HONESTY}",
@@ -6063,6 +6137,7 @@ def emit_bpy_script(package: BlockoutRecipePackage) -> str:
         f"# recipe schema_version: {RECIPE_SCHEMA_VERSION}",
         f"# recipe_id: {package.recipe_id}",
         f"# join_ready: {join_ready_flag}",
+        f"# soft_density: {soft_density_flag}",
         "# MeshOps face -Y: toes -Y, heels +Y. RECIPE only — not final mesh.",
         "# N1: do not whole-model voxel remesh from this script.",
         "",
@@ -6429,6 +6504,7 @@ def run_blockout_recipe(
     glute: GluteMode = "oval",
     nofuse: bool = False,
     join_ready: bool = False,
+    soft_density: SoftDensity = "full",
     breast_tilt_deg: float | None = None,
     template_applied: Path | str | None = None,
     profiles: str | None = None,
@@ -6495,6 +6571,7 @@ def run_blockout_recipe(
         glute=glute,
         nofuse=nofuse,
         join_ready=join_ready,
+        soft_density=soft_density,
         breast_tilt_deg=breast_tilt_deg,
         template_applied=tpl,
         profile=profile_doc,
@@ -6518,6 +6595,7 @@ def run_blockout_recipe(
         "messages": list(package.messages),
         "neck_len_m": package.metrics.neck_len_m,
         "join_ready": bool(package.join_ready),
+        "soft_density": package.soft_density,
     }
 
 
@@ -6541,6 +6619,7 @@ def run_blockout_emit_setup(
         "counts": dict(package.counts),
         "messages": list(package.messages),
         "join_ready": bool(package.join_ready),
+        "soft_density": package.soft_density,
         "honesty": RECIPE_HONESTY,
     }
 
@@ -6561,6 +6640,9 @@ __all__ = [
     "CLAVICLE_LATERAL_INSET_FRAC",
     "CLAVICLE_MEDIAL_Z_DROP_FRAC_H",
     "CLAVICLE_RADIUS_FRAC_H",
+    "COMPACT_CULL_NAME_EXACT",
+    "COMPACT_CULL_NAME_PREFIXES",
+    "COMPACT_CULL_ROLES",
     "CROTCH_SEAT_SLACK_M",
     "CROTCH_Z_FRAC_FALLBACK",
     "DELT_ARM_RADIUS_SCALE",
@@ -6681,6 +6763,7 @@ __all__ = [
     "BlockoutRecipePackage",
     "RecipeMetrics",
     "RecipePart",
+    "SoftDensity",
     "_append_all_hip_softs",
     "_append_elbow_softs",
     "_apply_arm_muscle_softs",
@@ -6692,6 +6775,7 @@ __all__ = [
     "_apply_neck_diameter_base",
     "_apply_scap_plane",
     "_apply_shoulder_girdle_softs",
+    "_apply_soft_density_cull",
     "_apply_thigh_adduction",
     "_apply_wrist_palm_floor",
     "_build_arm_tapered",
@@ -6699,6 +6783,7 @@ __all__ = [
     "_chest_front_y_for_girdle",
     "_co_shift_thigh_taper_dist",
     "_glute_or_hip_half_depth_m",
+    "_is_compact_cull",
     "_knee_adj_radius_m",
     "_knee_seam_radius_m",
     "_midpoint_of_joints",

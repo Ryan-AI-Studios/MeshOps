@@ -966,6 +966,7 @@ def mesh_proportion_blockout_recipe(
     glute: str = "oval",
     nofuse: bool = False,
     join_ready: bool = False,
+    soft_density: str = "full",
     breast_tilt_deg: float | None = None,
     template_applied: str | None = None,
     profiles: str | None = None,
@@ -1002,6 +1003,9 @@ def mesh_proportion_blockout_recipe(
     toes_tier = (toes or "wedge").strip().lower()
     if toes_tier not in ("none", "wedge", "full"):
         raise ValueError("--toes must be none, wedge, or full")
+    soft_density_mode = (soft_density or "full").strip().lower()
+    if soft_density_mode not in ("full", "compact"):
+        raise ValueError("--soft-density must be full or compact")
     # Preserve trailing directory separator intent (R1); Path resolve strips it.
     ends_sep = out.endswith(("/", "\\"))
     out_base = out.rstrip("/\\") if ends_sep else out
@@ -1022,6 +1026,7 @@ def mesh_proportion_blockout_recipe(
         glute=glute_mode,  # type: ignore[arg-type]
         nofuse=nofuse,
         join_ready=bool(join_ready),
+        soft_density=soft_density_mode,  # type: ignore[arg-type]
         breast_tilt_deg=breast_tilt_deg,
         template_applied=(
             _resolve_tool_path(template_applied, work_root) if template_applied else None

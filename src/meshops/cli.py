@@ -2434,6 +2434,11 @@ def proportion_blockout_recipe_cmd(
         "--toes",
         help="Toe tier when --feet: none | wedge | full (default wedge; 0029)",
     ),
+    soft_density: str = typer.Option(
+        "full",
+        "--soft-density",
+        help="Soft density: full | compact (default full; 0082 compact culls secondary softs)",
+    ),
     force: bool = typer.Option(
         False,
         "--force",
@@ -2467,6 +2472,9 @@ def proportion_blockout_recipe_cmd(
     toes_tier = toes.strip().lower()
     if toes_tier not in ("none", "wedge", "full"):
         raise typer.BadParameter("--toes must be none, wedge, or full")
+    soft_density_mode = soft_density.strip().lower()
+    if soft_density_mode not in ("full", "compact"):
+        raise typer.BadParameter("--soft-density must be full or compact")
 
     try:
         # Keep --out as str so trailing directory separators survive (R1).
@@ -2481,6 +2489,7 @@ def proportion_blockout_recipe_cmd(
             glute=glute_mode,  # type: ignore[arg-type]
             nofuse=nofuse,
             join_ready=join_ready,
+            soft_density=soft_density_mode,  # type: ignore[arg-type]
             breast_tilt_deg=breast_tilt_deg,
             template_applied=template_applied,
             profiles=profiles,
@@ -2510,7 +2519,8 @@ def proportion_blockout_recipe_cmd(
             f"parts={counts.get('parts', 0)} "
             f"by_role={by_role} "
             f"neck_len_m={neck_s} "
-            f"join_ready={payload.get('join_ready')}"
+            f"join_ready={payload.get('join_ready')} "
+            f"soft_density={payload.get('soft_density')}"
         )
         for p in payload.get("paths") or []:
             typer.echo(f"  {p}")
