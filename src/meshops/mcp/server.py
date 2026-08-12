@@ -653,6 +653,7 @@ def build_server(work_root: Path | None = None) -> Any:
         glute: str = "oval",
         nofuse: bool = False,
         join_ready: bool = False,
+        soft_density: str = "full",
         breast_tilt_deg: float | None = None,
         template_applied: str | None = None,
         profiles: str | None = None,
@@ -671,7 +672,7 @@ def build_server(work_root: Path | None = None) -> Any:
         Topology: torso trap|ovals, glute oval|two_spheres, optional template-applied.
         Optional profiles + skeleton (0027). Opt-in face/hair/neckline (0028).
         Opt-in hands/feet (0029). Opt-in join_ready (0039; mutually exclusive with nofuse).
-        Raises ProportionError on failure.
+        Opt-in soft_density full|compact (0082). Raises ProportionError on failure.
         """
         return T.mesh_proportion_blockout_recipe(
             wr,
@@ -685,6 +686,7 @@ def build_server(work_root: Path | None = None) -> Any:
             glute=glute,
             nofuse=nofuse,
             join_ready=join_ready,
+            soft_density=soft_density,
             breast_tilt_deg=breast_tilt_deg,
             template_applied=template_applied,
             profiles=profiles,
