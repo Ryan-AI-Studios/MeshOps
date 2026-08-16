@@ -1413,6 +1413,10 @@ def _resolve_limb_side(
         hand_xyz: tuple[float, float, float] | None = None
         if wr_xyz is not None and tip_x is not None and tip_y is not None and tip_z is not None:
             tip = (tip_x, tip_y, tip_z)
+            # 0084 B8: import inside to avoid cycle; untrusted tip keeps wrist Y.
+            from meshops.proportion.extremity_recipe import _fingertip_y_trusted
+
+            tip_trusted = _fingertip_y_trusted(wr_xyz[1], tip_y)
             if forearm_len is not None and forearm_len >= _LENGTH_EPS_M:
                 dx = tip[0] - wr_xyz[0]
                 dy = tip[1] - wr_xyz[1]
@@ -1420,18 +1424,38 @@ def _resolve_limb_side(
                 dlen = math.sqrt(dx * dx + dy * dy + dz * dz)
                 if dlen >= _LENGTH_EPS_M:
                     scale = (_HAND_FOREARM_FRAC * forearm_len) / dlen
-                    hand_xyz = (
-                        wr_xyz[0] + dx * scale,
-                        wr_xyz[1] + dy * scale,
-                        wr_xyz[2] + dz * scale,
-                    )
+                    if tip_trusted:
+                        hand_xyz = (
+                            wr_xyz[0] + dx * scale,
+                            wr_xyz[1] + dy * scale,
+                            wr_xyz[2] + dz * scale,
+                        )
+                    else:
+                        hand_xyz = (
+                            wr_xyz[0] + dx * scale,
+                            wr_xyz[1],
+                            wr_xyz[2] + dz * scale,
+                        )
+                        messages.append(f"joint {hand_id}: y from wrist (fingertip untrusted)")
                 else:
                     # Degenerate direction — mid wrist→tip
-                    hand_xyz = _mid3(wr_xyz, tip)
-                    messages.append(f"joint {hand_id}: mid wrist→fingertip (degenerate direction)")
+                    mid = _mid3(wr_xyz, tip)
+                    if tip_trusted:
+                        hand_xyz = mid
+                        messages.append(
+                            f"joint {hand_id}: mid wrist→fingertip (degenerate direction)"
+                        )
+                    else:
+                        hand_xyz = (mid[0], wr_xyz[1], mid[2])
+                        messages.append(f"joint {hand_id}: y from wrist (fingertip untrusted)")
             else:
-                hand_xyz = _mid3(wr_xyz, tip)
-                messages.append(f"joint {hand_id}: mid wrist→fingertip (forearm length null)")
+                mid = _mid3(wr_xyz, tip)
+                if tip_trusted:
+                    hand_xyz = mid
+                    messages.append(f"joint {hand_id}: mid wrist→fingertip (forearm length null)")
+                else:
+                    hand_xyz = (mid[0], wr_xyz[1], mid[2])
+                    messages.append(f"joint {hand_id}: y from wrist (fingertip untrusted)")
         if hand_xyz is not None:
             # Guard zero-length vs wrist
             if wr_xyz is not None and _dist3(wr_xyz, hand_xyz) < _LENGTH_EPS_M:

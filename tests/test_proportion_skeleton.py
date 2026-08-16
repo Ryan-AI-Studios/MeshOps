@@ -265,6 +265,37 @@ def test_skeleton__missing_fingertip_no_hand() -> None:
     assert any("hand_l" in m and "omitted" in m for m in pkg.messages)
 
 
+def test_skeleton__plane_class_tip_hand_y_from_wrist() -> None:
+    """0084 B8: plane-class fingertip Y → hand.y_m == wrist.y_m (XZ still toward tip)."""
+    lms = _full_landmarks()
+    lms["fingertip_l"] = _lm("fingertip_l", x_m=-0.35, y_m=None, z_m=0.70)
+    lms["fingertip_r"] = _lm("fingertip_r", x_m=0.35, y_m=None, z_m=0.70)
+    pkg = build_blockout_skeleton(_report(lms))
+    j = {jj.id: jj for jj in pkg.joints}
+    for side in ("l", "r"):
+        wrist = j[f"wrist_{side}"]
+        hand = j[f"hand_{side}"]
+        assert wrist.y_m is not None and hand.y_m is not None
+        assert float(hand.y_m) == pytest.approx(float(wrist.y_m), abs=1e-6)
+        assert hand.x_m is not None and wrist.x_m is not None
+        assert abs(float(hand.x_m) - float(wrist.x_m)) > 1e-4
+    assert any("fingertip untrusted" in m for m in pkg.messages)
+
+
+def test_skeleton__trusted_tip_hand_y_interpolates() -> None:
+    """0084 B3/B8: trusted face-forward tip still interpolates hand Y (not clone wrist)."""
+    lms = _full_landmarks()
+    pkg = build_blockout_skeleton(_report(lms))
+    j = {jj.id: jj for jj in pkg.joints}
+    for side in ("l", "r"):
+        wrist = j[f"wrist_{side}"]
+        hand = j[f"hand_{side}"]
+        assert wrist.y_m is not None and hand.y_m is not None
+        assert float(hand.y_m) != pytest.approx(float(wrist.y_m), abs=1e-6)
+        # Toward the more-negative trusted tip
+        assert float(hand.y_m) < float(wrist.y_m)
+
+
 def test_skeleton__measured_requires_full_xyz_front_plane_estimated() -> None:
     """5. measured only full XYZ; invent/prior Y -> estimated (0051 arm prior)."""
     lms = {
