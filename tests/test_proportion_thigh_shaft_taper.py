@@ -172,7 +172,7 @@ def _part(
 def test_t0_const_freezes() -> None:
     """T0: shaft taper const freezes exported / importable."""
     assert THIGH_PROX_SHAFT_SCALE == 1.0
-    assert THIGH_DIST_SHAFT_SCALE == 0.8
+    assert THIGH_DIST_SHAFT_SCALE == 0.72
     assert THIGH_SPLIT_T == 0.5
     assert THIGH_DIST_SHAFT_SCALE < THIGH_PROX_SHAFT_SCALE
     # Fence: prox soft + arms-only dist soft still present
@@ -201,7 +201,7 @@ def test_t1_emit_both_segments() -> None:
 
 
 def test_t2_radii_scales() -> None:
-    """T2: prox_r = mid*1.0; dist_r = mid*0.8 on synthetic thigh_hw."""
+    """T2: prox_r = mid*1.0; dist_r = mid*0.72 on synthetic thigh_hw."""
     mid_r = 0.0613
     report = _limb_mass_report(thigh_hw=mid_r)
     pkg = build_blockout_recipe(report, limbs=True)
@@ -216,8 +216,8 @@ def test_t2_radii_scales() -> None:
             mid_r * THIGH_DIST_SHAFT_SCALE, abs=1e-9
         )
         ratio = float(dist.radius_m) / float(prox.radius_m)  # type: ignore[arg-type]
-        assert 0.75 <= ratio <= 0.82
-        assert ratio == pytest.approx(0.80, abs=1e-9)
+        assert 0.68 <= ratio <= 0.74
+        assert ratio == pytest.approx(0.72, abs=1e-9)
 
 
 def test_t3_classifier() -> None:
@@ -598,13 +598,15 @@ def test_t9_thigh_outer_binds_on_limb_thigh() -> None:
 
 
 def test_t10_product_width_mid() -> None:
-    """T10: product-like mid_r=0.0613 → dist≈0.04904."""
+    """T10: product-like mid_r=0.0613 → dist = mid * THIGH_DIST_SHAFT_SCALE."""
     mid_r = 0.0613
     report = _limb_mass_report(thigh_hw=mid_r)
     pkg = build_blockout_recipe(report, limbs=True)
     by_name = {p.name: p for p in pkg.parts}
     dist = by_name["RECIPE_thigh_taper_dist_l"]
-    assert float(dist.radius_m) == pytest.approx(0.04904, abs=1e-5)  # type: ignore[arg-type]
+    assert float(dist.radius_m) == pytest.approx(  # type: ignore[arg-type]
+        mid_r * THIGH_DIST_SHAFT_SCALE, abs=1e-5
+    )
     prox = by_name["RECIPE_limb_thigh_l"]
     assert float(prox.radius_m) == pytest.approx(0.0613, abs=1e-5)  # type: ignore[arg-type]
     soft = by_name["RECIPE_hip_soft_l"]

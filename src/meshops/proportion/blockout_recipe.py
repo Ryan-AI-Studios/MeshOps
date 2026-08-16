@@ -175,7 +175,7 @@ HIP_SOFT_Y_REAR_FRAC_RX: Final[float] = 0.12
 _HIP_SOFT_R_FLOOR: Final[float] = 1e-4
 # 0070 B1-B3: thigh shaft prox > distal taper (two capsules; no dual-radius schema).
 THIGH_PROX_SHAFT_SCALE: Final[float] = 1.00  # B1: prox segment r vs measured mid half-width
-THIGH_DIST_SHAFT_SCALE: Final[float] = 0.80  # B2: dist segment r vs mid; must be < B1
+THIGH_DIST_SHAFT_SCALE: Final[float] = 0.72  # was 0.80 — 0094 distal plus (0070 leftover capsule)
 THIGH_SPLIT_T: Final[float] = 0.50  # B3/B15: split fraction along hip→knee
 _THIGH_SHAFT_R_FLOOR: Final[float] = 1e-4
 # 0046 B9: template thigh_tilt adduction (medial-shift cap + knee-cluster co-move).
@@ -3282,6 +3282,11 @@ def _build_limbs(
 
     # Cap skip flood: at most 8 segment skip messages already one-per-band
     _ = skip_count  # ≤8 by construction (SEED map size)
+    # 0094 B12: sibling once after both L/R shaft_taper lines (not inside per-side helper).
+    shaft_l = any(m.startswith("thigh_l: shaft_taper") for m in messages)
+    shaft_r = any(m.startswith("thigh_r: shaft_taper") for m in messages)
+    if shaft_l and shaft_r:
+        messages.append(f"thigh distal taper plus: dist_scale={THIGH_DIST_SHAFT_SCALE}")
     return parts
 
 
@@ -3328,6 +3333,7 @@ def _knee_seam_radius_m(
 
     Prefer thigh_taper_dist when present; else limb_thigh; always consider calf_a.
     Diameter ladder fallback only when both shaft ends absent.
+    0094: smaller THIGH_DIST_SHAFT_SCALE shrinks this adj on purpose — 0095 owns bead.
     """
     by = {p.name: p for p in parts}
     cands: list[float] = []
