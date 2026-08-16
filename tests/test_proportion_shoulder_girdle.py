@@ -310,10 +310,9 @@ def test_t3_asymmetric_front_shelf() -> None:
         lat = max(ends, key=lambda e: abs(float(e[0])))
         med = min(ends, key=lambda e: abs(float(e[0])))
         assert float(med[1]) <= shelf + 1e-4
-        # Lateral deepened to shelf (was behind); ridge: not forced equal when different pre
-        assert float(lat[1]) <= max(shoulder_y, shelf) + 1e-4
-        # With lat behind shelf, both at shelf after deepen-front is OK;
-        # product ridge case covered by T3b.
+        # 0083 B21: lat follows glenoid/emit — not forced to shelf
+        assert float(lat[1]) == pytest.approx(shoulder_y, abs=1e-3)
+        assert abs(float(lat[1]) - float(shelf)) > 0.01
 
 
 def test_t3b_lat_already_front_unchanged() -> None:
@@ -389,9 +388,9 @@ def test_t3c_landmark_past_oval_shelf_is_oval() -> None:
     ends = [clav.p0, clav.p1]
     lat = max(ends, key=lambda e: abs(float(e[0])))
     med = min(ends, key=lambda e: abs(float(e[0])))
-    # Both deepen only to oval front - not landmark -0.1303
+    # Med deepens only to oval front — not landmark -0.1303. Lat keeps emit Y (B21).
     assert float(med[1]) == pytest.approx(oval_front, abs=1e-4)
-    assert float(lat[1]) == pytest.approx(oval_front, abs=1e-4)
+    assert float(lat[1]) == pytest.approx(-0.04, abs=1e-4)
     assert float(med[1]) > lm_y + 1e-3
 
 
@@ -595,8 +594,8 @@ def test_t13_zero_length_and_missing_capsule_skip() -> None:
             "RECIPE_clavicle_l",
             kind="capsule",
             role="clavicle",
-            p0=[0.0, 0.0, 1.38],
-            p1=[0.0, 0.0, 1.38],
+            p0=[0.0, -0.08, 1.38],
+            p1=[0.0, -0.08, 1.38],
             radius_m=0.005,
         ),
         _part(
@@ -615,8 +614,8 @@ def test_t13_zero_length_and_missing_capsule_skip() -> None:
     _apply_shoulder_girdle_softs(parts, report, m, messages)  # type: ignore[arg-type]
     clav_l = parts[0]
     assert clav_l.p0 is not None and clav_l.p1 is not None
-    assert clav_l.p0 == [0.0, 0.0, 1.38]
-    assert clav_l.p1 == [0.0, 0.0, 1.38]
+    assert clav_l.p0 == [0.0, -0.08, 1.38]
+    assert clav_l.p1 == [0.0, -0.08, 1.38]
     assert any("zero length" in msg for msg in messages)
     assert any("not capsule" in msg for msg in messages)
 
@@ -627,8 +626,8 @@ def test_t13_zero_length_and_missing_capsule_skip() -> None:
             "RECIPE_clavicle_l",
             kind="capsule",
             role="clavicle",
-            p0=[0.0, 0.0, 1.38],
-            p1=[0.0, 0.0, 1.38],
+            p0=[0.0, -0.08, 1.38],
+            p1=[0.0, -0.08, 1.38],
             radius_m=0.005,
         ),
     ]
@@ -636,8 +635,8 @@ def test_t13_zero_length_and_missing_capsule_skip() -> None:
     messages_h: list[str] = []
     _apply_shoulder_girdle_softs(parts_h, report, m_h, messages_h)  # type: ignore[arg-type]
     assert parts_h[0].radius_m == pytest.approx(0.005, abs=1e-12)
-    assert parts_h[0].p0 == [0.0, 0.0, 1.38]
-    assert parts_h[0].p1 == [0.0, 0.0, 1.38]
+    assert parts_h[0].p0 == [0.0, -0.08, 1.38]
+    assert parts_h[0].p1 == [0.0, -0.08, 1.38]
     assert any("zero length" in msg for msg in messages_h)
 
 

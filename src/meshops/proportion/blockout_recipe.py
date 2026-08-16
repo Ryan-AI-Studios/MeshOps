@@ -50,8 +50,10 @@ from meshops.proportion.models import (
     ProportionReport,
 )
 from meshops.proportion.skeleton import (
+    GLENOID_ANTERIOR_FRAC,
     _arm_forward_y,
     _chest_half_depth_for_arm_prior,
+    _glenoid_plane_y,
 )
 
 if TYPE_CHECKING:
@@ -1693,11 +1695,9 @@ def _apply_shoulder_girdle_softs(
                 sh_z = float(lat[2])
                 clav_lat_x = sh_x
 
-                # Lateral X/Z + asymmetric Y shelf (AI2 P2-2 deepen-front only)
+                # Lateral X/Z only. 0083 B21: skip shelf min on lat — follows glenoid/emit Y.
                 lat[0] = sign * sh_x * (1.0 - CLAVICLE_LATERAL_INSET_FRAC)
                 lat[2] = sh_z
-                if shelf_y is not None and math.isfinite(float(shelf_y)):
-                    lat[1] = min(float(lat[1]), float(shelf_y))
 
                 # Medial sternal
                 med[0] = 0.0
@@ -2156,7 +2156,7 @@ def _build_deltoids(
             messages.append(
                 f"deltoid radius {measured:.3f}m clamped to {clamped:.3f}m (Michelin guard)"
             )
-        # 0051 B8: skeleton shoulder Y → landmark Y → arm forward prior.
+        # 0083 B5: skeleton shoulder Y → landmark Y → glenoid plane (not ARM_FORWARD).
         sk_sh = skel_joints.get(lm_id)
         if sk_sh is not None and sk_sh.y_m is not None and math.isfinite(float(sk_sh.y_m)):
             y = float(sk_sh.y_m)
@@ -2166,14 +2166,13 @@ def _build_deltoids(
             placement = "full3d"
         else:
             y_plane = float(chest_mid_y) if chest_mid_y is not None else 0.0
-            y = _arm_forward_y(
+            y = _glenoid_plane_y(
                 y_plane,
                 half_depth=half_depth,
-                height_m=m.height_m,
                 chest_front_y=chest_front_y,
             )
             placement = "full3d"
-            messages.append(f"RECIPE_deltoid_soft_{side}: y_m from arm forward prior")
+            messages.append(f"RECIPE_deltoid_soft_{side}: y_m from glenoid plane")
         center = [float(lm.x_m), y, float(lm.z_m)]
         _apply_delt_outer_x_bias(center, side, clamped, messages)
         name = f"RECIPE_deltoid_soft_{side}"
@@ -3026,6 +3025,24 @@ def _sync_calf_distal_to_ankle(
             messages.append(f"calf_{side}: distal/cyl p1 Y synced to ank_foot ({ay:.4f})")
 
 
+def _noskel_arm_endpoint_ys(
+    band_id: str,
+    y0: float | None,
+    *,
+    y_plane: float,
+    y_prior: float,
+) -> tuple[float, float]:
+    """0083 B7: no-skel arm both-null Y split.
+
+    UA: p0 = landmark shoulder Y if finite, else plane; p1 = distal prior.
+    Forearm: both ends distal prior.
+    """
+    if band_id.startswith("upper_arm"):
+        p0y = float(y0) if y0 is not None and math.isfinite(float(y0)) else float(y_plane)
+        return p0y, float(y_prior)
+    return float(y_prior), float(y_prior)
+
+
 def _build_limbs(
     report: ProportionReport,
     messages: list[str],
@@ -3109,10 +3126,18 @@ def _build_limbs(
                         height_m=report.height_m,
                         chest_front_y=chest_front_y,
                     )
-                    p0 = [float(lm0.x_m), y_prior, float(lm0.z_m)]
-                    p1 = [float(lm1.x_m), y_prior, float(lm1.z_m)]
+                    y0, y1 = _noskel_arm_endpoint_ys(
+                        band_id, lm0.y_m, y_plane=y_plane, y_prior=y_prior
+                    )
+                    p0 = [float(lm0.x_m), y0, float(lm0.z_m)]
+                    p1 = [float(lm1.x_m), y1, float(lm1.z_m)]
                     placement = "full3d"
-                    messages.append(f"{band_id}: y_m null — arm forward prior")
+                    if band_id.startswith("upper_arm"):
+                        messages.append(
+                            f"{band_id}: p0 glenoid plane; p1 arm forward prior (distal)"
+                        )
+                    else:
+                        messages.append(f"{band_id}: y_m null — arm forward prior")
                 else:
                     ys = [y for y in (lm0.y_m, lm1.y_m) if y is not None]
                     y_plane = (sum(ys) / len(ys)) if ys else 0.0
@@ -3938,7 +3963,7 @@ def _emit_one_profile_part(
         else:
             lm = lms.get(sh_id)
             if lm is not None and lm.x_m is not None and lm.z_m is not None:
-                # 0051 B8: null landmark Y → arm forward prior (not invent-0 mid-plane).
+                # 0083 B5: null landmark Y → glenoid plane (not ARM_FORWARD).
                 if lm.y_m is not None and math.isfinite(float(lm.y_m)):
                     dy = float(lm.y_m)
                 else:
@@ -3960,14 +3985,13 @@ def _emit_one_profile_part(
                         else None
                     )
                     y_plane = float(chest_mid_y) if chest_mid_y is not None else 0.0
-                    dy = _arm_forward_y(
+                    dy = _glenoid_plane_y(
                         y_plane,
                         half_depth=half_depth,
-                        height_m=height_m,
                         chest_front_y=chest_front_y,
                     )
                     messages.append(
-                        f"RECIPE_deltoid_soft_{side_tag}: y_m from arm forward prior (profile)"
+                        f"RECIPE_deltoid_soft_{side_tag}: y_m from glenoid plane (profile)"
                     )
                 center = [float(lm.x_m), dy, float(lm.z_m)]
                 messages.append(f"parent_joint {role} unresolved — using landmark placement")
@@ -6658,6 +6682,7 @@ __all__ = [
     "FA_DIST_SHAFT_SCALE",
     "FA_PROX_SHAFT_SCALE",
     "FA_SPLIT_T",
+    "GLENOID_ANTERIOR_FRAC",
     "GLUTE_BOTTOM_UNDER_MID_M",
     "GLUTE_RX_LAT_CAP_FRAC_HIP_HW",
     "GLUTE_RX_LAT_FLOOR_FRAC_HIP_HW",
@@ -6788,6 +6813,7 @@ __all__ = [
     "_knee_seam_radius_m",
     "_midpoint_of_joints",
     "_neck_upper_z",
+    "_noskel_arm_endpoint_ys",
     "_pelvis_ref_rear_y",
     "_ua_shaft_metrics",
     "build_blockout_recipe",

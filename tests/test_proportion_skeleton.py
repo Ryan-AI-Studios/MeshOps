@@ -280,10 +280,9 @@ def test_skeleton__measured_requires_full_xyz_front_plane_estimated() -> None:
     assert j["shoulder_r"].source == "measured"
     assert j["shoulder_l"].source == "estimated"
     assert j["shoulder_l"].y_m is not None
-    # 0051: invent shoulder uses arm forward prior (not front-plane token)
-    assert any(
-        "shoulder_l" in m and ("arm forward prior" in m or "front-plane" in m) for m in pkg.messages
-    )
+    # 0083: invent shoulder stays on glenoid plane (no arm-forward prior on glenoid)
+    assert j["shoulder_l"].y_m == pytest.approx(0.0)
+    assert not any("shoulder_l" in m and "arm forward prior" in m for m in pkg.messages)
 
 
 def test_skeleton__root_origin_no_root_pelvis_bone() -> None:
@@ -812,7 +811,7 @@ def test_skeleton__0037_t1_depth_family_arm_joints_none() -> None:
 
 
 def test_skeleton__0037_t2_real_shoulder_depth_elbow_wrist_inherit() -> None:
-    """T2 (0051): torso-plane chest_mid → arm prior Y; elbow/wrist inherit (arm prior)."""
+    """T2 (0083): torso-plane chest_mid → glenoid ≈ plane; el/wr distal prior from plane."""
     from meshops.proportion.skeleton import _arm_forward_y
 
     h = 1.72
@@ -824,7 +823,7 @@ def test_skeleton__0037_t2_real_shoulder_depth_elbow_wrist_inherit() -> None:
         "elbow_r": _lm("elbow_r", x_m=0.28, y_m=None, z_m=1.10),
         "wrist_l": _lm("wrist_l", x_m=-0.32, y_m=None, z_m=0.85),
         "wrist_r": _lm("wrist_r", x_m=0.32, y_m=None, z_m=0.85),
-        # Torso-plane depth for shoulder ladder → prior (not raw chest_y)
+        # Torso-plane depth for shoulder ladder → glenoid stays at plane
         "chest_mid": _lm("chest_mid", x_m=0.0, y_m=chest_y, z_m=1.25),
     }
     pkg = build_blockout_skeleton(_report(lms, height_m=h))
@@ -832,40 +831,26 @@ def test_skeleton__0037_t2_real_shoulder_depth_elbow_wrist_inherit() -> None:
     # No half-depth evidence -> stature prior from plane: chest_y + (-0.05)*H
     expected = _arm_forward_y(chest_y, half_depth=None, height_m=h, chest_front_y=None)
     sh_y = j["shoulder_l"].y_m
-    assert sh_y == pytest.approx(expected)
-    assert sh_y != pytest.approx(chest_y)
-    # Elbow/wrist chain inherit matches shoulder prior Y
-    assert j["elbow_l"].y_m == pytest.approx(sh_y)
-    assert j["wrist_l"].y_m == pytest.approx(sh_y)
-    assert j["elbow_r"].y_m == pytest.approx(j["shoulder_r"].y_m)
-    assert j["wrist_r"].y_m == pytest.approx(j["shoulder_r"].y_m)
-    # Provenance — (arm prior), not (depth) / front-plane
-    inherit_el = [m for m in pkg.messages if "elbow_l" in m and "inherited" in m]
-    inherit_wr = [m for m in pkg.messages if "wrist_l" in m and "inherited" in m]
-    inherit_el_r = [m for m in pkg.messages if "elbow_r" in m and "inherited" in m]
-    inherit_wr_r = [m for m in pkg.messages if "wrist_r" in m and "inherited" in m]
-    assert inherit_el, f"expected inherited msg for elbow_l; msgs={pkg.messages}"
-    assert inherit_wr, f"expected inherited msg for wrist_l; msgs={pkg.messages}"
-    assert inherit_el_r, f"expected inherited msg for elbow_r; msgs={pkg.messages}"
-    assert inherit_wr_r, f"expected inherited msg for wrist_r; msgs={pkg.messages}"
-    assert any("(arm prior)" in m for m in inherit_el)
-    assert any("(arm prior)" in m for m in inherit_wr)
-    assert any("(arm prior)" in m for m in inherit_el_r)
-    assert any("(arm prior)" in m for m in inherit_wr_r)
-    assert not any("(depth)" in m for m in inherit_el)
-    assert not any("(depth)" in m for m in inherit_wr)
-    assert any("arm forward prior" in m and "shoulder_l" in m for m in pkg.messages)
+    assert sh_y == pytest.approx(chest_y)
+    assert sh_y != pytest.approx(expected)
+    assert j["elbow_l"].y_m == pytest.approx(expected)
+    assert j["wrist_l"].y_m == pytest.approx(expected)
+    assert j["elbow_r"].y_m == pytest.approx(expected)
+    assert j["wrist_r"].y_m == pytest.approx(expected)
+    assert not any("shoulder_l" in m and "arm forward prior" in m for m in pkg.messages)
+    assert any("elbow_l" in m and "arm forward prior" in m and "distal" in m for m in pkg.messages)
+    assert any("wrist_l" in m and "arm forward prior" in m and "distal" in m for m in pkg.messages)
+    assert not any("(arm prior)" in m for m in pkg.messages)
     # Must not be front-plane-only for those joints
     assert not any("elbow_l" in m and "front-plane" in m for m in pkg.messages), (
-        "elbow_l must not use front-plane when shoulder prior applied"
+        "elbow_l must not use front-plane when distal prior applied"
     )
     assert not any("wrist_l" in m and "front-plane" in m for m in pkg.messages), (
-        "wrist_l must not use front-plane when shoulder prior applied"
+        "wrist_l must not use front-plane when distal prior applied"
     )
     assert not any("elbow_r" in m and "front-plane" in m for m in pkg.messages)
     assert not any("wrist_r" in m and "front-plane" in m for m in pkg.messages)
-    # Pure inherit is estimated, never measured; shoulder estimated after prior
-    assert j["shoulder_l"].source == "estimated"
+    # Glenoid Y is depth-ladder chest_mid (honest measured); distal prior is estimated
     assert j["elbow_l"].source == "estimated"
     assert j["wrist_l"].source == "estimated"
     assert j["elbow_r"].source == "estimated"
@@ -873,31 +858,28 @@ def test_skeleton__0037_t2_real_shoulder_depth_elbow_wrist_inherit() -> None:
 
 
 def test_skeleton__0037_t2b_invent_shoulder_keeps_front_plane_msgs() -> None:
-    """T2b (0051): invent shoulder → prior; never 'inherited (depth)'; may (arm prior)."""
+    """T2b (0083): invent glenoid ≈ 0; distal keeps stature prior; never inherit (depth)."""
     h = 1.72
     lms = {
         "shoulder_l": _lm("shoulder_l", x_m=-0.20, y_m=None, z_m=1.40),
         "shoulder_r": _lm("shoulder_r", x_m=0.20, y_m=None, z_m=1.40),
         "elbow_l": _lm("elbow_l", x_m=-0.28, y_m=None, z_m=1.10),
         "wrist_l": _lm("wrist_l", x_m=-0.32, y_m=None, z_m=0.85),
-        # No chest_mid / no depth bands → invent prior from mid-plane 0
+        # No chest_mid / no depth bands → invent glenoid from mid-plane 0
     }
     pkg = build_blockout_skeleton(_report(lms, height_m=h, depth_bands=[]))
     j = _by_id(pkg)
     assert j["shoulder_l"].y_m is not None
-    # Value-stable: invent no half-depth -> 0 + (-0.05)*H
-    assert j["shoulder_l"].y_m == pytest.approx(-0.05 * h)
-    # Numeric chain continuity allowed
-    assert j["elbow_l"].y_m == pytest.approx(j["shoulder_l"].y_m)
-    assert j["wrist_l"].y_m == pytest.approx(j["shoulder_l"].y_m)
-    # Never claim inherited depth (false); (arm prior) OK after 0051
+    assert j["shoulder_l"].y_m == pytest.approx(0.0)
+    assert j["elbow_l"].y_m == pytest.approx(-0.05 * h)
+    assert j["wrist_l"].y_m == pytest.approx(-0.05 * h)
     assert not any("inherited" in m and "(depth)" in m for m in pkg.messages), pkg.messages
-    assert any("arm forward prior" in m and "invent" in m for m in pkg.messages)
-    # Elbow/wrist: (arm prior) inherit preferred; front-plane no longer required
+    assert not any("shoulder_l" in m and "arm forward prior" in m for m in pkg.messages)
+    assert any("arm forward prior" in m and "invent" in m and "distal" in m for m in pkg.messages)
     el_msgs = [m for m in pkg.messages if "elbow_l" in m]
     wr_msgs = [m for m in pkg.messages if "wrist_l" in m]
-    assert any("(arm prior)" in m or "front-plane" in m for m in el_msgs), el_msgs
-    assert any("(arm prior)" in m or "front-plane" in m for m in wr_msgs), wr_msgs
+    assert any("arm forward prior" in m and "distal" in m for m in el_msgs), el_msgs
+    assert any("arm forward prior" in m and "distal" in m for m in wr_msgs), wr_msgs
     assert j["elbow_l"].source == "estimated"
     assert j["wrist_l"].source == "estimated"
 
@@ -920,9 +902,13 @@ def test_skeleton__0037_t3_elbow_no_chest_band_ladder() -> None:
     bands = [_band("chest", y_mid=0.08)]
     pkg = build_blockout_skeleton(_report(lms, height_m=h, depth_bands=bands))
     j = _by_id(pkg)
-    # No ladder message claiming elbow y from chest band (family is None)
+    # No ladder message claiming elbow y from chest band (family is None).
+    # 0083 distal prior may mention "from chest_mid" — that is not a band steal.
     assert not any(
-        "elbow_l" in m and ("depth band" in m or "from chest" in m) and "inherited" not in m
+        "elbow_l" in m
+        and ("depth band" in m or "from chest" in m)
+        and "inherited" not in m
+        and "arm forward prior" not in m
         for m in pkg.messages
     ), pkg.messages
     # Elbow Y may match shoulder (chain inherit) but family remains None
