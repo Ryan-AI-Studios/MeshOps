@@ -67,7 +67,7 @@ _THUMB_SEG_FRAC_HAND: Final[float] = 1.0 / 6.0
 _THUMB_R_SCALE_VS_FINGER: Final[float] = 1.25
 _THUMB_BASE_LATERAL_FRAC_HALF_W: Final[float] = 0.95
 _THUMB_OPPOSE_LATERAL: Final[float] = 0.45
-_THUMB_PALM_PITCH: Final[float] = 0.55
+_THUMB_PALM_PITCH: Final[float] = -0.55  # 0084 B6: face -Y (was +0.55 rear rake)
 # Foot-friendly toe / sole fracs (0044 Phase 0 organic sole)
 _TOE_WEDGE_LEN_FRAC: Final[float] = 0.42  # elongated front mass (not a ball on plate)
 # 0054 full-toe bulk freezes (B5-B10, B15, B11)
@@ -117,7 +117,9 @@ ANK_RZ_FLOOR_M: Final[float] = 0.044  # 0076 B2 (was 0.048; product frac wins)
 ANK_RZ_MIN_VS_CALF_B: Final[float] = 1.35
 ANK_RZ_MAX_FRAC_ANK_Z: Final[float] = 0.60  # AI2 P2-2 ceiling
 HEEL_CONTACT_OVERLAP_TARGET_M: Final[float] = 0.005  # B7 all three sites (0056 fence)
-_FINGER_Y_BIAS_FRAC: Final[float] = 0.10  # secondary only when no tip
+_FINGER_Y_BIAS_FRAC: Final[float] = 0.10  # hang and no-tip slight -Y (never primary -Y)
+# Mirror constraints.AXIAL_DEPTH_MARGIN_M / skeleton._GLENOID_PLANE_MARGIN_M (0084 B21).
+_FINGERTIP_PLANE_MARGIN_M: Final[float] = 0.02
 _NEAR_ZERO: Final[float] = 1e-9
 _FINGER_NAMES: Final[tuple[str, ...]] = ("index", "middle", "ring", "pinky")
 
@@ -497,18 +499,37 @@ def _calf_distal_r_from_parts(
 # ---------------------------------------------------------------------------
 
 
+def _fingertip_y_trusted(wrist_y: float | None, tip_y: float | None) -> bool:
+    """0084 B19: True only for a face-forward, off-plane measured tip.
+
+    False when either Y is missing/non-finite, tip is plane-class
+    (``abs(y) <= 0.02`` / invent 0), or wrist→tip would rear-rake (ΔY >= 0).
+    """
+    if wrist_y is None or tip_y is None:
+        return False
+    if not (math.isfinite(wrist_y) and math.isfinite(tip_y)):
+        return False
+    return tip_y < -_FINGERTIP_PLANE_MARGIN_M and (tip_y - wrist_y) < 0.0
+
+
 def finger_primary_axis(
     wrist: list[float] | None,
     fingertip: list[float] | None,
     *,
     hand_len: float,
 ) -> tuple[float, float, float]:
-    """Primary finger/mitten axis: wrist->tip when both finite; else -Z (B7).
+    """Primary finger/mitten axis: wrist->tip when tip Y trusted; else hang -Z.
 
-    Optional slight -Y bias (<=10% hand_len) is applied only as secondary nudge
-    when no tip — returned as unit vector of (-small_Y, -Z) renormalized.
+    Hang and no-tip both use ``_FINGER_Y_BIAS_FRAC`` as slight -Y on
+    ``(0, -bias, -1)``. Never returns ``axis[1] > 0``.
     """
-    if wrist is not None and fingertip is not None and _finite3(wrist) and _finite3(fingertip):
+    if (
+        wrist is not None
+        and fingertip is not None
+        and _finite3(wrist)
+        and _finite3(fingertip)
+        and _fingertip_y_trusted(wrist[1], fingertip[1])
+    ):
         raw = (
             fingertip[0] - wrist[0],
             fingertip[1] - wrist[1],
@@ -516,11 +537,13 @@ def finger_primary_axis(
         )
         n = _normalize(raw)
         if n is not None:
+            if n[1] > 0.0:
+                n2 = _normalize((n[0], 0.0, n[2]))
+                return n2 if n2 is not None else (0.0, 0.0, -1.0)
             return n
 
-    # Default A-pose hang: primary -Z; slight -Y secondary only (B7, ≤10% hand_len)
+    # Hang / no-tip: primary -Z; slight -Y (B2 / B7, <=10% hand_len)
     bias = _FINGER_Y_BIAS_FRAC * max(hand_len, 0.01)
-    # Direction components before normalize: (0, -bias, -1) so -Z dominates
     raw_def = (0.0, -bias, -1.0)
     n = _normalize(raw_def)
     return n if n is not None else (0.0, 0.0, -1.0)
@@ -1060,6 +1083,14 @@ def _build_hand_side(
         messages.append(f"hand_{side}: length fallback 0.18 m (no H)")
 
     axis = finger_primary_axis(wrist, tip, hand_len=hand_len)
+    tip_trusted = (
+        wrist is not None
+        and tip is not None
+        and _finite3(wrist)
+        and _finite3(tip)
+        and _fingertip_y_trusted(wrist[1], tip[1])
+    )
+    axis_mode = "wrist_tip" if tip_trusted else "hang"
 
     # Palm center: hand joint or mid wrist->tip or wrist + 0.35*hand_len along axis
     if hand is not None:
@@ -1075,6 +1106,10 @@ def _build_hand_side(
     else:
         assert hand_est is not None
         palm_c = list(hand_est)
+
+    # 0084 B4: after the whole ladder, untrusted tip → palm Y = wrist Y (keep X/Z).
+    if wrist is not None and _finite3(wrist) and not tip_trusted:
+        palm_c[1] = wrist[1]
 
     palm_w = _PALM_WIDTH_FRAC_HAND * hand_len
     palm_th = _PALM_THICKNESS_FRAC_HAND * hand_len
@@ -1127,6 +1162,9 @@ def _build_hand_side(
 
     if fingers == "none":
         return out
+
+    if fingers in ("full", "mitten"):
+        messages.append(f"hand hang: axis={axis_mode} pitch={_THUMB_PALM_PITCH} anti-rake")
 
     if fingers == "mitten":
         # Fat mitten ellipsoid overlapping palm (not a thin stick capsule)
@@ -1190,8 +1228,8 @@ def _build_hand_side(
     thumb_r0 = max(fr * _THUMB_R_SCALE_VS_FINGER, _FINGER_R_FLOOR_M)
     thumb_r1 = max(thumb_r0 * _THUMB_DISTAL_R_SCALE, _FINGER_R_FLOOR_M)
     oppose = _THUMB_OPPOSE_LATERAL if side == "l" else -_THUMB_OPPOSE_LATERAL
-    # Palm-plane pitch: +Y when axis primarily -Z (A-pose hang) so thumb swings across palm front
-    pitch = _THUMB_PALM_PITCH  # positive Y component
+    # Palm-plane pitch: face -Y (0084 B6) so thumb swings across palm front, not rear.
+    pitch = _THUMB_PALM_PITCH
     thumb_dir_raw = (
         axis[0] + oppose * 0.5,
         axis[1] + pitch,  # primary oppose read (AI1 P2)
@@ -1276,6 +1314,7 @@ __all__ = [
     "TOE_TIP_PAD_SCALE",
     "TOE_TIP_PAST_FRAC",
     "TOE_WEDGE_RZ_FRAC_SOLE",
+    "_FINGERTIP_PLANE_MARGIN_M",
     "_FINGER_DIGIT_L_SCALE",
     "_FINGER_DIGIT_R_SCALE",
     "_FINGER_R_SCALES_SEG",
@@ -1284,8 +1323,10 @@ __all__ = [
     "_PALM_THICKNESS_FRAC_HAND",
     "_THUMB_DISTAL_L_SCALE",
     "_THUMB_DISTAL_R_SCALE",
+    "_THUMB_PALM_PITCH",
     "FingerTier",
     "ToeTier",
+    "_fingertip_y_trusted",
     "apply_foot_half_width_visual_floor",
     "apply_foot_length_visual_floor",
     "build_foot_parts",
