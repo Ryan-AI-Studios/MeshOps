@@ -242,14 +242,14 @@ def test_t0_public_freezes_exported_in_bands() -> None:
     assert 0.22 <= TORSO_OVAL_RZ_HIP_FRAC <= 0.28
     assert 0.060 <= TORSO_OVAL_OVERLAP_FLOOR_M <= 0.080
     assert 0.025 <= TORSO_OVAL_RZ_GROW_CAP_M <= 0.035
-    assert 0.65 <= TORSO_OVAL_RY_HIP_FRAC <= 0.75
+    assert 0.61 <= TORSO_OVAL_RY_HIP_FRAC <= 0.68
     # exact defaults
     assert TORSO_OVAL_RZ_CHEST_FRAC == 0.28
     assert TORSO_OVAL_RZ_WAIST_FRAC == 0.16
     assert TORSO_OVAL_RZ_HIP_FRAC == 0.24
     assert TORSO_OVAL_OVERLAP_FLOOR_M == 0.070
     assert TORSO_OVAL_RZ_GROW_CAP_M == 0.030
-    assert TORSO_OVAL_RY_HIP_FRAC == 0.70
+    assert TORSO_OVAL_RY_HIP_FRAC == 0.64
     assert TORSO_OVAL_RZ_FLOOR_M == 0.025
     # B4 legacy fence symbol only
     assert TORSO_OVAL_RZ_SPAN_FRAC == 0.22
@@ -304,7 +304,7 @@ def test_t3_not_equal_tire_triad_rz() -> None:
 
 
 def test_t4_ry_magnitudes_from_fracs() -> None:
-    """T4: ry magnitudes — chest 0.72; waist 0.58; hip 0.70 of half_*."""
+    """T4: ry magnitudes — chest 0.72; waist 0.58; hip 0.64 of half_*."""
     half_chest = 0.12
     half_hip = 0.13
     report = _full_torso_report(chest_depth_m=0.24, hip_depth_m=0.26)
@@ -320,7 +320,7 @@ def test_t4_ry_magnitudes_from_fracs() -> None:
 
 
 def test_t5_ry_hip_order_vs_chest_pelvis() -> None:
-    """T5: ry_hip > ry_pelvis; ry_chest > ry_waist. 0090 does not require ry_h < ry_c."""
+    """T5: restore ry_c > ry_h > ry_p; keep ry_c > ry_w (0090 B19 lifted)."""
     report = _full_torso_report()
     pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
     by = {p.name: p for p in pkg.parts}
@@ -329,6 +329,7 @@ def test_t5_ry_hip_order_vs_chest_pelvis() -> None:
     ry_h = float(by[_HIP].ry_m or 0.0)
     ry_p = float(by["RECIPE_pelvis_oval"].ry_m or 0.0)
     eps = 1e-9
+    assert ry_c > ry_h + eps
     assert ry_h > ry_p + eps
     assert ry_c > ry_w + eps
 

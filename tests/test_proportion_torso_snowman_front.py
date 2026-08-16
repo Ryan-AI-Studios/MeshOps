@@ -206,7 +206,7 @@ def test_t0_public_freezes_exported_in_bands() -> None:
     assert 0.52 <= TORSO_OVAL_RY_WAIST_FRAC <= 0.64
     assert 0.68 <= TORSO_OVAL_RY_CHEST_FRAC <= 0.78
     assert 0.46 <= TORSO_CHEST_Y_REAR_BIAS_FRAC_RY <= 0.56
-    assert TORSO_OVAL_RY_HIP_FRAC == 0.70  # 0073 retarget (was 0.80)
+    assert TORSO_OVAL_RY_HIP_FRAC == 0.64  # 0092 hip plate (was 0.70)
     assert TORSO_OVAL_RZ_SPAN_FRAC == 0.22  # B4 fence symbol only
     assert TORSO_OVAL_RZ_FLOOR_M == 0.025
     # exact freeze defaults (0090 thoracic plate)
@@ -252,7 +252,7 @@ def test_t2_male_taper_skips_hard_max() -> None:
 
 
 def test_t3_ry_magnitudes_from_fracs() -> None:
-    """T3: ry chest half*0.72; waist half*0.58; hip half*0.70."""
+    """T3: ry chest half*0.72; waist half*0.58; hip half*0.64."""
     half_chest = 0.12
     half_hip = 0.13
     report = _full_torso_report(chest_depth_m=0.24, hip_depth_m=0.26)
