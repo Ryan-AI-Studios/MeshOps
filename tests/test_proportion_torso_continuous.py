@@ -13,6 +13,7 @@ import pytest
 from meshops.mcp.server import TOOL_NAMES
 from meshops.proportion.anatomy_profile import load_anatomy_profile
 from meshops.proportion.blockout_recipe import (
+    MID_BACK_Z_BELOW_WAIST_M,
     RECIPE_SCHEMA_VERSION,
     TORSO_OVAL_OVERLAP_FLOOR_M,
     TORSO_OVAL_RY_HIP_FRAC,
@@ -484,7 +485,7 @@ def test_t10_grow_respects_cap_never_shrink() -> None:
 
 
 def test_t11_mid_back_follows_waist_hang_applied() -> None:
-    """T11: mid_back z ≈ waist z; breast hang applied (do not pin z=1.228)."""
+    """T11: mid_back z ~ waist - z_below; breast hang applied (do not pin z=1.228)."""
     report = _product_class_report()
     skel = build_blockout_skeleton(report)
     pkg = build_blockout_recipe(report, skeleton=skel, **_product_flags())  # type: ignore[arg-type]
@@ -496,7 +497,7 @@ def test_t11_mid_back_follows_waist_hang_applied() -> None:
     assert len(mbs) == 2
     for mb in mbs:
         assert mb.center is not None
-        assert float(mb.center[2]) == pytest.approx(waist_z, abs=2e-3)
+        assert float(mb.center[2]) == pytest.approx(waist_z - MID_BACK_Z_BELOW_WAIST_M, abs=2e-3)
     breasts = [p for p in pkg.parts if p.role == "breast_soft"]
     assert breasts
     assert any("breast_hang_z_applied: true" in m for m in pkg.messages)

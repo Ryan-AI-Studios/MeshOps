@@ -13,6 +13,7 @@ import pytest
 from meshops.mcp.server import TOOL_NAMES
 from meshops.proportion.anatomy_profile import load_anatomy_profile
 from meshops.proportion.blockout_recipe import (
+    MID_BACK_Z_BELOW_WAIST_M,
     PELVIS_OVAL_RY_FRAC_HALF_HIP,
     RECIPE_SCHEMA_VERSION,
     SCAP_REAR_PAST_M,
@@ -488,7 +489,7 @@ def test_t9_product_n_parts_129_schema_mcp() -> None:
 
 
 def test_t10_waist_hip_bias_and_mid_back_z() -> None:
-    """T10: 0074 waist bias 0.42; 0092 hip bias 0.33; mid_back z ≈ waist z."""
+    """T10: 0074 waist bias 0.42; 0092 hip bias 0.33; mid_back z ~ waist - z_below."""
     assert TORSO_WAIST_Y_REAR_BIAS_FRAC_RY == 0.42
     assert TORSO_HIP_Y_REAR_BIAS_FRAC_RY == 0.33
     assert TORSO_WAIST_Y_REAR_BIAS_FRAC_RY != TORSO_CHEST_Y_REAR_BIAS_FRAC_RY
@@ -503,7 +504,7 @@ def test_t10_waist_hip_bias_and_mid_back_z() -> None:
     assert len(mbs) == 2
     for mb in mbs:
         assert mb.center is not None
-        assert float(mb.center[2]) == pytest.approx(waist_z, abs=2e-3)
+        assert float(mb.center[2]) == pytest.approx(waist_z - MID_BACK_Z_BELOW_WAIST_M, abs=2e-3)
 
 
 def test_t11_scap_follows_chest_rear_plus_past() -> None:
