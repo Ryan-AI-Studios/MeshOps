@@ -15,6 +15,7 @@ from meshops.proportion.blockout_recipe import (
     MID_BACK_RY_FRAC_RX,
     MID_BACK_RY_MIN_FRAC_H,
     MID_BACK_RZ_FRAC_RX,
+    MID_BACK_Z_BELOW_WAIST_M,
     MID_BACK_Z_DROP_FRAC_H,
     RECIPE_HONESTY,
     SCAP_REAR_PAST_M,
@@ -343,12 +344,12 @@ def _metrics_for_ovals(*, chest_y: float | None = 0.0) -> _ResolvedMetrics:
 
 def test_t0_constants_freeze() -> None:
     """T0: 0074 named constant freezes match plan B2-B8 / B17."""
-    assert MID_BACK_REAR_PAST_M == 0.022
+    assert MID_BACK_REAR_PAST_M == 0.032
     assert MID_BACK_RX_MIN_FRAC_H == 0.038
     assert MID_BACK_RY_FRAC_RX == 0.38
     assert MID_BACK_RY_MIN_FRAC_H == 0.014
     assert MID_BACK_RZ_FRAC_RX == 1.30
-    assert MID_BACK_LAT_FRAC == 0.38
+    assert MID_BACK_LAT_FRAC == 0.48
     assert MID_BACK_Z_DROP_FRAC_H == 0.14
     assert MID_BACK_BELOW_SCAP_M == 0.008
     assert TORSO_WAIST_Y_REAR_BIAS_FRAC_RY == 0.42
@@ -415,7 +416,7 @@ def test_t3_plate_ratios() -> None:
 
 
 def test_t4_lateral_frac() -> None:
-    """T4: |cx| = shoulder_hw * 0.38."""
+    """T4: |cx| = shoulder_hw * MID_BACK_LAT_FRAC (0093: 0.48)."""
     sh = 0.2575
     parts = [*_product_like_mid_backs(), _waist_oval(), *_product_like_scaps()]
     msgs: list[str] = []
@@ -429,7 +430,7 @@ def test_t4_lateral_frac() -> None:
 
 
 def test_t5_z_from_waist_oval() -> None:
-    """T5: z ≈ waist oval z when waist present (name SoT)."""
+    """T5: z == waist_z - MID_BACK_Z_BELOW_WAIST_M when waist present (0093 invert)."""
     waist_z = 1.1411
     parts = [
         *_product_like_mid_backs(cz=1.00),
@@ -442,7 +443,7 @@ def test_t5_z_from_waist_oval() -> None:
         if p.role != "mid_back_soft":
             continue
         assert p.center is not None
-        assert float(p.center[2]) == pytest.approx(waist_z, abs=1e-9)
+        assert float(p.center[2]) == pytest.approx(waist_z - MID_BACK_Z_BELOW_WAIST_M, abs=1e-9)
 
 
 def test_t6_dual_lr_equal() -> None:

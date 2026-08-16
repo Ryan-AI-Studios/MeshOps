@@ -154,9 +154,12 @@ MID_BACK_RX_MIN_FRAC_H: Final[float] = 0.038
 MID_BACK_RY_FRAC_RX: Final[float] = 0.38
 MID_BACK_RY_MIN_FRAC_H: Final[float] = 0.014
 MID_BACK_RZ_FRAC_RX: Final[float] = 1.30
-MID_BACK_REAR_PAST_M: Final[float] = 0.022
-MID_BACK_LAT_FRAC: Final[float] = 0.38
+MID_BACK_REAR_PAST_M: Final[float] = 0.032  # was 0.022 — 0093 integrate (cape-aware)
+MID_BACK_LAT_FRAC: Final[float] = 0.48  # was 0.38 — cover waist tire from back
 MID_BACK_Z_DROP_FRAC_H: Final[float] = 0.14
+# 0093 B3: drop below waist oval so plates are lumbar, not coins on the disc.
+# Fallback (no waist) still uses MID_BACK_Z_DROP_FRAC_H.
+MID_BACK_Z_BELOW_WAIST_M: Final[float] = 0.035
 MID_BACK_BELOW_SCAP_M: Final[float] = 0.008
 # 0046 B6: thigh proximal soft at hip (no dist_soft - 0045 B13).
 # 0069: THIGH_PROX_SOFT_SCALE kept for fence/import smoke; superseded for product emit
@@ -2040,6 +2043,7 @@ def _apply_mid_back_plane(
         # B17 anti-cape: outer must stay below scap outer - margin.
         # Do NOT abs(cy) after the pull — a degenerate negative cy would flip
         # positive and re-expand outer past the scap cap (Codex P3-001).
+        # 0093 cape margin on product_0092up: (scap_rear - 0.008) - (waist_rear + 0.032) ≈ 6.3 mm
         if scap_outer_rear is not None:
             outer_cap = scap_outer_rear - MID_BACK_BELOW_SCAP_M
             if cy + ry > outer_cap:
@@ -2057,9 +2061,9 @@ def _apply_mid_back_plane(
             sign = -1.0 if side == "l" else 1.0
             c[0] = sign * float(sh) * MID_BACK_LAT_FRAC
 
-        # B5 Z: prefer exact waist oval Z; fallback shoulder_z drop
+        # B5 Z: prefer waist oval Z minus 0093 lumbar drop; fallback shoulder_z drop
         if waist_z is not None and math.isfinite(waist_z):
-            c[2] = waist_z
+            c[2] = waist_z - MID_BACK_Z_BELOW_WAIST_M
         elif m.shoulder_z is not None and math.isfinite(float(m.shoulder_z)) and h_f is not None:
             c[2] = float(m.shoulder_z) - MID_BACK_Z_DROP_FRAC_H * h_f
 
@@ -2111,6 +2115,17 @@ def _apply_mid_back_plane(
             f"rx/ry/rz={float(p.rx_m or 0.0):.4f}/{float(p.ry_m or 0.0):.4f}/"
             f"{float(p.rz_m or 0.0):.4f} outer_rear={outer:.4f}"
         )
+    outer_acc = 0.0
+    for i in idxs:
+        pi = parts[i]
+        assert pi.center is not None
+        outer_acc += float(pi.center[1]) + float(pi.ry_m or 0.0)
+    mean_outer = outer_acc / n
+    messages.append(
+        "torso mid-back integrate: "
+        f"past={MID_BACK_REAR_PAST_M} lat={MID_BACK_LAT_FRAC} "
+        f"z_below={MID_BACK_Z_BELOW_WAIST_M} outer={mean_outer:.4f} z={mean_z:.4f}"
+    )
 
 
 def _build_deltoids(
@@ -6748,6 +6763,7 @@ __all__ = [
     "MID_BACK_RY_FRAC_RX",
     "MID_BACK_RY_MIN_FRAC_H",
     "MID_BACK_RZ_FRAC_RX",
+    "MID_BACK_Z_BELOW_WAIST_M",
     "MID_BACK_Z_DROP_FRAC_H",
     "NECK_BASE_RX_FRAC_R",
     "NECK_BASE_RY_FRAC_R",
