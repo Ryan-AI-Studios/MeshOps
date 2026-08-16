@@ -18,6 +18,9 @@ from meshops.proportion.blockout_recipe import (
     TORSO_OVAL_RZ_HIP_FRAC,
     TORSO_OVAL_RZ_SPAN_FRAC,
     TORSO_OVAL_RZ_WAIST_FRAC,
+    TORSO_OVAL_Z_NORM_CHEST,
+    TORSO_OVAL_Z_NORM_HIP,
+    TORSO_OVAL_Z_NORM_WAIST,
     TORSO_WAIST_PINCH_TAPER_GATE,
     TORSO_WAIST_RX_MAX_FRAC_CHEST,
     RecipePart,
@@ -233,18 +236,18 @@ def _pair_overlaps(by: dict[str, RecipePart]) -> tuple[float, float]:
 
 
 def test_t0_public_freezes_exported_in_bands() -> None:
-    """T0: public freezes exported; within §0 bands; GROW_CAP=0.030; OVERLAP=0.055."""
+    """T0: public freezes exported; within §0 bands; GROW_CAP=0.030; OVERLAP=0.070."""
     assert 0.26 <= TORSO_OVAL_RZ_CHEST_FRAC <= 0.32
     assert 0.14 <= TORSO_OVAL_RZ_WAIST_FRAC <= 0.18
     assert 0.22 <= TORSO_OVAL_RZ_HIP_FRAC <= 0.28
-    assert 0.050 <= TORSO_OVAL_OVERLAP_FLOOR_M <= 0.070
+    assert 0.060 <= TORSO_OVAL_OVERLAP_FLOOR_M <= 0.080
     assert 0.025 <= TORSO_OVAL_RZ_GROW_CAP_M <= 0.035
     assert 0.65 <= TORSO_OVAL_RY_HIP_FRAC <= 0.75
     # exact defaults
     assert TORSO_OVAL_RZ_CHEST_FRAC == 0.28
     assert TORSO_OVAL_RZ_WAIST_FRAC == 0.16
     assert TORSO_OVAL_RZ_HIP_FRAC == 0.24
-    assert TORSO_OVAL_OVERLAP_FLOOR_M == 0.055
+    assert TORSO_OVAL_OVERLAP_FLOOR_M == 0.070
     assert TORSO_OVAL_RZ_GROW_CAP_M == 0.030
     assert TORSO_OVAL_RY_HIP_FRAC == 0.70
     assert TORSO_OVAL_RZ_FLOOR_M == 0.025
@@ -277,7 +280,7 @@ def test_t1_rz_at_least_planned_b1() -> None:
 
 
 def test_t2_pairwise_overlap_floor() -> None:
-    """T2: pairwise overlap ≥ 0.055 after B2."""
+    """T2: pairwise overlap ≥ TORSO_OVAL_OVERLAP_FLOOR_M after B2."""
     report = _full_torso_report()
     pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
     by = {p.name: p for p in pkg.parts}
@@ -429,16 +432,17 @@ def test_t10_connection_gap_and_constraints() -> None:
 def test_t11_b2_preference_waist_grows_first() -> None:
     """T11: B2 preference - force shortfall -> waist grows first; grown <= GROW_CAP.
 
-    Geometry: span <= ~0.375 m so pre-grow 0.28s+0.16s-0.35s < OVERLAP_FLOOR.
+    Geometry: span <= ~0.375 m so pre-grow planned-rz minus layer Δz_norm < floor.
     """
     # span = 0.35 m -> pre-grow shortfall forces grow
     shoulder_z = 1.30
     hip_z = 0.95
     span = shoulder_z - hip_z
     assert span <= 0.375 + 1e-9
-    # pre-grow shortfall on both pairs
-    pre_ov_cw = (TORSO_OVAL_RZ_CHEST_FRAC + TORSO_OVAL_RZ_WAIST_FRAC - 0.35) * span
-    pre_ov_wh = (TORSO_OVAL_RZ_WAIST_FRAC + TORSO_OVAL_RZ_HIP_FRAC - 0.35) * span
+    dz_cw = TORSO_OVAL_Z_NORM_WAIST - TORSO_OVAL_Z_NORM_CHEST
+    dz_wh = TORSO_OVAL_Z_NORM_HIP - TORSO_OVAL_Z_NORM_WAIST
+    pre_ov_cw = (TORSO_OVAL_RZ_CHEST_FRAC + TORSO_OVAL_RZ_WAIST_FRAC - dz_cw) * span
+    pre_ov_wh = (TORSO_OVAL_RZ_WAIST_FRAC + TORSO_OVAL_RZ_HIP_FRAC - dz_wh) * span
     assert pre_ov_cw < TORSO_OVAL_OVERLAP_FLOOR_M
     assert pre_ov_wh < TORSO_OVAL_OVERLAP_FLOOR_M
 

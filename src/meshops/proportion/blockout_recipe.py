@@ -189,8 +189,13 @@ TORSO_OVAL_RZ_HIP_FRAC: Final[float] = 0.24
 # 0073 B4: legacy equal-span symbol — documentation fence only; emit must NOT use it
 TORSO_OVAL_RZ_SPAN_FRAC: Final[float] = 0.22  # fence 0040 / mean reference
 TORSO_OVAL_RZ_FLOOR_M: Final[float] = 0.025
-# 0073 B2: pairwise vertical overlap floor + cumulative grow cap per layer
-TORSO_OVAL_OVERLAP_FLOOR_M: Final[float] = 0.055
+# 0089 B1: layer z_norm pull (0073 B7 deferred even-thirds). Waist stays 0.50
+# so 0074 mid_back Z=waist does not move.
+TORSO_OVAL_Z_NORM_CHEST: Final[float] = 0.18  # was 0.15
+TORSO_OVAL_Z_NORM_WAIST: Final[float] = 0.50  # stay — 0074 mid_back Z
+TORSO_OVAL_Z_NORM_HIP: Final[float] = 0.82  # was 0.85
+# 0073 B2 + 0089 B3: pairwise vertical overlap floor + cumulative grow cap
+TORSO_OVAL_OVERLAP_FLOOR_M: Final[float] = 0.070  # was 0.055 — AI2 F1
 TORSO_OVAL_RZ_GROW_CAP_M: Final[float] = 0.030
 TORSO_WAIST_RX_MAX_FRAC_CHEST: Final[float] = 0.80
 TORSO_WAIST_PINCH_TAPER_GATE: Final[float] = 0.10
@@ -2608,11 +2613,11 @@ def _build_torso_ovals(
         messages.append("torso ovals: shoulder≈hip near-columnar")
 
     span = z_top - z_bottom
-    # z_norm 0 at shoulder (top), 1 at hip (bottom)
+    # z_norm 0 at shoulder (top), 1 at hip (bottom). 0089 B1 named pull.
     layers: list[tuple[str, float]] = [
-        ("RECIPE_torso_oval_chest", 0.15),
-        ("RECIPE_torso_oval_waist", 0.50),
-        ("RECIPE_torso_oval_hip", 0.85),
+        ("RECIPE_torso_oval_chest", TORSO_OVAL_Z_NORM_CHEST),
+        ("RECIPE_torso_oval_waist", TORSO_OVAL_Z_NORM_WAIST),
+        ("RECIPE_torso_oval_hip", TORSO_OVAL_Z_NORM_HIP),
     ]
     # 0065 two-pass: precompute post-taper rx, then B1 waist cap vs post-taper chest.
     rx_by: dict[str, float] = {
@@ -2740,7 +2745,8 @@ def _build_torso_ovals(
         messages.append(
             "torso form silhouette: "
             f"rz=c/w/h={rz_map[chest_key]:.4f}/{rz_map[waist_key]:.4f}/{rz_map[hip_key]:.4f} "
-            f"overlap_cw={ov_cw:.4f} overlap_wh={ov_wh:.4f}"
+            f"overlap_cw={ov_cw:.4f} overlap_wh={ov_wh:.4f} "
+            f"z_norm=c/w/h={TORSO_OVAL_Z_NORM_CHEST:.2f}/{TORSO_OVAL_Z_NORM_WAIST:.2f}/{TORSO_OVAL_Z_NORM_HIP:.2f}"
         )
 
     if ry_chest is not None and ry_waist is not None and ry_hip is not None:
@@ -6763,6 +6769,9 @@ __all__ = [
     "TORSO_OVAL_RZ_HIP_FRAC",
     "TORSO_OVAL_RZ_SPAN_FRAC",
     "TORSO_OVAL_RZ_WAIST_FRAC",
+    "TORSO_OVAL_Z_NORM_CHEST",
+    "TORSO_OVAL_Z_NORM_HIP",
+    "TORSO_OVAL_Z_NORM_WAIST",
     "TORSO_WAIST_PINCH_TAPER_GATE",
     "TORSO_WAIST_RX_MAX_FRAC_CHEST",
     "TORSO_WAIST_Y_REAR_BIAS_FRAC_RY",

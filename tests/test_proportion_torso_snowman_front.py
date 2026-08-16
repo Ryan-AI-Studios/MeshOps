@@ -14,6 +14,7 @@ from meshops.proportion.blockout_recipe import (
     TORSO_OVAL_RY_WAIST_FRAC,
     TORSO_OVAL_RZ_FLOOR_M,
     TORSO_OVAL_RZ_SPAN_FRAC,
+    TORSO_OVAL_Z_NORM_CHEST,
     TORSO_WAIST_PINCH_TAPER_GATE,
     TORSO_WAIST_RX_MAX_FRAC_CHEST,
     TORSO_WAIST_Y_REAR_BIAS_FRAC_RY,
@@ -225,7 +226,7 @@ def test_t1_taper_ge_gate_waist_rx_capped() -> None:
     by = {p.name: p for p in pkg.parts}
     rx_c = float(by["RECIPE_torso_oval_chest"].rx_m or 0.0)
     rx_w = float(by["RECIPE_torso_oval_waist"].rx_m or 0.0)
-    raw_c = _waist_width_at(0.15, 0.25, 0.24, 0.14)
+    raw_c = _waist_width_at(TORSO_OVAL_Z_NORM_CHEST, 0.25, 0.24, 0.14)
     raw_w = _waist_width_at(0.50, 0.25, 0.24, 0.14)
     assert raw_w > TORSO_WAIST_RX_MAX_FRAC_CHEST * raw_c + 1e-6
     assert rx_c == pytest.approx(raw_c, abs=1e-9)
@@ -242,7 +243,7 @@ def test_t2_male_taper_skips_hard_max() -> None:
     rx_c = float(by["RECIPE_torso_oval_chest"].rx_m or 0.0)
     rx_w = float(by["RECIPE_torso_oval_waist"].rx_m or 0.0)
     # Geometry with taper=0.05 yields raw ratio > 0.80 when hard max off.
-    raw_c = _waist_width_at(0.15, 0.20, 0.14, 0.05)
+    raw_c = _waist_width_at(TORSO_OVAL_Z_NORM_CHEST, 0.20, 0.14, 0.05)
     raw_w = _waist_width_at(0.50, 0.20, 0.14, 0.05)
     assert raw_w / raw_c > TORSO_WAIST_RX_MAX_FRAC_CHEST + 1e-6
     assert rx_c == pytest.approx(raw_c, abs=1e-9)
@@ -498,8 +499,8 @@ def test_t13_two_pass_cap_uses_post_taper_chest_rx() -> None:
     ws, wh = 0.25, 0.24
     taper = 0.22
     assert taper >= TORSO_WAIST_PINCH_TAPER_GATE
-    rx_c_post = _waist_width_at(0.15, ws, wh, taper)
-    rx_c_pre = _waist_width_at(0.15, ws, wh, 0.0)
+    rx_c_post = _waist_width_at(TORSO_OVAL_Z_NORM_CHEST, ws, wh, taper)
+    rx_c_pre = _waist_width_at(TORSO_OVAL_Z_NORM_CHEST, ws, wh, 0.0)
     rx_w_raw = _waist_width_at(0.50, ws, wh, taper)
     expected = min(rx_w_raw, TORSO_WAIST_RX_MAX_FRAC_CHEST * rx_c_post)
     wrong = min(rx_w_raw, TORSO_WAIST_RX_MAX_FRAC_CHEST * rx_c_pre)
