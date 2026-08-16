@@ -200,13 +200,13 @@ def test_t_no_new_sleeve_names() -> None:
 
 
 def test_t_fence_shafts() -> None:
-    """R6: UA/FA/thigh shaft scales stay 1.00/0.88/0.78/0.80 class."""
+    """R6: UA/FA/thigh shaft scales stay 1.00/0.88/0.78/0.72 class."""
     assert UA_PROX_SHAFT_SCALE == 1.00
     assert UA_DIST_SHAFT_SCALE == 0.88
     assert FA_PROX_SHAFT_SCALE == 1.00
     assert FA_DIST_SHAFT_SCALE == 0.78
     assert THIGH_PROX_SHAFT_SCALE == 1.00
-    assert THIGH_DIST_SHAFT_SCALE == 0.80
+    assert THIGH_DIST_SHAFT_SCALE == 0.72
     report = _product_class_report()
     pkg = build_blockout_recipe(report, limbs=True)
     by = {p.name: p for p in pkg.parts}

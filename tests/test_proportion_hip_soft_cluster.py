@@ -454,7 +454,7 @@ def test_t13_0070_taper_fences() -> None:
     pkg = build_blockout_recipe(report, limbs=True)
     by_name = {p.name: p for p in pkg.parts}
     assert THIGH_PROX_SHAFT_SCALE == 1.0
-    assert THIGH_DIST_SHAFT_SCALE == 0.8
+    assert THIGH_DIST_SHAFT_SCALE == 0.72
     assert THIGH_SPLIT_T == 0.5
     for side in ("l", "r"):
         prox = by_name[f"RECIPE_limb_thigh_{side}"]
