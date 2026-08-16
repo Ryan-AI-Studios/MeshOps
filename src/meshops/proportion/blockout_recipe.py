@@ -178,8 +178,8 @@ _THIGH_SHAFT_R_FLOOR: Final[float] = 1e-4
 # 0046 B9: template thigh_tilt adduction (medial-shift cap + knee-cluster co-move).
 THIGH_TILT_DEG_CAP: Final[float] = 15.0
 THIGH_ADDUCTION_MAX_MEDIAL_M: Final[float] = 0.030
-# 0047 B1 + 0065: torso oval depth + front pinch freezes
-TORSO_OVAL_RY_CHEST_FRAC: Final[float] = 0.85  # was 0.95
+# 0047 B1 + 0065 + 0090: torso oval depth + thoracic plate
+TORSO_OVAL_RY_CHEST_FRAC: Final[float] = 0.72  # was 0.85 — 0090 thoracic plate
 TORSO_OVAL_RY_WAIST_FRAC: Final[float] = 0.58  # was 0.72
 TORSO_OVAL_RY_HIP_FRAC: Final[float] = 0.70  # was 0.80; 0073 anti-stack vs chest ball
 # 0073 B1: layer-asymmetric rz fracs (replace equal span*0.22 tire stack)
@@ -199,7 +199,8 @@ TORSO_OVAL_OVERLAP_FLOOR_M: Final[float] = 0.070  # was 0.055 — AI2 F1
 TORSO_OVAL_RZ_GROW_CAP_M: Final[float] = 0.030
 TORSO_WAIST_RX_MAX_FRAC_CHEST: Final[float] = 0.80
 TORSO_WAIST_PINCH_TAPER_GATE: Final[float] = 0.10
-TORSO_CHEST_Y_REAR_BIAS_FRAC_RY: Final[float] = 0.28
+# Hold product chest_rear: bias = rear/ry - 1 ≈ 0.14177/0.09382 - 1 ≈ 0.511.
+TORSO_CHEST_Y_REAR_BIAS_FRAC_RY: Final[float] = 0.51  # was 0.28 — named freeze (not a solver)
 # 0074 B7/B8: mild waist/hip full3d rear bias (cy only — do not change ry).
 TORSO_WAIST_Y_REAR_BIAS_FRAC_RY: Final[float] = 0.42
 TORSO_HIP_Y_REAR_BIAS_FRAC_RY: Final[float] = 0.22
@@ -2775,6 +2776,12 @@ def _build_torso_ovals(
             "torso front pinch: "
             f"waist_rx/chest_rx={rx_waist_emit:.4f}/{rx_chest_emit:.4f} "
             f"({frac:.3f}) chest_front_y={front_y:.4f} chest_rear_y={rear_y:.4f}"
+        )
+        messages.append(
+            "torso thoracic front: "
+            f"ry_frac={TORSO_OVAL_RY_CHEST_FRAC} "
+            f"bias={TORSO_CHEST_Y_REAR_BIAS_FRAC_RY} "
+            f"front={front_y:.4f} rear={rear_y:.4f}"
         )
 
     # 0053 pelvis shelf freezes (was B10: ry = hip_half * 0.85)
