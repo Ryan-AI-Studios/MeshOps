@@ -299,20 +299,30 @@ def test_t2_both_sides_parent_joint() -> None:
 
 
 def test_t3_asymmetric_front_shelf() -> None:
-    """T3: medial on shelf; lateral deepen-front only (not lat==med forced)."""
-    shelf = -0.08
-    shoulder_y = -0.04  # lateral starts behind shelf (less front)
-    pkg = _build_profile_pkg(shoulder_y=shoulder_y, chest_front_y=shelf)
+    """T3: medial on shelf; lateral deepen-front only (not lat==med forced).
+
+    0090: `_chest_front_y_for_girdle` is max(landmark, oval_front). Live oval
+    front after the thoracic plate is less proud than landmark -0.08, so the
+    oval binds (B15 cascade). Lat still follows glenoid/emit (0083 B21).
+    """
+    lm_shelf = -0.08
+    shoulder_y = -0.04  # lateral starts behind landmark (less front)
+    pkg = _build_profile_pkg(shoulder_y=shoulder_y, chest_front_y=lm_shelf)
+    chest = next(p for p in pkg.parts if p.name == "RECIPE_torso_oval_chest")
+    assert chest.center is not None and chest.ry_m is not None
+    oval_front = float(chest.center[1]) - float(chest.ry_m)
+    expected_shelf = max(lm_shelf, oval_front)
     for side in ("l", "r"):
         clav = next(p for p in pkg.parts if p.name == f"RECIPE_clavicle_{side}")
         assert clav.p0 is not None and clav.p1 is not None
         ends = [clav.p0, clav.p1]
         lat = max(ends, key=lambda e: abs(float(e[0])))
         med = min(ends, key=lambda e: abs(float(e[0])))
-        assert float(med[1]) <= shelf + 1e-4
+        assert float(med[1]) <= expected_shelf + 1e-4
+        assert float(med[1]) >= oval_front - 1e-4
         # 0083 B21: lat follows glenoid/emit — not forced to shelf
         assert float(lat[1]) == pytest.approx(shoulder_y, abs=1e-3)
-        assert abs(float(lat[1]) - float(shelf)) > 0.01
+        assert abs(float(lat[1]) - float(med[1])) > 1e-4
 
 
 def test_t3b_lat_already_front_unchanged() -> None:

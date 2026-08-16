@@ -253,12 +253,12 @@ def test_t0_public_freezes_exported_in_bands() -> None:
     assert TORSO_OVAL_RZ_FLOOR_M == 0.025
     # B4 legacy fence symbol only
     assert TORSO_OVAL_RZ_SPAN_FRAC == 0.22
-    # 0065 keep
-    assert TORSO_OVAL_RY_CHEST_FRAC == 0.85
+    # 0065 keep pinch/waist; 0090 chest plate
+    assert TORSO_OVAL_RY_CHEST_FRAC == 0.72
     assert TORSO_OVAL_RY_WAIST_FRAC == 0.58
     assert TORSO_WAIST_RX_MAX_FRAC_CHEST == 0.80
     assert TORSO_WAIST_PINCH_TAPER_GATE == 0.10
-    assert TORSO_CHEST_Y_REAR_BIAS_FRAC_RY == 0.28
+    assert TORSO_CHEST_Y_REAR_BIAS_FRAC_RY == 0.51
 
 
 def test_t1_rz_at_least_planned_b1() -> None:
@@ -304,7 +304,7 @@ def test_t3_not_equal_tire_triad_rz() -> None:
 
 
 def test_t4_ry_magnitudes_from_fracs() -> None:
-    """T4: ry magnitudes — chest 0.85; waist 0.58; hip 0.70 of half_*."""
+    """T4: ry magnitudes — chest 0.72; waist 0.58; hip 0.70 of half_*."""
     half_chest = 0.12
     half_hip = 0.13
     report = _full_torso_report(chest_depth_m=0.24, hip_depth_m=0.26)
@@ -320,16 +320,17 @@ def test_t4_ry_magnitudes_from_fracs() -> None:
 
 
 def test_t5_ry_hip_order_vs_chest_pelvis() -> None:
-    """T5: ry_hip > ry_pelvis; ry_hip < ry_chest."""
+    """T5: ry_hip > ry_pelvis; ry_chest > ry_waist. 0090 does not require ry_h < ry_c."""
     report = _full_torso_report()
     pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
     by = {p.name: p for p in pkg.parts}
     ry_c = float(by[_CHEST].ry_m or 0.0)
+    ry_w = float(by[_WAIST].ry_m or 0.0)
     ry_h = float(by[_HIP].ry_m or 0.0)
     ry_p = float(by["RECIPE_pelvis_oval"].ry_m or 0.0)
     eps = 1e-9
     assert ry_h > ry_p + eps
-    assert ry_h < ry_c - eps
+    assert ry_c > ry_w + eps
 
 
 def test_t6_front_pinch_and_chest_rear_bias() -> None:
