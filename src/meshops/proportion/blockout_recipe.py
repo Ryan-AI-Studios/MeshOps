@@ -181,7 +181,7 @@ THIGH_ADDUCTION_MAX_MEDIAL_M: Final[float] = 0.030
 # 0047 B1 + 0065 + 0090: torso oval depth + thoracic plate
 TORSO_OVAL_RY_CHEST_FRAC: Final[float] = 0.72  # was 0.85 — 0090 thoracic plate
 TORSO_OVAL_RY_WAIST_FRAC: Final[float] = 0.58  # was 0.72
-TORSO_OVAL_RY_HIP_FRAC: Final[float] = 0.70  # was 0.80; 0073 anti-stack vs chest ball
+TORSO_OVAL_RY_HIP_FRAC: Final[float] = 0.64  # was 0.70 — 0092 hip plate (0073 vs chest 0.85)
 # 0073 B1: layer-asymmetric rz fracs (replace equal span*0.22 tire stack)
 TORSO_OVAL_RZ_CHEST_FRAC: Final[float] = 0.28
 TORSO_OVAL_RZ_WAIST_FRAC: Final[float] = 0.16
@@ -203,7 +203,9 @@ TORSO_WAIST_PINCH_TAPER_GATE: Final[float] = 0.10
 TORSO_CHEST_Y_REAR_BIAS_FRAC_RY: Final[float] = 0.51  # was 0.28 — named freeze (not a solver)
 # 0074 B7/B8: mild waist/hip full3d rear bias (cy only — do not change ry).
 TORSO_WAIST_Y_REAR_BIAS_FRAC_RY: Final[float] = 0.42
-TORSO_HIP_Y_REAR_BIAS_FRAC_RY: Final[float] = 0.22
+# Hold product hip_rear: bias = rear/ry - 1 ≈ 0.11870/0.08895 - 1 ≈ 0.334.
+# Named freeze stays 0.33 (lands 0.1183; live 0.1187 ± 2 mm). Not a solver.
+TORSO_HIP_Y_REAR_BIAS_FRAC_RY: Final[float] = 0.33  # was 0.22 — named freeze (not a solver)
 # 0049 B1: breast_soft vertical hang floor (center Z drop as fraction of rz).
 BREAST_HANG_Z_DROP_FRAC_RZ: Final[float] = 0.55
 # 0049 D2: unit min hang drop vs pre-anchor (softer than B1; waist soft-clamp threshold).
@@ -2643,6 +2645,7 @@ def _build_torso_ovals(
     ry_waist: float | None = None
     ry_hip: float | None = None
     chest_cy: float | None = None
+    hip_cy: float | None = None
     rx_chest_emit: float | None = None
     rx_waist_emit: float | None = None
     for name, z_norm in layers:
@@ -2669,9 +2672,10 @@ def _build_torso_ovals(
         else:  # hip
             ry = half_hip * TORSO_OVAL_RY_HIP_FRAC
             ry_hip = ry
-            # 0074 B8: mild full3d rear bias (cy only; ry unchanged).
+            # 0074 B8 + 0092: full3d rear bias (cy only; ry from B1).
             if placement == "full3d":
                 center_y = y + TORSO_HIP_Y_REAR_BIAS_FRAC_RY * ry
+            hip_cy = center_y
         parts.append(
             RecipePart(
                 name=name,
@@ -2782,6 +2786,16 @@ def _build_torso_ovals(
             f"ry_frac={TORSO_OVAL_RY_CHEST_FRAC} "
             f"bias={TORSO_CHEST_Y_REAR_BIAS_FRAC_RY} "
             f"front={front_y:.4f} rear={rear_y:.4f}"
+        )
+    # 0092 B12: hip plate inventory (sibling; do not replace 0074 hip_rear_bias=).
+    if hip_cy is not None and ry_hip is not None:
+        hip_front_y = hip_cy - ry_hip
+        hip_rear_y = hip_cy + ry_hip
+        messages.append(
+            "torso hip hierarchy: "
+            f"ry_frac={TORSO_OVAL_RY_HIP_FRAC} "
+            f"bias={TORSO_HIP_Y_REAR_BIAS_FRAC_RY} "
+            f"front={hip_front_y:.4f} rear={hip_rear_y:.4f}"
         )
 
     # 0053 pelvis shelf freezes (was B10: ry = hip_half * 0.85)

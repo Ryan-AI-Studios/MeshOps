@@ -352,7 +352,7 @@ def test_t0_constants_freeze() -> None:
     assert MID_BACK_Z_DROP_FRAC_H == 0.14
     assert MID_BACK_BELOW_SCAP_M == 0.008
     assert TORSO_WAIST_Y_REAR_BIAS_FRAC_RY == 0.42
-    assert TORSO_HIP_Y_REAR_BIAS_FRAC_RY == 0.22
+    assert TORSO_HIP_Y_REAR_BIAS_FRAC_RY == 0.33
 
 
 # ---------------------------------------------------------------------------

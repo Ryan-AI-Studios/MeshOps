@@ -386,7 +386,7 @@ def test_t4_pinch_cap_when_taper_gate_on() -> None:
 
 
 def test_t5_hip_ry_frac_and_pelvis_order() -> None:
-    """T5: hip ry frac 0.70; ry_hip > ry_pelvis."""
+    """T5: hip ry frac 0.64; ry_hip > ry_pelvis."""
     half_hip = 0.13
     report = _full_torso_report(hip_depth_m=0.26)
     pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
@@ -394,7 +394,7 @@ def test_t5_hip_ry_frac_and_pelvis_order() -> None:
     ry_h = float(by[_HIP].ry_m or 0.0)
     ry_p = float(by["RECIPE_pelvis_oval"].ry_m or 0.0)
     assert ry_h == pytest.approx(half_hip * TORSO_OVAL_RY_HIP_FRAC, abs=1e-9)
-    assert TORSO_OVAL_RY_HIP_FRAC == 0.70
+    assert TORSO_OVAL_RY_HIP_FRAC == 0.64
     assert ry_h > ry_p + 1e-9
 
 
