@@ -48,9 +48,15 @@ _HIP_HALF_WIDTH_FRAC: Final[float] = 0.09
 # Mild A-pose arm depth offset (meters scale via height) - only when inventing missing arm Y.
 _A_POSE_ARM_Y_FRAC: Final[float] = -0.05
 # 0051: anterior arm prior when shoulder Y is torso-plane (chest_mid/chest) or invent.
+# 0083: prior is distal-only (elbow/wrist/hand). Glenoid stays on the torso plane.
 ARM_FORWARD_OF_HALF_DEPTH_FRAC: Final[float] = 0.45
 _ARM_FORWARD_ABS_FALLBACK_M: Final[float] = 0.05
 _TORSO_PLANE_DEPTH_SRCS: Final[frozenset[str]] = frozenset({"chest_mid", "chest"})
+# 0083 B16: optional mild glenoid anterior from plane. Default 0 (honest split).
+# Band [0.00, 0.15] x half_depth; chest-front clamp still applies.
+GLENOID_ANTERIOR_FRAC: Final[float] = 0.0
+# Mirror constraints.AXIAL_DEPTH_MARGIN_M — plane-class landmark glenoid (AI2 F2).
+_GLENOID_PLANE_MARGIN_M: Final[float] = 0.02
 
 SkeletonFormat = Literal["json", "bpy", "both"]
 JointSource = Literal["measured", "estimated", "template", "missing"]
@@ -342,6 +348,29 @@ def _chest_half_depth_for_arm_prior(
     if front is not None and mid is not None and _finite(front.y_m) and _finite(mid.y_m):
         return abs(float(front.y_m) - float(mid.y_m))
     return None
+
+
+def _glenoid_plane_y(
+    y_plane: float,
+    *,
+    half_depth: float | None,
+    chest_front_y: float | None,
+) -> float:
+    """0083 B1/B16: glenoid stays on torso plane (optional mild anterior + front clamp).
+
+    Default GLENOID_ANTERIOR_FRAC is 0 → identity. Never applies ARM_FORWARD.
+    """
+    y = float(y_plane)
+    if half_depth is not None and half_depth > 0.0 and math.isfinite(half_depth):
+        y -= GLENOID_ANTERIOR_FRAC * float(half_depth)
+    if chest_front_y is not None and math.isfinite(chest_front_y):
+        y = max(y, float(chest_front_y))
+    return y
+
+
+def _is_glenoid_plane_class(y: float, plane: float) -> bool:
+    """True when glenoid Y is on the torso mid-plane (B2 / AI2 F2)."""
+    return abs(float(y) - float(plane)) <= _GLENOID_PLANE_MARGIN_M
 
 
 def _arm_forward_y(
@@ -1151,40 +1180,46 @@ def _resolve_limb_side(
         )
 
     def _arm_inherit_msg(joint_id: str) -> str:
-        if shoulder_arm_prior:
-            return f"joint {joint_id}: y_m inherited from {sh_id} (arm prior)"
         if shoulder_y_real:
             return f"joint {joint_id}: y_m inherited from {sh_id} (depth)"
         return f"joint {joint_id}: front-plane placement (y_m estimated)"
+
+    y_plane_distal = float(chest_mid_y) if chest_mid_y is not None else 0.0
+    glenoid_plane_class = False
+    glenoid_src = "invent"
+
+    def _apply_distal_prior(joint_id: str) -> float:
+        y_new = _arm_forward_y(
+            y_plane_distal,
+            half_depth=half_depth,
+            height_m=height_m,
+            chest_front_y=chest_front_y,
+        )
+        dy = y_new - y_plane_distal
+        messages.append(
+            f"joint {joint_id}: arm forward prior (distal; from {glenoid_src}; Δy={dy:.4f})"
+        )
+        return y_new
 
     # --- shoulder ---
     lm, lid = _pick_lm(lms, sh_id)
     x, y, z, lid2, x_from, y_from, z_from = _raw_coords_from_lm(lm)
     lid = lid2 or lid
     y, y_from, y_depth, depth_src_id = _depth_y(sh_id, y, y_from)
-    applied_prior = False
-    # B1-B6: arm forward prior when Y is torso-plane depth or invent (not landmark).
-    if y_from:
-        pass  # direct landmark Y wins — no prior
+    # 0083 B1: glenoid stays on torso plane — do not apply _arm_forward_y here.
+    if y_from and y is not None:
+        # Direct landmark Y wins (B3). Plane-class if near torso mid-plane (B2 / AI2 F2).
+        glenoid_plane_class = _is_glenoid_plane_class(float(y), y_plane_distal)
+        glenoid_src = "plane-lm" if glenoid_plane_class else "landmark"
     elif y is not None and y_depth and depth_src_id in _TORSO_PLANE_DEPTH_SRCS:
-        y_plane = float(y)
-        y_new = _arm_forward_y(
-            y_plane,
+        y = _glenoid_plane_y(
+            float(y),
             half_depth=half_depth,
-            height_m=height_m,
             chest_front_y=chest_front_y,
         )
-        dy = y_new - y_plane
-        y = y_new
-        applied_prior = True
-        y_from, y_depth = False, False
-        # Suppress stale lone "from chest_mid (depth)" claim (B6 / P3-4).
-        depth_msg = f"joint {sh_id}: y_m from {depth_src_id} (depth)"
-        for i in range(len(messages) - 1, -1, -1):
-            if messages[i] == depth_msg:
-                del messages[i]
-                break
-        messages.append(f"joint {sh_id}: arm forward prior (from {depth_src_id}; Δy={dy:.4f})")
+        glenoid_plane_class = True
+        glenoid_src = str(depth_src_id)
+        # Keep the depth message — do not rewrite as arm-forward prior (B13 / T11).
     if not _all_finite_xyz(x, y, z):
         if z is None:
             z = _stature_z(height_m, "shoulder")
@@ -1193,20 +1228,16 @@ def _resolve_limb_side(
         if x is None and default_sh_x is not None:
             x = default_sh_x
             x_from = False
-        if y is None and z is not None and not applied_prior:
-            # Invent path (P2-1): plane = chest_mid if finite else 0 — never invent value.
-            y_plane = float(chest_mid_y) if chest_mid_y is not None else 0.0
-            y_new = _arm_forward_y(
-                y_plane,
+        if y is None and z is not None:
+            # Invent path: plane = chest_mid if finite else 0. No distal prior on glenoid.
+            y = _glenoid_plane_y(
+                y_plane_distal,
                 half_depth=half_depth,
-                height_m=height_m,
                 chest_front_y=chest_front_y,
             )
-            dy = y_new - y_plane
-            y = y_new
-            applied_prior = True
             y_from, y_depth = False, False
-            messages.append(f"joint {sh_id}: arm forward prior (from invent; Δy={dy:.4f})")
+            glenoid_plane_class = True
+            glenoid_src = "invent"
         elif y is None and z is None and x is None and default_sh_x is not None:
             messages.append(f"joint {sh_id}: estimated from stature/lateral defaults")
     src = _joint_source(
@@ -1237,9 +1268,9 @@ def _resolve_limb_side(
     if joints[sh_id].source == "missing":
         messages.append(f"joint {sh_id}: missing")
 
-    # Provenance for arm-chain Y inherit (0037 R1 + 0051 arm prior): capture before wrist.
-    shoulder_y_real = bool(y_from or y_depth or applied_prior)
-    shoulder_arm_prior = applied_prior
+    # Provenance for arm-chain Y inherit (0037 R1): off-plane landmark/depth only.
+    # 0083: plane-class glenoid does not donate Y to elbow/wrist.
+    shoulder_y_real = bool(y_from or y_depth)
 
     # --- wrist (needed before elbow mid); arms have NO depth band (R2) ---
     lm, lid = _pick_lm(lms, wr_id)
@@ -1256,7 +1287,11 @@ def _resolve_limb_side(
             x = shj.x_m if _finite(shj.x_m) else default_sh_x
             x_from = False
         if y is None and z is not None:
-            if _finite(shj.y_m):
+            if glenoid_plane_class:
+                y = _apply_distal_prior(wr_id)
+                y_from = False
+                y_depth = False
+            elif _finite(shj.y_m):
                 y = shj.y_m
                 y_from = False
                 y_depth = False
@@ -1309,7 +1344,11 @@ def _resolve_limb_side(
                 x = shx if _finite(shx) else default_sh_x
                 x_from = False
             if y is None and z is not None:
-                if _finite(shy2):
+                if glenoid_plane_class:
+                    y = _apply_distal_prior(el_id)
+                    y_from = False
+                    y_depth = False
+                elif _finite(shy2):
                     y = shy2
                     y_from = False
                     y_depth = False
@@ -2156,6 +2195,7 @@ __all__ = [
     "ARM_FORWARD_OF_HALF_DEPTH_FRAC",
     "AXIS_NOTES",
     "BPY_BASENAME",
+    "GLENOID_ANTERIOR_FRAC",
     "JSON_BASENAME",
     "SKELETON_HONESTY",
     "SKELETON_SCHEMA_VERSION",
@@ -2168,6 +2208,8 @@ __all__ = [
     "_arm_forward_y",
     "_chest_half_depth_for_arm_prior",
     "_depth_family_for_joint",
+    "_glenoid_plane_y",
+    "_is_glenoid_plane_class",
     "build_blockout_skeleton",
     "emit_bpy_script",
     "load_blockout_skeleton",

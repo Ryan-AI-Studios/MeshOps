@@ -2612,10 +2612,13 @@ def test_recipe__0037_t4_limbs_skeleton_arm_full3d() -> None:
     assert arms_no
     assert all(p.placement == "full3d" for p in arms_no)
     assert any("arm forward prior" in m for m in pkg_no.messages)
-    assert arms_no[0].p0 is not None
-    assert arms_no[0].p0[1] == pytest.approx(expected_y, abs=1e-6)
+    ua_no = next(p for p in arms_no if p.name == "RECIPE_limb_upper_arm_l")
+    dist_no = next(p for p in pkg_no.parts if p.name == "RECIPE_arm_taper_dist_ua_l")
+    assert ua_no.p0 is not None and dist_no.p1 is not None
+    assert ua_no.p0[1] == pytest.approx(chest_y, abs=1e-6)
+    assert dist_no.p1[1] == pytest.approx(expected_y, abs=1e-6)
 
-    # With skeleton (finite arm joint XYZ after prior) → full3d + skeleton message
+    # With skeleton (finite arm joint XYZ after split) → full3d + skeleton message
     skel = build_blockout_skeleton(report)
     pkg = build_blockout_recipe(report, limbs=True, skeleton=skel)
     ua_l = next(p for p in pkg.parts if p.name == "RECIPE_limb_upper_arm_l")
@@ -2626,10 +2629,11 @@ def test_recipe__0037_t4_limbs_skeleton_arm_full3d() -> None:
     assert fa_l.placement == "full3d"
     assert any("upper_arm_l: endpoints from skeleton joints" in m for m in pkg.messages)
     assert any("forearm_l: endpoints from skeleton joints" in m for m in pkg.messages)
-    # Capsule Y tracks skeleton prior chain, not absolute chest_mid 0.08
-    assert ua_l.p0 is not None and ua_l.p1 is not None
-    assert ua_l.p0[1] == pytest.approx(expected_y, abs=1e-6)
-    assert ua_l.p1[1] == pytest.approx(expected_y, abs=1e-6)
+    # UA slant: prox p0 = glenoid plane; dist p1 = distal prior
+    dist_l = next(p for p in pkg.parts if p.name == "RECIPE_arm_taper_dist_ua_l")
+    assert ua_l.p0 is not None and dist_l.p1 is not None
+    assert ua_l.p0[1] == pytest.approx(chest_y, abs=1e-6)
+    assert dist_l.p1[1] == pytest.approx(expected_y, abs=1e-6)
     # Arm-only DoD (AI2 B4): thigh/calf must NOT claim skeleton endpoints
     assert not any("thigh" in m and "endpoints from skeleton" in m for m in pkg.messages)
     assert not any("calf" in m and "endpoints from skeleton" in m for m in pkg.messages)

@@ -126,7 +126,7 @@ def test_arm_depth__helpers_half_depth_and_prior_math() -> None:
 
 
 def test_arm_depth__t0_product_like_chest_mid_prior() -> None:
-    """T0: chest_mid only + half-depth → shoulder/elbow/wrist Y < mid by ≥0.03."""
+    """T0 (0083): glenoid ~ chest plane; elbow/wrist keep distal prior + Y < mid-0.03."""
     h = 1.72
     half = 0.13
     chest_y = 0.0
@@ -134,18 +134,25 @@ def test_arm_depth__t0_product_like_chest_mid_prior() -> None:
     bands = [_band("chest", depth_m=half * 2.0)]
     pkg = build_blockout_skeleton(_report(lms, height_m=h, depth_bands=bands))
     j = _by_id(pkg)
-    expected = _arm_forward_y(
+    expected_distal = _arm_forward_y(
         chest_y,
         half_depth=half,
         height_m=h,
         chest_front_y=chest_y - half,
     )
-    for jid in ("shoulder_l", "elbow_l", "wrist_l", "shoulder_r", "elbow_r", "wrist_r"):
+    for jid in ("shoulder_l", "shoulder_r"):
         y_m = j[jid].y_m
         assert y_m is not None, jid
-        assert y_m == pytest.approx(expected, abs=1e-6), jid
+        assert y_m == pytest.approx(chest_y, abs=1e-6), jid
+        assert y_m != pytest.approx(expected_distal, abs=1e-6), jid
+    for jid in ("elbow_l", "wrist_l", "elbow_r", "wrist_r"):
+        y_m = j[jid].y_m
+        assert y_m is not None, jid
+        assert y_m == pytest.approx(expected_distal, abs=1e-6), jid
         assert float(y_m) < chest_y - 0.03, jid
-    assert any("arm forward prior" in m for m in pkg.messages)
+    assert any("arm forward prior" in m and "distal" in m for m in pkg.messages)
+    assert not any("shoulder_l" in m and "arm forward prior" in m for m in pkg.messages)
+    assert not any("shoulder_r" in m and "arm forward prior" in m for m in pkg.messages)
 
 
 # ---------------------------------------------------------------------------
@@ -164,8 +171,24 @@ def test_arm_depth__t1_direct_shoulder_landmark_preserved() -> None:
     assert j["shoulder_l"].y_m == pytest.approx(measured)
     assert j["shoulder_r"].y_m == pytest.approx(measured)
     assert not any("arm forward prior" in m for m in pkg.messages)
-    # Elbow/wrist inherit measured as (depth) — true arm Y
+    # Elbow/wrist inherit measured as (depth) — true off-plane arm Y
     assert any("elbow_l" in m and "inherited" in m and "(depth)" in m for m in pkg.messages)
+
+
+def test_arm_depth__t1b_plane_class_zero_landmark_still_distal() -> None:
+    """T1b (0083 / AI2 F2): landmark shoulder Y=0 is plane-class — distal prior still fires."""
+    h = 1.72
+    half = 0.13
+    lms = _arm_lms(chest_y=0.0, half_depth=half, shoulder_y=0.0)
+    bands = [_band("chest", depth_m=0.26)]
+    pkg = build_blockout_skeleton(_report(lms, height_m=h, depth_bands=bands))
+    j = _by_id(pkg)
+    expected = _arm_forward_y(0.0, half_depth=half, height_m=h, chest_front_y=-half)
+    assert j["shoulder_l"].y_m == pytest.approx(0.0)
+    assert j["elbow_l"].y_m == pytest.approx(expected, abs=1e-6)
+    assert j["wrist_l"].y_m == pytest.approx(expected, abs=1e-6)
+    assert any("elbow_l" in m and "arm forward prior" in m and "distal" in m for m in pkg.messages)
+    assert not any("shoulder_l" in m and "arm forward prior" in m for m in pkg.messages)
 
 
 # ---------------------------------------------------------------------------
@@ -359,10 +382,10 @@ def test_arm_depth__t6b_bridge_p1_matches_skeleton_shoulder() -> None:
 
 
 def test_arm_depth__t7_clamp_not_past_chest_front() -> None:
-    """T7: prior Y ≥ chest_front (front more negative) when front known."""
+    """T7 (0083): glenoid stays at plane; distal prior still clamps at chest_front."""
     h = 1.72
     chest_y = 0.0
-    # Huge half-depth would push past front without clamp
+    # Huge half-depth would push distal past front without clamp
     front_y = -0.05
     lms = {
         "shoulder_l": _lm("shoulder_l", x_m=-0.20, y_m=None, z_m=1.40),
@@ -375,12 +398,14 @@ def test_arm_depth__t7_clamp_not_past_chest_front() -> None:
     pkg = build_blockout_skeleton(_report(lms, height_m=h, depth_bands=bands))
     j = _by_id(pkg)
     assert j["shoulder_l"].y_m is not None
+    assert j["shoulder_l"].y_m == pytest.approx(chest_y, abs=1e-6)
     assert float(j["shoulder_l"].y_m) >= front_y - 1e-9
-    assert j["shoulder_l"].y_m == pytest.approx(front_y)
+    assert j["elbow_l"].y_m == pytest.approx(front_y)
+    assert j["wrist_l"].y_m == pytest.approx(front_y)
 
 
 def test_arm_depth__t8_invent_no_half_depth_value_stable() -> None:
-    """T8: invent without half-depth -> Y ~ (-0.05)*H from plane 0 (P2-1 value-stable)."""
+    """T8 (0083): invent glenoid = plane 0; distal still stature prior (-0.05)*H."""
     h = 1.72
     lms = {
         "shoulder_l": _lm("shoulder_l", x_m=-0.20, y_m=None, z_m=1.40),
@@ -389,8 +414,11 @@ def test_arm_depth__t8_invent_no_half_depth_value_stable() -> None:
     }
     pkg = build_blockout_skeleton(_report(lms, height_m=h, depth_bands=[]))
     j = _by_id(pkg)
-    assert j["shoulder_l"].y_m == pytest.approx(-0.05 * h)
-    assert any("arm forward prior" in m and "invent" in m for m in pkg.messages)
+    assert j["shoulder_l"].y_m == pytest.approx(0.0)
+    assert j["elbow_l"].y_m == pytest.approx(-0.05 * h)
+    assert j["wrist_l"].y_m == pytest.approx(-0.05 * h)
+    assert any("arm forward prior" in m and "invent" in m and "distal" in m for m in pkg.messages)
+    assert not any("shoulder_l" in m and "arm forward prior" in m for m in pkg.messages)
     assert not any("inherited" in m and "(depth)" in m for m in pkg.messages)
 
 
@@ -458,19 +486,19 @@ def test_arm_depth__t9_thigh_null_still_front_plane() -> None:
 
 
 def test_arm_depth__t11_no_stale_lone_chest_mid_depth() -> None:
-    """T11: when prior applies, no lone 'from chest_mid (depth)' without prior line."""
+    """T11 (0083 / AI2 F4): distal claims prior; shoulder must not."""
     h = 1.72
     lms = _arm_lms(chest_y=0.0, half_depth=0.13)
     bands = [_band("chest", depth_m=0.26)]
     pkg = build_blockout_skeleton(_report(lms, height_m=h, depth_bands=bands))
-    depth_only = [
-        m
-        for m in pkg.messages
-        if "shoulder_l" in m and "from chest_mid (depth)" in m and "arm forward prior" not in m
-    ]
-    assert not depth_only, f"stale depth claim: {depth_only}"
+    assert not any("shoulder_l" in m and "arm forward prior" in m for m in pkg.messages), (
+        pkg.messages
+    )
     assert any(
-        "shoulder_l" in m and "arm forward prior" in m and "chest_mid" in m for m in pkg.messages
+        "elbow_l" in m and "arm forward prior" in m and "distal" in m for m in pkg.messages
+    ), pkg.messages
+    assert any(
+        "wrist_l" in m and "arm forward prior" in m and "distal" in m for m in pkg.messages
     ), pkg.messages
 
 
