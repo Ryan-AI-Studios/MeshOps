@@ -194,9 +194,10 @@ def classify_part_name(name: str) -> tuple[ConstraintRole, Side]:
     2. heel → heel
     3. foot → foot_plate (only if not ank_foot)
     4. RECIPE_limb_calf / limb_calf → calf (whole product capsule)
-    5. calf + ends _b → calf_distal
-    6. calf + ends _a → calf_proximal
-    7. bare calf → calf (NOT proximal)
+    5. calf_taper → unknown (0096 distal shaft; before generic calf)
+    6. calf + ends _b → calf_distal
+    7. calf + ends _a → calf_proximal
+    8. bare calf → calf (NOT proximal)
     8. thigh / limb_thigh, arms, bridges, softs, axial, unknown
     """
     raw = strip_blender_suffix(name)
@@ -221,6 +222,8 @@ def classify_part_name(name: str) -> tuple[ConstraintRole, Side]:
         return "calf", side
     # 5-7 calf split / generic
     if "calf" in lower:
+        if "calf_taper" in lower:
+            return "unknown", side
         if stem.endswith("_b"):
             return "calf_distal", side
         if stem.endswith("_a"):

@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from meshops.proportion.blockout_recipe import (
+    CALF_SPLIT_T,
     HIP_SOFT_RX_SCALE,
     THIGH_ADDUCTION_MAX_MEDIAL_M,
     THIGH_DIST_SHAFT_SCALE,
@@ -363,11 +364,19 @@ def test_t6_adduction_chain_knee_delta() -> None:
             )
         cyl0 = by0[f"RECIPE_calf_cyl_{side}"]
         cyl1 = by[f"RECIPE_calf_cyl_{side}"]
+        taper0 = by0[f"RECIPE_calf_taper_dist_{side}"]
+        taper1 = by[f"RECIPE_calf_taper_dist_{side}"]
         assert cyl0.p0 is not None and cyl1.p0 is not None
         assert cyl0.p1 is not None and cyl1.p1 is not None
+        assert taper0.p1 is not None and taper1.p0 is not None and taper1.p1 is not None
         for i in range(3):
             assert float(cyl1.p0[i]) == pytest.approx(float(cyl0.p0[i]) + delta[i], abs=1e-5)
-            assert float(cyl1.p1[i]) == pytest.approx(float(cyl0.p1[i]), abs=1e-5)
+            expected_mid = float(cyl1.p0[i]) + CALF_SPLIT_T * (
+                float(taper1.p1[i]) - float(cyl1.p0[i])
+            )
+            assert float(cyl1.p1[i]) == pytest.approx(expected_mid, abs=1e-5)
+            assert float(taper1.p0[i]) == pytest.approx(float(cyl1.p1[i]), abs=1e-5)
+            assert float(taper1.p1[i]) == pytest.approx(float(taper0.p1[i]), abs=1e-5)
         calf_b0 = by0[f"RECIPE_calf_b_{side}"]
         calf_b1 = by[f"RECIPE_calf_b_{side}"]
         assert calf_b0.center is not None and calf_b1.center is not None

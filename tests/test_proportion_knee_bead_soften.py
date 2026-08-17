@@ -372,7 +372,7 @@ def test_t6_sibling_after_both_knees() -> None:
 
 
 def test_t7_n_parts_schema_mcp() -> None:
-    """T7: n_parts 129 via product flags; schema 1.4.0; MCP 46."""
+    """T7: n_parts 131 via product flags; schema 1.4.0; MCP 46."""
     report = _product_class_report()
     skel = build_blockout_skeleton(report)
     pkg = build_blockout_recipe(
@@ -381,7 +381,7 @@ def test_t7_n_parts_schema_mcp() -> None:
         template_applied=_template(),
         **_product_flags(),  # type: ignore[arg-type]
     )
-    assert len(pkg.parts) == 129
+    assert len(pkg.parts) == 131
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
     assert len(TOOL_NAMES) == 46
 

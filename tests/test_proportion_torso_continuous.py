@@ -454,12 +454,12 @@ def test_t8_front_plane_still_b1_b3() -> None:
     assert ov_wh >= TORSO_OVAL_OVERLAP_FLOOR_M - 1e-9
 
 
-def test_t9_product_n_parts_129_schema_mcp() -> None:
-    """T9: n_parts 129 via hair=short + profile; schema 1.4.0; MCP 46."""
+def test_t9_product_n_parts_131_schema_mcp() -> None:
+    """T9: n_parts 131 via hair=short + profile; schema 1.4.0; MCP 46."""
     report = _product_class_report()
     skel = build_blockout_skeleton(report)
     pkg = build_blockout_recipe(report, skeleton=skel, **_product_flags())  # type: ignore[arg-type]
-    assert len(pkg.parts) == 129
+    assert len(pkg.parts) == 131
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
     assert len(TOOL_NAMES) == 46
     result = validate_constraints(pkg, report=report)

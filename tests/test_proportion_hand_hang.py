@@ -343,14 +343,14 @@ def test_t9_hang_message() -> None:
 
 
 def test_t10_palm_ellipsoid_n_parts() -> None:
-    """T10: C_palm_ellipsoid pass; product-class n_parts 129 (hair=short)."""
+    """T10: C_palm_ellipsoid pass; product-class n_parts 131 (hair=short)."""
     report = _product_class_report()
     skel = build_blockout_skeleton(report)
     pkg = build_blockout_recipe(report, skeleton=skel, **_product_flags())  # type: ignore[arg-type]
     result = validate_constraints(pkg, report=report)
     by_id = {r.id: r for r in result.rules}
     assert by_id["C_palm_ellipsoid"].status == "pass", by_id["C_palm_ellipsoid"].message
-    assert len(pkg.parts) == 129
+    assert len(pkg.parts) == 131
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
     assert SKELETON_SCHEMA_VERSION == "1.0.0"
     # Dual-layer: skeleton hand Y + B4 both land palm on wrist (not halfway to invent-0).
