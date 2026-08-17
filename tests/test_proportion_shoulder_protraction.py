@@ -27,8 +27,10 @@ from meshops.proportion.models import (
 )
 from meshops.proportion.skeleton import (
     ARM_FORWARD_OF_HALF_DEPTH_FRAC,
+    ELBOW_HANG_T,
     SKELETON_SCHEMA_VERSION,
     _arm_forward_y,
+    _elbow_hang_y,
     build_blockout_skeleton,
 )
 
@@ -239,7 +241,7 @@ def test_t_glenoid_plane() -> None:
 
 
 def test_t_distal_prior() -> None:
-    """T_distal_prior: same fixture → elbow/wrist ≈ _arm_forward_y(0)."""
+    """T_distal_prior (0087): wrist ≈ _arm_forward_y(0); elbow = lerp(0, wrist, T)."""
     h = 1.72
     half = 0.13
     lms = _arm_lms(chest_y=0.0, half_depth=half)
@@ -248,10 +250,11 @@ def test_t_distal_prior() -> None:
     )
     j = _by_id(pkg)
     expected = _arm_forward_y(0.0, half_depth=half, height_m=h, chest_front_y=-half)
-    assert j["elbow_l"].y_m == pytest.approx(expected, abs=1e-6)
+    hang = _elbow_hang_y(0.0, expected, t=ELBOW_HANG_T)
     assert j["wrist_l"].y_m == pytest.approx(expected, abs=1e-6)
-    assert j["elbow_r"].y_m == pytest.approx(expected, abs=1e-6)
     assert j["wrist_r"].y_m == pytest.approx(expected, abs=1e-6)
+    assert j["elbow_l"].y_m == pytest.approx(hang, abs=1e-6)
+    assert j["elbow_r"].y_m == pytest.approx(hang, abs=1e-6)
 
 
 def test_t_no_inherit_zero() -> None:
@@ -324,18 +327,22 @@ def test_t_bridge_p1_glenoid() -> None:
 
 
 def test_t_ua_slant() -> None:
-    """T_ua_slant: UA p0 ≈ glenoid; p1 ≈ elbow (diverge ≥ 0.03 on product-like)."""
+    """T_ua_slant (0087): UA + FA both slant ≥ 0.025 after hang (was ≥ 0.03 UA-only)."""
     report = _product_class_report()
     skel = build_blockout_skeleton(report)
     pkg = build_blockout_recipe(report, skeleton=skel, **_product_flags())  # type: ignore[arg-type]
     ua = next(p for p in pkg.parts if p.name == "RECIPE_limb_upper_arm_l")
     dist = next(p for p in pkg.parts if p.name == "RECIPE_arm_taper_dist_ua_l")
+    fa = next(p for p in pkg.parts if p.name == "RECIPE_limb_forearm_l")
+    fa_dist = next(p for p in pkg.parts if p.name == "RECIPE_arm_taper_dist_fa_l")
     assert ua.p0 is not None and dist.p1 is not None
+    assert fa.p0 is not None and fa_dist.p1 is not None
     sh_y = next(j.y_m for j in skel.joints if j.id == "shoulder_l")
     el_y = next(j.y_m for j in skel.joints if j.id == "elbow_l")
     assert ua.p0[1] == pytest.approx(sh_y, abs=1e-6)
     assert dist.p1[1] == pytest.approx(el_y, abs=1e-6)
-    assert abs(float(ua.p0[1]) - float(dist.p1[1])) >= 0.03
+    assert abs(float(ua.p0[1]) - float(dist.p1[1])) >= 0.025
+    assert abs(float(fa.p0[1]) - float(fa_dist.p1[1])) >= 0.025
 
 
 def test_t_landmark_wins() -> None:
@@ -354,7 +361,7 @@ def test_t_landmark_wins() -> None:
 
 
 def test_t_plane_class_zero_lm() -> None:
-    """T_plane_class_zero_lm: landmark shoulder Y=0.0 → el/wr still get distal prior."""
+    """T_plane_class_zero_lm (0087): landmark Y=0 → wrist distal; elbow hang lerp."""
     h = 1.72
     half = 0.13
     lms = _arm_lms(chest_y=0.0, half_depth=half, shoulder_y=0.0)
@@ -363,9 +370,10 @@ def test_t_plane_class_zero_lm() -> None:
     )
     j = _by_id(pkg)
     expected = _arm_forward_y(0.0, half_depth=half, height_m=h, chest_front_y=-half)
+    hang = _elbow_hang_y(0.0, expected, t=ELBOW_HANG_T)
     assert j["shoulder_l"].y_m == pytest.approx(0.0)
-    assert j["elbow_l"].y_m == pytest.approx(expected, abs=1e-6)
     assert j["wrist_l"].y_m == pytest.approx(expected, abs=1e-6)
+    assert j["elbow_l"].y_m == pytest.approx(hang, abs=1e-6)
 
 
 def test_t_fence_0060() -> None:
@@ -427,15 +435,15 @@ def test_t_schema() -> None:
 
 
 def test_t_b7_noskel_landmark_p0() -> None:
-    """B7: no-skel UA p0 uses finite landmark shoulder Y; p1 stays distal prior."""
+    """B7 (0087): no-skel UA p0 landmark/plane; p1 hang lerp; FA p0 hang, p1 prior."""
     y_plane = 0.08
     y_prior = -0.0586
     y0, y1 = _noskel_arm_endpoint_ys("upper_arm_l", 0.04, y_plane=y_plane, y_prior=y_prior)
     assert y0 == pytest.approx(0.04)
-    assert y1 == pytest.approx(y_prior)
+    assert y1 == pytest.approx(_elbow_hang_y(0.04, y_prior, t=ELBOW_HANG_T))
     y0b, y1b = _noskel_arm_endpoint_ys("upper_arm_r", None, y_plane=y_plane, y_prior=y_prior)
     assert y0b == pytest.approx(y_plane)
-    assert y1b == pytest.approx(y_prior)
+    assert y1b == pytest.approx(_elbow_hang_y(y_plane, y_prior, t=ELBOW_HANG_T))
     fa0, fa1 = _noskel_arm_endpoint_ys("forearm_l", None, y_plane=y_plane, y_prior=y_prior)
-    assert fa0 == pytest.approx(y_prior)
+    assert fa0 == pytest.approx(_elbow_hang_y(y_plane, y_prior, t=ELBOW_HANG_T))
     assert fa1 == pytest.approx(y_prior)
