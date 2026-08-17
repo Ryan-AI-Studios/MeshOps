@@ -301,9 +301,9 @@ def test_t6_trusted_tip_still_wrist_tip() -> None:
 
 def test_t7_0079_fence() -> None:
     """T7: 0079 middle r0>r1>r2; segs sum 0.55; fr 0.16; splay 1.95."""
-    assert _FINGER_SEG_FRACS_HAND == (0.25, 0.18, 0.12)
+    assert _FINGER_SEG_FRACS_HAND == (0.27, 0.18, 0.10)
     assert abs(sum(_FINGER_SEG_FRACS_HAND) - 0.55) < 1e-12
-    assert _FINGER_R_SCALES_SEG == (1.00, 0.90, 0.82)
+    assert _FINGER_R_SCALES_SEG == (1.00, 0.86, 0.72)
     assert pytest.approx(0.16) == _FINGER_R_FRAC_PALM
     assert pytest.approx(1.95) == _FINGER_SPLAY_FRAC_HALF_W
     report = _rake_report()
