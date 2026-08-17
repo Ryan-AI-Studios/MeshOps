@@ -41,23 +41,23 @@ _PALM_PAD_RY_FRAC_TH: Final[float] = 0.78  # 0064 B2 (was 0.65)
 _PALM_LEN_FRAC_HAND: Final[float] = 0.48
 _MITTEN_LEN_FRAC_HAND: Final[float] = 0.50
 _MITTEN_R_FRAC_PALM: Final[float] = 0.72  # fat mitt, not thin stick — DO NOT CHANGE
-# 0079 hand digit sausage freezes (B1-B5, B16)
-_FINGER_SEG_FRACS_HAND: Final[tuple[float, float, float]] = (0.25, 0.18, 0.12)  # sum 0.55
-_FINGER_R_SCALES_SEG: Final[tuple[float, float, float]] = (1.00, 0.90, 0.82)
+# 0088 hand digit taper plus (B1-B5, B16; 0079 leftover sausage)
+_FINGER_SEG_FRACS_HAND: Final[tuple[float, float, float]] = (0.27, 0.18, 0.10)  # sum 0.55
+_FINGER_R_SCALES_SEG: Final[tuple[float, float, float]] = (1.00, 0.86, 0.72)
 _FINGER_DIGIT_L_SCALE: Final[dict[str, float]] = {
     "index": 0.96,
     "middle": 1.00,
     "ring": 0.96,
-    "pinky": 0.88,
+    "pinky": 0.80,
 }
 _FINGER_DIGIT_R_SCALE: Final[dict[str, float]] = {
     "index": 0.94,
     "middle": 1.00,
     "ring": 0.96,
-    "pinky": 0.86,
+    "pinky": 0.78,
 }
-_THUMB_DISTAL_L_SCALE: Final[float] = 0.78
-_THUMB_DISTAL_R_SCALE: Final[float] = 0.88
+_THUMB_DISTAL_L_SCALE: Final[float] = 0.72
+_THUMB_DISTAL_R_SCALE: Final[float] = 0.80
 _FINGER_R_FRAC_PALM: Final[float] = 0.16
 _FINGER_R_FLOOR_M: Final[float] = 0.006
 _FINGER_R_CAP_VS_HALF_W: Final[float] = 0.55
@@ -537,9 +537,6 @@ def finger_primary_axis(
         )
         n = _normalize(raw)
         if n is not None:
-            if n[1] > 0.0:
-                n2 = _normalize((n[0], 0.0, n[2]))
-                return n2 if n2 is not None else (0.0, 0.0, -1.0)
             return n
 
     # Hang / no-tip: primary -Z; slight -Y (B2 / B7, <=10% hand_len)

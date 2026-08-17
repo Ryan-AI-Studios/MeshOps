@@ -1236,9 +1236,9 @@ def test_ext__t11_finger_r_floor() -> None:
                 part = next(p for p in pkg.parts if p.name == f"RECIPE_finger_{fname}_{si}_{side}")
                 assert _require_radius_m(part) >= 0.006 - 1e-12
         pinky_2 = next(p for p in pkg.parts if p.name == f"RECIPE_finger_pinky_2_{side}")
-        # pinky distal would be 0.006*0.82*0.86=0.00424 without B16 — floor-bind
+        # pinky distal would be 0.006*0.72*0.78=0.00337 without B16 — floor-bind
         assert _require_radius_m(pinky_2) >= 0.006 - 1e-12
-        # B16 thumb floor: both segs >= 0.006 after distal 0.88 scale (Codex P2-1)
+        # B16 thumb floor: both segs >= 0.006 after distal 0.80 scale (Codex P2-1)
         for si in range(2):
             thumb = next(p for p in pkg.parts if p.name == f"RECIPE_thumb_soft_{si}_{side}")
             assert _require_radius_m(thumb) >= 0.006 - 1e-12
@@ -1310,6 +1310,8 @@ def test_ext__t14_thumb_clear_of_fingers() -> None:
 
 def test_ext__t_b11_bulk_message_full() -> None:
     """B10 / 0079: dual hand bulk + taper messages when fingers=full."""
+    from meshops.proportion.extremity_recipe import _FINGER_SEG_FRACS_HAND
+
     report = _report_with_extremities()
     pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="full")
     bulk_msgs = [m for m in pkg.messages if "hand bulk: full digits" in m]
@@ -1319,7 +1321,7 @@ def test_ext__t_b11_bulk_message_full() -> None:
     assert "splay=1.95" in bulk_msgs[0]
     assert "palm_th=0.36" in bulk_msgs[0]
     assert "pad_ry=0.78" in bulk_msgs[0]
-    assert "segs=(0.25, 0.18, 0.12)" in bulk_msgs[0]
+    assert f"segs={_FINGER_SEG_FRACS_HAND}" in bulk_msgs[0]
     assert "anti-stick" in bulk_msgs[0]
     assert "dist_r=" not in bulk_msgs[0]
 
@@ -1367,23 +1369,23 @@ def test_ext__t0_0079_constants() -> None:
 
     assert _PALM_THICKNESS_FRAC_HAND == 0.36
     assert _PALM_PAD_RY_FRAC_TH == 0.78
-    assert _FINGER_SEG_FRACS_HAND == (0.25, 0.18, 0.12)
+    assert _FINGER_SEG_FRACS_HAND == (0.27, 0.18, 0.10)
     assert abs(sum(_FINGER_SEG_FRACS_HAND) - 0.55) < 1e-12
-    assert _FINGER_R_SCALES_SEG == (1.00, 0.90, 0.82)
+    assert _FINGER_R_SCALES_SEG == (1.00, 0.86, 0.72)
     assert _FINGER_DIGIT_L_SCALE == {
         "index": 0.96,
         "middle": 1.00,
         "ring": 0.96,
-        "pinky": 0.88,
+        "pinky": 0.80,
     }
     assert _FINGER_DIGIT_R_SCALE == {
         "index": 0.94,
         "middle": 1.00,
         "ring": 0.96,
-        "pinky": 0.86,
+        "pinky": 0.78,
     }
-    assert _THUMB_DISTAL_L_SCALE == 0.78
-    assert _THUMB_DISTAL_R_SCALE == 0.88
+    assert _THUMB_DISTAL_L_SCALE == 0.72
+    assert _THUMB_DISTAL_R_SCALE == 0.80
     # AI2 P2-4: must NOT import _FINGER_DISTAL_R_SCALE
     import meshops.proportion.extremity_recipe as ext
 
@@ -1434,7 +1436,9 @@ def test_ext__t15_middle_phalanx_length_taper() -> None:
 
 
 def test_ext__t16_radius_taper_middle() -> None:
-    """T16: middle r2 < r1 < r0; r1 ~ 0.90*r0; r2 ~ 0.82*r0 (digit scale 1.0)."""
+    """T16: middle r2 < r1 < r0; r1/r2 follow _FINGER_R_SCALES_SEG (digit scale 1.0)."""
+    from meshops.proportion.extremity_recipe import _FINGER_R_SCALES_SEG
+
     report = _report_with_extremities()
     pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="full")
     for side in ("l", "r"):
@@ -1445,26 +1449,33 @@ def test_ext__t16_radius_taper_middle() -> None:
         r1 = _require_radius_m(p1)
         r2 = _require_radius_m(p2)
         assert r2 < r1 < r0, f"side={side} r=({r0:.6f},{r1:.6f},{r2:.6f})"
-        assert r1 == pytest.approx(0.90 * r0, abs=1e-9), f"side={side} r1={r1} r0={r0}"
-        assert r2 == pytest.approx(0.82 * r0, abs=1e-9), f"side={side} r2={r2} r0={r0}"
+        assert r1 == pytest.approx(_FINGER_R_SCALES_SEG[1] * r0, abs=1e-9), (
+            f"side={side} r1={r1} r0={r0}"
+        )
+        assert r2 == pytest.approx(_FINGER_R_SCALES_SEG[2] * r0, abs=1e-9), (
+            f"side={side} r2={r2} r0={r0}"
+        )
 
 
 def test_ext__t17_distal_lr_vs_prox_lr() -> None:
-    """T17: distal L/r < 1.50 and < 0.75 * prox L/r (anti-stick dual assert)."""
+    """T17: distal L/r < 1.50 and < 0.75 * prox L/r on all four digits."""
+    from meshops.proportion.extremity_recipe import _FINGER_NAMES
+
     report = _report_with_extremities()
     pkg = build_blockout_recipe(report, limbs=False, hands=True, fingers="full")
     for side in ("l", "r"):
-        prox = next(p for p in pkg.parts if p.name == f"RECIPE_finger_middle_0_{side}")
-        dist = next(p for p in pkg.parts if p.name == f"RECIPE_finger_middle_2_{side}")
-        l0, r0 = _seg_length(prox), _require_radius_m(prox)
-        l2, r2 = _seg_length(dist), _require_radius_m(dist)
-        assert r0 > 0.0 and r2 > 0.0
-        lr_dist = l2 / r2
-        lr_prox = l0 / r0
-        assert lr_dist < 1.50, f"side={side} lr_dist={lr_dist}"
-        assert lr_dist < 0.75 * lr_prox, (
-            f"side={side} lr_dist={lr_dist} vs 0.75*lr_prox={0.75 * lr_prox}"
-        )
+        for fname in _FINGER_NAMES:
+            prox = next(p for p in pkg.parts if p.name == f"RECIPE_finger_{fname}_0_{side}")
+            dist = next(p for p in pkg.parts if p.name == f"RECIPE_finger_{fname}_2_{side}")
+            l0, r0 = _seg_length(prox), _require_radius_m(prox)
+            l2, r2 = _seg_length(dist), _require_radius_m(dist)
+            assert r0 > 0.0 and r2 > 0.0
+            lr_dist = l2 / r2
+            lr_prox = l0 / r0
+            assert lr_dist < 1.50, f"{fname}_{side} lr_dist={lr_dist}"
+            assert lr_dist < 0.75 * lr_prox, (
+                f"{fname}_{side} lr_dist={lr_dist} vs 0.75*lr_prox={0.75 * lr_prox}"
+            )
 
 
 def test_ext__t18_pinky_cascade_vs_middle() -> None:
@@ -1499,5 +1510,10 @@ def test_ext__t19_thumb_distal_taper() -> None:
         r0, r1 = _require_radius_m(t0), _require_radius_m(t1)
         assert l1 < l0, f"side={side} thumb L=({l0:.6f},{l1:.6f})"
         assert r1 < r0, f"side={side} thumb r=({r0:.6f},{r1:.6f})"
-        assert l1 == pytest.approx(0.78 * l0, abs=1e-9)
-        assert r1 == pytest.approx(0.88 * r0, abs=1e-9)
+        from meshops.proportion.extremity_recipe import (
+            _THUMB_DISTAL_L_SCALE,
+            _THUMB_DISTAL_R_SCALE,
+        )
+
+        assert l1 == pytest.approx(_THUMB_DISTAL_L_SCALE * l0, abs=1e-9)
+        assert r1 == pytest.approx(_THUMB_DISTAL_R_SCALE * r0, abs=1e-9)
