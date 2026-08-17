@@ -771,7 +771,7 @@ def test_recipe__t4_arm_dist_soft_scale() -> None:
 
 
 def test_recipe__t5_knee_soft_radius_mixed_thigh_calf() -> None:
-    """0071/0081 T5 pin: knee_soft rx = 1.18*seam (B15 clamp base); seam=max(dist, calf_a)."""
+    """0071/0081 T5 pin: knee_soft rx = KNEE_SOFT_FRAC*seam (B15 clamp); seam=max(dist, calf_a)."""
     from meshops.proportion.blockout_recipe import (
         CALF_PROX_END_SCALE,
         KNEE_SOFT_FRAC,
@@ -783,7 +783,7 @@ def test_recipe__t5_knee_soft_radius_mixed_thigh_calf() -> None:
     )
 
     height_m = 1.72
-    thigh_hw = 0.08  # prox > calf_a; taper_dist = 0.08*0.8 = 0.064 > calf_a
+    thigh_hw = 0.08  # prox > calf_a; taper_dist = 0.08*0.72 = 0.0576 > calf_a
     calf_hw = 0.04
     report = _limb_mass_report(
         height_m=height_m,

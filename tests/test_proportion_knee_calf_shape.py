@@ -179,10 +179,10 @@ def _part(
 
 def test_t0_const_freezes() -> None:
     """T0: knee seam freezes + calf belly lat/rear + 0045 scale fence."""
-    assert KNEE_SOFT_FRAC == 1.18
+    assert KNEE_SOFT_FRAC == 1.08
     assert KNEE_SOFT_MIN_FRAC_H == 0.018
-    assert KNEE_SOFT_RY_FRAC == 0.90
-    assert KNEE_SOFT_RZ_FRAC == 0.95
+    assert KNEE_SOFT_RY_FRAC == 0.82
+    assert KNEE_SOFT_RZ_FRAC == 1.15
     assert KNEE_SOFT_OUTER_FRAC_RX == 0.06
     assert KNEE_SOFT_REAR_FRAC_RY == 0.10
     assert KNEE_SOFT_MAX_VS_THIGH_PROX == 1.25
@@ -216,7 +216,7 @@ def test_t1_knee_rx_above_calf_a_near_seam() -> None:
 
 
 def test_t2_knee_anisotropy() -> None:
-    """T2: sleeve rx >= rz >= ry with 0.90 / 0.95 fracs (rz may exceed ry)."""
+    """T2: tall sleeve rz >= rx >= ry with 0.82 / 1.15 fracs."""
     report = _limb_mass_report(thigh_hw=0.08, calf_hw=0.04)
     pkg = build_blockout_recipe(report, limbs=True)
     by = {p.name: p for p in pkg.parts}
@@ -224,8 +224,8 @@ def test_t2_knee_anisotropy() -> None:
         knee = by[f"RECIPE_knee_soft_{side}"]
         assert knee.rx_m is not None and knee.ry_m is not None and knee.rz_m is not None
         rx, ry, rz = float(knee.rx_m), float(knee.ry_m), float(knee.rz_m)
-        assert rx >= rz - 1e-12
-        assert rz >= ry - 1e-12
+        assert rz >= rx - 1e-12
+        assert rx >= ry - 1e-12
         assert ry == pytest.approx(rx * KNEE_SOFT_RY_FRAC, abs=1e-9)
         assert rz == pytest.approx(rx * KNEE_SOFT_RZ_FRAC, abs=1e-9)
 
@@ -259,7 +259,7 @@ def test_t4_knee_message_rx() -> None:
 
 
 def test_t5_seam_adj_axes_message() -> None:
-    """T5: seam adj x 1.18 + clamp-base-then-aniso + message rx= (pin spirit)."""
+    """T5: seam adj x KNEE_SOFT_FRAC + clamp-base-then-aniso + message rx=."""
     height_m = 1.72
     thigh_hw = 0.08
     calf_hw = 0.04
