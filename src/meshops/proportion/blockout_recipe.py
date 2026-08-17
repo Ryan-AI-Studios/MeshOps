@@ -113,11 +113,12 @@ TRICEP_RY_FRAC: Final[float] = 0.88
 TRICEP_RZ_FRAC: Final[float] = 0.92
 TRICEP_REAR_PAST_M: Final[float] = 0.010
 TRICEP_ALONG_T: Final[float] = 0.50
-# --- Knee joint mass (0045 retune → 0071 → 0081) ---
-KNEE_SOFT_FRAC: Final[float] = 1.18  # 0081 B6 — was 1.10; scale vs SEAM adj
+# --- Knee joint mass (0045 retune → 0071 → 0081 → 0095) ---
+# 0095: 1.08 / 0.82 / 1.15 de-sphere the 0081 ball after 0094 shrank the step.
+KNEE_SOFT_FRAC: Final[float] = 1.08  # 0095 — was 1.18; modest past-dist after 0094
 KNEE_SOFT_MIN_FRAC_H: Final[float] = 0.018  # B2: stature floor
-KNEE_SOFT_RY_FRAC: Final[float] = 0.90  # B3: depth de-sphere
-KNEE_SOFT_RZ_FRAC: Final[float] = 0.95  # 0081 B7 — was 0.75; axial sleeve (rz may > ry)
+KNEE_SOFT_RY_FRAC: Final[float] = 0.82  # 0095 — was 0.90; left de-sphere
+KNEE_SOFT_RZ_FRAC: Final[float] = 1.15  # 0095 — was 0.95; tall sleeve (rz > rx)
 KNEE_SOFT_OUTER_FRAC_RX: Final[float] = 0.06  # B5: outer center bias (* rx, signed)
 KNEE_SOFT_REAR_FRAC_RY: Final[float] = 0.10  # B6: rear +Y center bias (* ry)
 KNEE_SOFT_MAX_VS_THIGH_PROX: Final[float] = 1.25  # 0081 B15 anti-Michelin vs thigh prox
@@ -3395,7 +3396,7 @@ def _append_knee_softs(
     height_m: float | None,
     messages: list[str],
 ) -> None:
-    """0045 B5 + 0071 + 0081: seam-scaled anisotropic knee softs (clamp base then aniso)."""
+    """0045 B5 + 0071 + 0081 + 0095: seam-scaled anisotropic knee (clamp base then aniso)."""
     for side in ("l", "r"):
         center_place = _knee_center_and_placement(report, side, skeleton)
         if center_place is None:
@@ -4443,6 +4444,14 @@ def build_blockout_recipe(
             resolved.height_m,
             messages,
         )
+        # 0095 B12: sibling once after both L/R knee_soft_ lines (const-driven).
+        if any(p.name == "RECIPE_knee_soft_l" for p in parts) and any(
+            p.name == "RECIPE_knee_soft_r" for p in parts
+        ):
+            messages.append(
+                f"knee bead soften: frac={KNEE_SOFT_FRAC} "
+                f"ry={KNEE_SOFT_RY_FRAC} rz={KNEE_SOFT_RZ_FRAC}"
+            )
         # 0062 B10 + 0081: elbow soft post-pass (seam center + 1.22x adj, de-sphere)
         _append_elbow_softs(
             parts,
