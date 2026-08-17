@@ -2556,13 +2556,15 @@ def test_recipe__axial_band_skipped_when_height_null() -> None:
 
 
 def test_recipe__0037_t4_limbs_skeleton_arm_full3d() -> None:
-    """T4 (0051): skeleton arm full3d; Y tracks prior (not absolute chest_mid 0.08).
+    """T4 (0087): skeleton arm full3d; UA dist p1 is hang lerp, wrist stays distal.
 
-    T4b: without skeleton + both-null arms → prior full3d + arm-forward message.
+    T4b: without skeleton + both-null arms → hang UA p1; FA distal + arm-forward message.
     """
     from meshops.proportion.skeleton import (
+        ELBOW_HANG_T,
         _arm_forward_y,
         _chest_half_depth_for_arm_prior,
+        _elbow_hang_y,
         build_blockout_skeleton,
     )
 
@@ -2595,8 +2597,9 @@ def test_recipe__0037_t4_limbs_skeleton_arm_full3d() -> None:
     )
     half = _chest_half_depth_for_arm_prior(report.landmarks_xyz, report.depth_bands)
     expected_y = _arm_forward_y(chest_y, half_depth=half, height_m=h, chest_front_y=None)
+    hang_y = _elbow_hang_y(chest_y, expected_y, t=ELBOW_HANG_T)
 
-    # T4b: Without skeleton → arm forward prior full3d (not front_plane)
+    # T4b: Without skeleton → hang UA p1; FA still distal (not front_plane)
     pkg_no = build_blockout_recipe(report, limbs=True)
     arms_no = [
         p
@@ -2616,7 +2619,7 @@ def test_recipe__0037_t4_limbs_skeleton_arm_full3d() -> None:
     dist_no = next(p for p in pkg_no.parts if p.name == "RECIPE_arm_taper_dist_ua_l")
     assert ua_no.p0 is not None and dist_no.p1 is not None
     assert ua_no.p0[1] == pytest.approx(chest_y, abs=1e-6)
-    assert dist_no.p1[1] == pytest.approx(expected_y, abs=1e-6)
+    assert dist_no.p1[1] == pytest.approx(hang_y, abs=1e-6)
 
     # With skeleton (finite arm joint XYZ after split) → full3d + skeleton message
     skel = build_blockout_skeleton(report)
@@ -2629,11 +2632,11 @@ def test_recipe__0037_t4_limbs_skeleton_arm_full3d() -> None:
     assert fa_l.placement == "full3d"
     assert any("upper_arm_l: endpoints from skeleton joints" in m for m in pkg.messages)
     assert any("forearm_l: endpoints from skeleton joints" in m for m in pkg.messages)
-    # UA slant: prox p0 = glenoid plane; dist p1 = distal prior
+    # UA slant: prox p0 = glenoid plane; dist p1 = elbow hang (0087)
     dist_l = next(p for p in pkg.parts if p.name == "RECIPE_arm_taper_dist_ua_l")
     assert ua_l.p0 is not None and dist_l.p1 is not None
     assert ua_l.p0[1] == pytest.approx(chest_y, abs=1e-6)
-    assert dist_l.p1[1] == pytest.approx(expected_y, abs=1e-6)
+    assert dist_l.p1[1] == pytest.approx(hang_y, abs=1e-6)
     # Arm-only DoD (AI2 B4): thigh/calf must NOT claim skeleton endpoints
     assert not any("thigh" in m and "endpoints from skeleton" in m for m in pkg.messages)
     assert not any("calf" in m and "endpoints from skeleton" in m for m in pkg.messages)

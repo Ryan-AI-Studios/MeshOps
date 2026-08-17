@@ -16,12 +16,14 @@ from meshops.proportion.honesty import DEPTH_HONESTY, SKELETON_HONESTY
 from meshops.proportion.models import DepthBand, LandmarkXYZ, ProportionReport, QualityFlags
 from meshops.proportion.skeleton import (
     BPY_BASENAME,
+    ELBOW_HANG_T,
     JSON_BASENAME,
     SKELETON_SCHEMA_VERSION,
     BlockoutSkeleton,
     SkeletonBone,
     SkeletonJoint,
     _depth_family_for_joint,
+    _elbow_hang_y,
     build_blockout_skeleton,
     emit_bpy_script,
     run_skeleton_build,
@@ -842,7 +844,7 @@ def test_skeleton__0037_t1_depth_family_arm_joints_none() -> None:
 
 
 def test_skeleton__0037_t2_real_shoulder_depth_elbow_wrist_inherit() -> None:
-    """T2 (0083): torso-plane chest_mid → glenoid ≈ plane; el/wr distal prior from plane."""
+    """T2 (0087): torso-plane chest_mid → glenoid ≈ plane; wrist distal; elbow hang."""
     from meshops.proportion.skeleton import _arm_forward_y
 
     h = 1.72
@@ -861,15 +863,16 @@ def test_skeleton__0037_t2_real_shoulder_depth_elbow_wrist_inherit() -> None:
     j = _by_id(pkg)
     # No half-depth evidence -> stature prior from plane: chest_y + (-0.05)*H
     expected = _arm_forward_y(chest_y, half_depth=None, height_m=h, chest_front_y=None)
+    hang = _elbow_hang_y(chest_y, expected, t=ELBOW_HANG_T)
     sh_y = j["shoulder_l"].y_m
     assert sh_y == pytest.approx(chest_y)
     assert sh_y != pytest.approx(expected)
-    assert j["elbow_l"].y_m == pytest.approx(expected)
+    assert j["elbow_l"].y_m == pytest.approx(hang)
     assert j["wrist_l"].y_m == pytest.approx(expected)
-    assert j["elbow_r"].y_m == pytest.approx(expected)
+    assert j["elbow_r"].y_m == pytest.approx(hang)
     assert j["wrist_r"].y_m == pytest.approx(expected)
     assert not any("shoulder_l" in m and "arm forward prior" in m for m in pkg.messages)
-    assert any("elbow_l" in m and "arm forward prior" in m and "distal" in m for m in pkg.messages)
+    assert any("elbow_l" in m and "hang" in m and f"t={ELBOW_HANG_T}" in m for m in pkg.messages)
     assert any("wrist_l" in m and "arm forward prior" in m and "distal" in m for m in pkg.messages)
     assert not any("(arm prior)" in m for m in pkg.messages)
     # Must not be front-plane-only for those joints
@@ -902,14 +905,14 @@ def test_skeleton__0037_t2b_invent_shoulder_keeps_front_plane_msgs() -> None:
     j = _by_id(pkg)
     assert j["shoulder_l"].y_m is not None
     assert j["shoulder_l"].y_m == pytest.approx(0.0)
-    assert j["elbow_l"].y_m == pytest.approx(-0.05 * h)
     assert j["wrist_l"].y_m == pytest.approx(-0.05 * h)
+    assert j["elbow_l"].y_m == pytest.approx(_elbow_hang_y(0.0, -0.05 * h, t=ELBOW_HANG_T))
     assert not any("inherited" in m and "(depth)" in m for m in pkg.messages), pkg.messages
     assert not any("shoulder_l" in m and "arm forward prior" in m for m in pkg.messages)
     assert any("arm forward prior" in m and "invent" in m and "distal" in m for m in pkg.messages)
     el_msgs = [m for m in pkg.messages if "elbow_l" in m]
     wr_msgs = [m for m in pkg.messages if "wrist_l" in m]
-    assert any("arm forward prior" in m and "distal" in m for m in el_msgs), el_msgs
+    assert any("hang" in m and f"t={ELBOW_HANG_T}" in m for m in el_msgs), el_msgs
     assert any("arm forward prior" in m and "distal" in m for m in wr_msgs), wr_msgs
     assert j["elbow_l"].source == "estimated"
     assert j["wrist_l"].source == "estimated"
@@ -934,14 +937,11 @@ def test_skeleton__0037_t3_elbow_no_chest_band_ladder() -> None:
     pkg = build_blockout_skeleton(_report(lms, height_m=h, depth_bands=bands))
     j = _by_id(pkg)
     # No ladder message claiming elbow y from chest band (family is None).
-    # 0083 distal prior may mention "from chest_mid" — that is not a band steal.
+    # 0087 hang may mention (from chest) as glenoid provenance — not a band steal.
     assert not any(
-        "elbow_l" in m
-        and ("depth band" in m or "from chest" in m)
-        and "inherited" not in m
-        and "arm forward prior" not in m
-        for m in pkg.messages
+        "elbow_l" in m and ("depth band" in m or "y_m from chest" in m) for m in pkg.messages
     ), pkg.messages
+    assert any("elbow_l" in m and "elbow hang" in m for m in pkg.messages), pkg.messages
     # Elbow Y may match shoulder (chain inherit) but family remains None
     assert _depth_family_for_joint("elbow_l") is None
     assert j["elbow_l"].y_m is not None

@@ -50,9 +50,11 @@ from meshops.proportion.models import (
     ProportionReport,
 )
 from meshops.proportion.skeleton import (
+    ELBOW_HANG_T,
     GLENOID_ANTERIOR_FRAC,
     _arm_forward_y,
     _chest_half_depth_for_arm_prior,
+    _elbow_hang_y,
     _glenoid_plane_y,
 )
 
@@ -3074,16 +3076,19 @@ def _noskel_arm_endpoint_ys(
     *,
     y_plane: float,
     y_prior: float,
+    hang_t: float = ELBOW_HANG_T,
 ) -> tuple[float, float]:
-    """0083 B7: no-skel arm both-null Y split.
+    """0083 B7 + 0087 hang. Production caller is both-null (y0 is None).
 
-    UA: p0 = landmark shoulder Y if finite, else plane; p1 = distal prior.
-    Forearm: both ends distal prior.
+    Landmark-p0 is helper-only; production both-null uses plane.
+    UA: p0 = landmark shoulder Y if finite, else plane; p1 = hang lerp.
+    Forearm: p0 = hang lerp(plane, prior); p1 = distal prior.
     """
     if band_id.startswith("upper_arm"):
         p0y = float(y0) if y0 is not None and math.isfinite(float(y0)) else float(y_plane)
-        return p0y, float(y_prior)
-    return float(y_prior), float(y_prior)
+        return p0y, _elbow_hang_y(p0y, float(y_prior), t=hang_t)
+    hang = _elbow_hang_y(float(y_plane), float(y_prior), t=hang_t)
+    return hang, float(y_prior)
 
 
 def _build_limbs(
@@ -3177,10 +3182,13 @@ def _build_limbs(
                     placement = "full3d"
                     if band_id.startswith("upper_arm"):
                         messages.append(
-                            f"{band_id}: p0 glenoid plane; p1 arm forward prior (distal)"
+                            f"{band_id}: p0 glenoid plane; p1 elbow hang t={ELBOW_HANG_T}"
                         )
                     else:
-                        messages.append(f"{band_id}: y_m null — arm forward prior")
+                        messages.append(
+                            f"{band_id}: p0 elbow hang t={ELBOW_HANG_T}; "
+                            "p1 arm forward prior (distal)"
+                        )
                 else:
                     ys = [y for y in (lm0.y_m, lm1.y_m) if y is not None]
                     y_plane = (sum(ys) / len(ys)) if ys else 0.0
@@ -4460,6 +4468,11 @@ def build_blockout_recipe(
             resolved.height_m,
             messages,
         )
+        # 0087 B12: sibling once after both L/R elbow_soft_ lines (const-driven).
+        if any(p.name == "RECIPE_elbow_soft_l" for p in parts) and any(
+            p.name == "RECIPE_elbow_soft_r" for p in parts
+        ):
+            messages.append(f"elbow hang: t={ELBOW_HANG_T}")
     else:
         messages.append("--no-limbs: limb_segment parts omitted")
 
@@ -6731,6 +6744,7 @@ __all__ = [
     "DELT_OUTER_X_FRAC",
     "DELT_RY_FRAC",
     "DELT_RZ_FRAC",
+    "ELBOW_HANG_T",
     "ELBOW_SOFT_MAX_SCALE",
     "ELBOW_SOFT_MIN_FRAC_H",
     "ELBOW_SOFT_RY_FRAC",

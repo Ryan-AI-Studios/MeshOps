@@ -52,6 +52,8 @@ _A_POSE_ARM_Y_FRAC: Final[float] = -0.05
 ARM_FORWARD_OF_HALF_DEPTH_FRAC: Final[float] = 0.45
 _ARM_FORWARD_ABS_FALLBACK_M: Final[float] = 0.05
 _TORSO_PLANE_DEPTH_SRCS: Final[frozenset[str]] = frozenset({"chest_mid", "chest"})
+# 0087 — plane-class elbow hang frac glenoid → wrist (equals 0083 B22 mid).
+ELBOW_HANG_T: Final[float] = 0.50
 # 0083 B16: optional mild glenoid anterior from plane. Default 0 (honest split).
 # Band [0.00, 0.15] x half_depth; chest-front clamp still applies.
 GLENOID_ANTERIOR_FRAC: Final[float] = 0.0
@@ -371,6 +373,11 @@ def _glenoid_plane_y(
 def _is_glenoid_plane_class(y: float, plane: float) -> bool:
     """True when glenoid Y is on the torso mid-plane (B2 / AI2 F2)."""
     return abs(float(y) - float(plane)) <= _GLENOID_PLANE_MARGIN_M
+
+
+def _elbow_hang_y(y_glenoid: float, y_wrist: float, *, t: float = ELBOW_HANG_T) -> float:
+    """Plane-class elbow Y: lerp(glenoid, wrist, t)."""
+    return float(y_glenoid) + float(t) * (float(y_wrist) - float(y_glenoid))
 
 
 def _arm_forward_y(
@@ -1265,6 +1272,9 @@ def _resolve_limb_side(
         source=src,
         landmark_id=lid,
     )
+    # 0087 B3 C1: distal prior roots at resolved glenoid plane, not frozen chest_mid|0.
+    if glenoid_plane_class and y is not None and math.isfinite(float(y)):
+        y_plane_distal = float(y)
     if joints[sh_id].source == "missing":
         messages.append(f"joint {sh_id}: missing")
 
@@ -1345,9 +1355,16 @@ def _resolve_limb_side(
                 x_from = False
             if y is None and z is not None:
                 if glenoid_plane_class:
-                    y = _apply_distal_prior(el_id)
+                    wr_y = joints[wr_id].y_m
+                    y = _elbow_hang_y(
+                        y_plane_distal,
+                        float(wr_y) if _finite(wr_y) else _apply_distal_prior(el_id),
+                    )
                     y_from = False
                     y_depth = False
+                    messages.append(
+                        f"joint {el_id}: elbow hang t={ELBOW_HANG_T} (from {glenoid_src})"
+                    )
                 elif _finite(shy2):
                     y = shy2
                     y_from = False
@@ -2219,6 +2236,7 @@ __all__ = [
     "ARM_FORWARD_OF_HALF_DEPTH_FRAC",
     "AXIS_NOTES",
     "BPY_BASENAME",
+    "ELBOW_HANG_T",
     "GLENOID_ANTERIOR_FRAC",
     "JSON_BASENAME",
     "SKELETON_HONESTY",
@@ -2232,6 +2250,7 @@ __all__ = [
     "_arm_forward_y",
     "_chest_half_depth_for_arm_prior",
     "_depth_family_for_joint",
+    "_elbow_hang_y",
     "_glenoid_plane_y",
     "_is_glenoid_plane_class",
     "build_blockout_skeleton",

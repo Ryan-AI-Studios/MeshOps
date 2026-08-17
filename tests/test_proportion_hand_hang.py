@@ -34,8 +34,10 @@ from meshops.proportion.models import (
     QualityFlags,
 )
 from meshops.proportion.skeleton import (
+    ELBOW_HANG_T,
     SKELETON_SCHEMA_VERSION,
     _arm_forward_y,
+    _elbow_hang_y,
     build_blockout_skeleton,
 )
 
@@ -315,17 +317,18 @@ def test_t7_0079_fence() -> None:
 
 
 def test_t8_0083_distal_fence() -> None:
-    """T8: product-like skeleton elbow/wrist still distal prior class."""
+    """T8: product-like skeleton wrist stays distal; elbow hang lerp."""
     h = 1.72
     half = 0.1303
     report = _product_class_report()
     pkg = build_blockout_skeleton(report)
     j = _by_id(pkg)
     expected = _arm_forward_y(0.0, half_depth=half, height_m=h, chest_front_y=-half)
-    assert j["elbow_l"].y_m == pytest.approx(expected, abs=1e-4)
+    hang = _elbow_hang_y(0.0, expected, t=ELBOW_HANG_T)
     assert j["wrist_l"].y_m == pytest.approx(expected, abs=1e-4)
-    assert j["elbow_r"].y_m == pytest.approx(expected, abs=1e-4)
     assert j["wrist_r"].y_m == pytest.approx(expected, abs=1e-4)
+    assert j["elbow_l"].y_m == pytest.approx(hang, abs=1e-4)
+    assert j["elbow_r"].y_m == pytest.approx(hang, abs=1e-4)
 
 
 def test_t9_hang_message() -> None:

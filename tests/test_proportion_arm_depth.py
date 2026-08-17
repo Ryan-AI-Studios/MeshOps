@@ -11,9 +11,11 @@ from meshops.proportion.blockout_recipe import build_blockout_recipe
 from meshops.proportion.models import DepthBand, LandmarkXYZ, ProportionReport, QualityFlags
 from meshops.proportion.skeleton import (
     ARM_FORWARD_OF_HALF_DEPTH_FRAC,
+    ELBOW_HANG_T,
     _arm_forward_y,
     _chest_half_depth_for_arm_prior,
     _depth_family_for_joint,
+    _elbow_hang_y,
     build_blockout_skeleton,
 )
 
@@ -126,7 +128,7 @@ def test_arm_depth__helpers_half_depth_and_prior_math() -> None:
 
 
 def test_arm_depth__t0_product_like_chest_mid_prior() -> None:
-    """T0 (0083): glenoid ~ chest plane; elbow/wrist keep distal prior + Y < mid-0.03."""
+    """T0 (0087): glenoid ~ plane; wrist distal + Y < mid-0.03; elbow hang lerp."""
     h = 1.72
     half = 0.13
     chest_y = 0.0
@@ -140,16 +142,21 @@ def test_arm_depth__t0_product_like_chest_mid_prior() -> None:
         height_m=h,
         chest_front_y=chest_y - half,
     )
+    expected_hang = _elbow_hang_y(chest_y, expected_distal, t=ELBOW_HANG_T)
     for jid in ("shoulder_l", "shoulder_r"):
         y_m = j[jid].y_m
         assert y_m is not None, jid
         assert y_m == pytest.approx(chest_y, abs=1e-6), jid
         assert y_m != pytest.approx(expected_distal, abs=1e-6), jid
-    for jid in ("elbow_l", "wrist_l", "elbow_r", "wrist_r"):
+    for jid in ("wrist_l", "wrist_r"):
         y_m = j[jid].y_m
         assert y_m is not None, jid
         assert y_m == pytest.approx(expected_distal, abs=1e-6), jid
         assert float(y_m) < chest_y - 0.03, jid
+    for jid in ("elbow_l", "elbow_r"):
+        y_m = j[jid].y_m
+        assert y_m is not None, jid
+        assert y_m == pytest.approx(expected_hang, abs=1e-6), jid
     assert any("arm forward prior" in m and "distal" in m for m in pkg.messages)
     assert not any("shoulder_l" in m and "arm forward prior" in m for m in pkg.messages)
     assert not any("shoulder_r" in m and "arm forward prior" in m for m in pkg.messages)
@@ -176,7 +183,7 @@ def test_arm_depth__t1_direct_shoulder_landmark_preserved() -> None:
 
 
 def test_arm_depth__t1b_plane_class_zero_landmark_still_distal() -> None:
-    """T1b (0083 / AI2 F2): landmark shoulder Y=0 is plane-class — distal prior still fires."""
+    """T1b (0087): landmark Y=0 plane-class — wrist distal; elbow hang message."""
     h = 1.72
     half = 0.13
     lms = _arm_lms(chest_y=0.0, half_depth=half, shoulder_y=0.0)
@@ -184,10 +191,11 @@ def test_arm_depth__t1b_plane_class_zero_landmark_still_distal() -> None:
     pkg = build_blockout_skeleton(_report(lms, height_m=h, depth_bands=bands))
     j = _by_id(pkg)
     expected = _arm_forward_y(0.0, half_depth=half, height_m=h, chest_front_y=-half)
+    hang = _elbow_hang_y(0.0, expected, t=ELBOW_HANG_T)
     assert j["shoulder_l"].y_m == pytest.approx(0.0)
-    assert j["elbow_l"].y_m == pytest.approx(expected, abs=1e-6)
     assert j["wrist_l"].y_m == pytest.approx(expected, abs=1e-6)
-    assert any("elbow_l" in m and "arm forward prior" in m and "distal" in m for m in pkg.messages)
+    assert j["elbow_l"].y_m == pytest.approx(hang, abs=1e-6)
+    assert any("elbow_l" in m and "hang" in m and f"t={ELBOW_HANG_T}" in m for m in pkg.messages)
     assert not any("shoulder_l" in m and "arm forward prior" in m for m in pkg.messages)
 
 
@@ -400,8 +408,8 @@ def test_arm_depth__t7_clamp_not_past_chest_front() -> None:
     assert j["shoulder_l"].y_m is not None
     assert j["shoulder_l"].y_m == pytest.approx(chest_y, abs=1e-6)
     assert float(j["shoulder_l"].y_m) >= front_y - 1e-9
-    assert j["elbow_l"].y_m == pytest.approx(front_y)
     assert j["wrist_l"].y_m == pytest.approx(front_y)
+    assert j["elbow_l"].y_m == pytest.approx(_elbow_hang_y(chest_y, front_y, t=ELBOW_HANG_T))
 
 
 def test_arm_depth__t8_invent_no_half_depth_value_stable() -> None:
@@ -415,8 +423,8 @@ def test_arm_depth__t8_invent_no_half_depth_value_stable() -> None:
     pkg = build_blockout_skeleton(_report(lms, height_m=h, depth_bands=[]))
     j = _by_id(pkg)
     assert j["shoulder_l"].y_m == pytest.approx(0.0)
-    assert j["elbow_l"].y_m == pytest.approx(-0.05 * h)
     assert j["wrist_l"].y_m == pytest.approx(-0.05 * h)
+    assert j["elbow_l"].y_m == pytest.approx(_elbow_hang_y(0.0, -0.05 * h, t=ELBOW_HANG_T))
     assert any("arm forward prior" in m and "invent" in m and "distal" in m for m in pkg.messages)
     assert not any("shoulder_l" in m and "arm forward prior" in m for m in pkg.messages)
     assert not any("inherited" in m and "(depth)" in m for m in pkg.messages)
@@ -494,9 +502,9 @@ def test_arm_depth__t11_no_stale_lone_chest_mid_depth() -> None:
     assert not any("shoulder_l" in m and "arm forward prior" in m for m in pkg.messages), (
         pkg.messages
     )
-    assert any(
-        "elbow_l" in m and "arm forward prior" in m and "distal" in m for m in pkg.messages
-    ), pkg.messages
+    assert any("elbow_l" in m and "hang" in m and f"t={ELBOW_HANG_T}" in m for m in pkg.messages), (
+        pkg.messages
+    )
     assert any(
         "wrist_l" in m and "arm forward prior" in m and "distal" in m for m in pkg.messages
     ), pkg.messages
