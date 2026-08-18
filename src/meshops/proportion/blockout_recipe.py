@@ -14,7 +14,8 @@ breast_lower* used for rz in 0030; lateral fuse/diameter still 0027.
 0033: breast hang tilt on breast_soft (rotation_euler_deg + bpy TRS); schema write 1.4.0;
 load 1.0|1.1|1.2|1.3|1.4.
 0034: product split calf RECIPE_calf_{a,cyl,b}_{side} (not limb_calf) so C_calf_slant
-can pass; B6 distal/cyl p1 Y sync to ank_foot after feet emit.
+can pass; B6 distal Y sync to ank_foot after feet emit.
+0096: two-seg shaft RECIPE_calf_taper_dist_{side}; B6 writes taper.p1 (legacy cyl.p1).
 0036: post-pass aligns glute_soft outer X to hip_bridge outer (pre-optimize C_glute_outer).
 0039: opt-in --join-ready socket overlaps (shoulder/hip/neck/ankle); mutually exclusive with
 --nofuse; setup re-emit via run_blockout_emit_setup; schema stay 1.4.0 + join_ready bool.
@@ -79,12 +80,15 @@ CROTCH_Z_FRAC_FALLBACK: Final[float] = 0.5
 _NEAR_ZERO_LEN: Final[float] = 1e-9
 # 0045 B1: calf belly + asymmetric ends (replaces single _CALF_END_SCALE=0.95).
 # 0071 B10-B11: p0-only lateral/rear belly bias (scales kept).
+# 0096: two-seg + 1.18/0.88/0.42 so the 44 cm 1.08 pipe is a gastroc + shank.
 _CALF_END_R_FLOOR: Final[float] = 1e-4
-CALF_BELLY_SCALE: Final[float] = 1.08
-CALF_PROX_END_SCALE: Final[float] = 0.88
-CALF_DIST_END_SCALE: Final[float] = 0.72
-CALF_BELLY_LAT_FRAC: Final[float] = 0.22  # B10: outer offset on cyl.p0 only (* cyl_r)
-CALF_BELLY_REAR_FRAC: Final[float] = 0.28  # B11: rear offset on cyl.p0 only (* cyl_r, +Y)
+CALF_BELLY_SCALE: Final[float] = 1.18  # 0096 — was 1.08; prox shaft only
+CALF_PROX_END_SCALE: Final[float] = 0.88  # fence 0071/0095
+CALF_DIST_END_SCALE: Final[float] = 0.72  # fence 0080 calf_b
+CALF_DIST_SHAFT_SCALE: Final[float] = 0.88  # 0096 distal shaft vs mid
+CALF_SPLIT_T: Final[float] = 0.42  # 0096 prox fraction of shank
+CALF_BELLY_LAT_FRAC: Final[float] = 0.30  # 0096 — was 0.22
+CALF_BELLY_REAR_FRAC: Final[float] = 0.42  # 0096 — was 0.28
 # 0045 B3: arm distal soft beads only (not thigh — P2-1 / B13).
 # 0062 B9: shrink to forearm only (elbow_soft owns UA distal joint; no UA dist_soft).
 LIMB_DISTAL_SOFT_SCALE: Final[float] = 0.78
@@ -2975,23 +2979,32 @@ def _build_calf_split(
     placement: Literal["full3d", "front_plane"],
     messages: list[str],
 ) -> list[RecipePart]:
-    """0034 names + 0045 B1-B2 belly/taper: calf_a / calf_cyl / calf_b.
+    """0034 names + 0045 ends + 0096 two-seg: a / cyl belly / taper_dist / b.
 
-    Proximal ellipsoid @ knee (p0) with prox end scale, distal @ ankle (p1)
-    with dist end scale, shaft capsule with belly scale vs mid measured r.
+    Proximal ellipsoid @ knee (p0), distal ellipsoid @ ankle (p1), prox capsule
+    belly (offset p0 → mid), distal capsule shank (mid → ankle).
     """
     mid_r = float(radius)
     cyl_r = max(mid_r * CALF_BELLY_SCALE, _CALF_END_R_FLOOR)
     prox_r = max(mid_r * CALF_PROX_END_SCALE, _CALF_END_R_FLOOR)
     dist_r = max(mid_r * CALF_DIST_END_SCALE, _CALF_END_R_FLOOR)
+    shaft_r = max(mid_r * CALF_DIST_SHAFT_SCALE, _CALF_END_R_FLOOR)
     name_a = f"RECIPE_calf_a_{side}"
     name_cyl = f"RECIPE_calf_cyl_{side}"
+    name_taper = f"RECIPE_calf_taper_dist_{side}"
     name_b = f"RECIPE_calf_b_{side}"
-    # a/b stay on joint axis; cyl p0 gets 0071 belly bias (p1 unchanged — B6-safe).
+    # a/b stay on joint axis; cyl p0 gets 0071/0096 belly bias (p0-only).
     sign = 1.0 if side == "r" else -1.0
     dx = sign * CALF_BELLY_LAT_FRAC * cyl_r
     dy = CALF_BELLY_REAR_FRAC * cyl_r
     cyl_p0 = [float(p0[0]) + dx, float(p0[1]) + dy, float(p0[2])]
+    ankle = [float(p1[0]), float(p1[1]), float(p1[2])]
+    split_t = CALF_SPLIT_T
+    mid = [
+        cyl_p0[0] + split_t * (ankle[0] - cyl_p0[0]),
+        cyl_p0[1] + split_t * (ankle[1] - cyl_p0[1]),
+        cyl_p0[2] + split_t * (ankle[2] - cyl_p0[2]),
+    ]
     parts = [
         RecipePart(
             name=name_a,
@@ -3009,16 +3022,26 @@ def _build_calf_split(
             role="limb_segment",
             kind="capsule",
             p0=cyl_p0,
-            p1=[float(p1[0]), float(p1[1]), float(p1[2])],
+            p1=list(mid),
             radius_m=cyl_r,
             placement=placement,
             label=name_cyl,
         ),
         RecipePart(
+            name=name_taper,
+            role="limb_segment",
+            kind="capsule",
+            p0=list(mid),
+            p1=list(ankle),
+            radius_m=shaft_r,
+            placement=placement,
+            label=name_taper,
+        ),
+        RecipePart(
             name=name_b,
             role="limb_segment",
             kind="ellipsoid",
-            center=[float(p1[0]), float(p1[1]), float(p1[2])],
+            center=list(ankle),
             rx_m=dist_r,
             ry_m=dist_r,
             rz_m=dist_r,
@@ -3038,13 +3061,10 @@ def _sync_calf_distal_to_ankle(
     parts: list[RecipePart],
     messages: list[str],
 ) -> None:
-    """0034 B6: set calf_distal center Y and cyl p1[1] to ank_foot Y when present.
+    """0034 B6 / 0096: set calf_distal Y and taper (or legacy cyl) p1 Y to ank.
 
-    Idempotent absolute set. No ankle → leave landmark Y. Name-matched to avoid
-    import cycle with constraints.classify_part_name.
-
-    When Y is rewritten from ank_foot, also set placement=full3d so front_plane
-    calves (null joint y_m at emit) do not keep stale plane metadata after sync.
+    Prefer RECIPE_calf_taper_dist_*.p1 when present — belly cyl.p1 is mid.
+    Legacy cyl-only fixtures still write cyl.p1. Idempotent absolute set.
     """
     by_name = {p.name: p for p in parts}
     for side in ("l", "r"):
@@ -3058,16 +3078,23 @@ def _sync_calf_distal_to_ankle(
             dist.center = [float(dist.center[0]), ay, float(dist.center[2])]
             dist.placement = "full3d"
             updated = True
-        cyl = by_name.get(f"RECIPE_calf_cyl_{side}")
-        if cyl is not None and cyl.p1 is not None and len(cyl.p1) >= 3:
-            # Keep p0[1] = proximal Y; only p1 Y tracks ankle.
-            cyl.p1 = [float(cyl.p1[0]), ay, float(cyl.p1[2])]
-            cyl.placement = "full3d"
+        taper = by_name.get(f"RECIPE_calf_taper_dist_{side}")
+        if taper is not None and taper.p1 is not None and len(taper.p1) >= 3:
+            taper.p1 = [float(taper.p1[0]), ay, float(taper.p1[2])]
+            taper.placement = "full3d"
             updated = True
-        # Honesty: only claim sync when distal and/or cyl were actually written
-        # (feet without limbs leave ank_foot present but no calf parts).
+        else:
+            cyl = by_name.get(f"RECIPE_calf_cyl_{side}")
+            if cyl is not None and cyl.p1 is not None and len(cyl.p1) >= 3:
+                # Legacy one-cyl fixtures: keep p0[1]; only p1 Y tracks ankle.
+                cyl.p1 = [float(cyl.p1[0]), ay, float(cyl.p1[2])]
+                cyl.placement = "full3d"
+                updated = True
         if updated:
-            messages.append(f"calf_{side}: distal/cyl p1 Y synced to ank_foot ({ay:.4f})")
+            if taper is not None:
+                messages.append(f"calf_{side}: distal/taper p1 Y synced to ank_foot ({ay:.4f})")
+            else:
+                messages.append(f"calf_{side}: distal/cyl p1 Y synced to ank_foot ({ay:.4f})")
 
 
 def _noskel_arm_endpoint_ys(
@@ -3096,7 +3123,7 @@ def _build_limbs(
     messages: list[str],
     skeleton: BlockoutSkeleton | None = None,
 ) -> list[RecipePart]:
-    """Limb capsules on SEED_SEGMENT_MAP; calf → a/cyl/b split (0034).
+    """Limb capsules on SEED_SEGMENT_MAP; calf → a/cyl/taper/b (0034/0096).
 
     0037 R2: upper_arm/forearm prefer skeleton joint endpoints when both finite XYZ.
     Thigh/calf stay report-only for DoD (arm-only free ride).
@@ -3296,6 +3323,15 @@ def _build_limbs(
     shaft_r = any(m.startswith("thigh_r: shaft_taper") for m in messages)
     if shaft_l and shaft_r:
         messages.append(f"thigh distal taper plus: dist_scale={THIGH_DIST_SHAFT_SCALE}")
+    # 0096 B12: sibling once after both L/R belly/taper lines (const-driven).
+    if any(m.startswith("calf_l: belly/taper") for m in messages) and any(
+        m.startswith("calf_r: belly/taper") for m in messages
+    ):
+        messages.append(
+            f"calf shaft form: belly={CALF_BELLY_SCALE} "
+            f"dist_shaft={CALF_DIST_SHAFT_SCALE} split={CALF_SPLIT_T} "
+            f"lat={CALF_BELLY_LAT_FRAC} rear={CALF_BELLY_REAR_FRAC}"
+        )
     return parts
 
 
@@ -4506,7 +4542,7 @@ def build_blockout_recipe(
         ):
             _append_part(parts, p)
 
-    # 0034 B6: distal/cyl p1 Y ← ank_foot after feet, before profile/breast tilt
+    # 0034 B6 / 0096: distal/taper p1 Y ← ank_foot after feet (legacy: cyl.p1)
     _sync_calf_distal_to_ankle(parts, messages)
 
     # 0027 profile emit after base (skip_roles already applied)
@@ -5227,6 +5263,29 @@ def _apply_thigh_adduction(
                 float(cyl.p0[1]) + delta_capped[1],
                 float(cyl.p0[2]) + delta_capped[2],
             ]
+            # 0096 B17: recompute belly mid after p0 delta; do not translate taper.p1.
+            # Legacy one-cyl fixtures: only translate p0 (cyl.p1 stays ankle).
+            taper = by_name.get(f"RECIPE_calf_taper_dist_{side}")
+            dest: list[float] | None = None
+            if taper is not None and taper.p1 is not None and len(taper.p1) >= 3:
+                dest = [float(taper.p1[0]), float(taper.p1[1]), float(taper.p1[2])]
+            elif taper is not None:
+                calf_b = by_name.get(f"RECIPE_calf_b_{side}")
+                if calf_b is not None and calf_b.center is not None and len(calf_b.center) >= 3:
+                    dest = [
+                        float(calf_b.center[0]),
+                        float(calf_b.center[1]),
+                        float(calf_b.center[2]),
+                    ]
+            if dest is not None and taper is not None:
+                split_t = CALF_SPLIT_T
+                mid = [
+                    float(cyl.p0[0]) + split_t * (dest[0] - float(cyl.p0[0])),
+                    float(cyl.p0[1]) + split_t * (dest[1] - float(cyl.p0[1])),
+                    float(cyl.p0[2]) + split_t * (dest[2] - float(cyl.p0[2])),
+                ]
+                cyl.p1 = list(mid)
+                taper.p0 = list(mid)
 
         msg = f"thigh_{side}: adduction_tilt_deg={tilt_req:.1f} medial_shift_m={medial_shift:.4f}"
         if capped:
@@ -6730,7 +6789,9 @@ __all__ = [
     "CALF_BELLY_REAR_FRAC",
     "CALF_BELLY_SCALE",
     "CALF_DIST_END_SCALE",
+    "CALF_DIST_SHAFT_SCALE",
     "CALF_PROX_END_SCALE",
+    "CALF_SPLIT_T",
     "CLAVICLE_LATERAL_INSET_FRAC",
     "CLAVICLE_MEDIAL_Z_DROP_FRAC_H",
     "CLAVICLE_RADIUS_FRAC_H",

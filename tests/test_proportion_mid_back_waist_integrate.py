@@ -568,8 +568,8 @@ def test_t8_cluster_fence_dual_mid_back_scap_glute_iliac() -> None:
     assert len(iliac) == 0
 
 
-def test_t9_product_n_parts_129_schema_mcp() -> None:
-    """T9: n_parts 129; schema 1.4.0; MCP 46; product-path C_thigh_outer / C_glute_outer."""
+def test_t9_product_n_parts_131_schema_mcp() -> None:
+    """T9: n_parts 131; schema 1.4.0; MCP 46; product-path C_thigh_outer / C_glute_outer."""
     report = _product_class_report()
     skel = build_blockout_skeleton(report)
     pkg = build_blockout_recipe(
@@ -578,7 +578,7 @@ def test_t9_product_n_parts_129_schema_mcp() -> None:
         template_applied=_template(taper=0.22),
         **_product_flags(),  # type: ignore[arg-type]
     )
-    assert len(pkg.parts) == 129
+    assert len(pkg.parts) == 131
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
     assert len(TOOL_NAMES) == 46
     result = validate_constraints(pkg, report=report)

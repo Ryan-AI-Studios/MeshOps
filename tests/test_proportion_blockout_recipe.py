@@ -435,13 +435,14 @@ def test_recipe__limbs_y_null_front_plane() -> None:
 
 
 def test_recipe__limbs_emit_split_calf() -> None:
-    """0034 names + 0045 B1/B2 + 0071 p0 belly: split calf; no RECIPE_limb_calf_*."""
+    """0034 names + 0096 two-seg: split calf + taper; no RECIPE_limb_calf_*."""
     from meshops.proportion.blockout_recipe import (
         CALF_BELLY_LAT_FRAC,
         CALF_BELLY_REAR_FRAC,
         CALF_BELLY_SCALE,
         CALF_DIST_END_SCALE,
         CALF_PROX_END_SCALE,
+        CALF_SPLIT_T,
     )
     from meshops.proportion.constraints import classify_part_name
 
@@ -489,13 +490,19 @@ def test_recipe__limbs_emit_split_calf() -> None:
         assert float(a.center[1]) == pytest.approx(knee_y)
         assert float(b.center[1]) == pytest.approx(ankle_y)
         assert cyl.p0 is not None and cyl.p1 is not None
-        # 0071: p0-only lat+rear belly; p1 stays on ankle joint
+        # 0096: p0-only lat+rear belly; taper.p1 stays on ankle; cyl.p1 is mid
         sign = 1.0 if side == "r" else -1.0
         assert float(cyl.p0[0]) == pytest.approx(
             float(a.center[0]) + sign * CALF_BELLY_LAT_FRAC * cyl_r, abs=1e-9
         )
         assert float(cyl.p0[1]) == pytest.approx(knee_y + CALF_BELLY_REAR_FRAC * cyl_r, abs=1e-9)
-        assert float(cyl.p1[1]) == pytest.approx(ankle_y)
+        taper = by_name[f"RECIPE_calf_taper_dist_{side}"]
+        assert taper.kind == "capsule"
+        assert classify_part_name(taper.name) == ("unknown", side)
+        assert taper.p0 is not None and taper.p1 is not None
+        mid_y = float(cyl.p0[1]) + CALF_SPLIT_T * (ankle_y - float(cyl.p0[1]))
+        assert float(cyl.p1[1]) == pytest.approx(mid_y, abs=1e-9)
+        assert float(taper.p1[1]) == pytest.approx(ankle_y)
         assert a.placement == "full3d"
         # T2: belly/taper + p0 bias messages
         assert any(f"calf_{side}: belly/taper a=" in m for m in pkg.messages)
@@ -508,7 +515,7 @@ def test_recipe__limbs_emit_split_calf() -> None:
 
 
 def test_recipe__calf_distal_syncs_to_ank_foot() -> None:
-    """0034 B6: after feet, calf_b Y and cyl p1 Y match RECIPE_ank_foot Y."""
+    """0034 B6 / 0096: after feet, calf_b Y and taper p1 Y match RECIPE_ank_foot Y."""
     report = _full_torso_report(
         extra_lms={
             "elbow_l": _lm("elbow_l", x_m=-0.25, y_m=0.0, z_m=1.10),
@@ -554,8 +561,11 @@ def test_recipe__calf_distal_syncs_to_ank_foot() -> None:
         assert ank.center is not None and dist.center is not None
         assert cyl.p0 is not None and cyl.p1 is not None
         ay = float(ank.center[1])
+        taper = by_name[f"RECIPE_calf_taper_dist_{side}"]
+        assert taper.p1 is not None
         assert float(dist.center[1]) == pytest.approx(ay)
-        assert float(cyl.p1[1]) == pytest.approx(ay)
+        assert float(taper.p1[1]) == pytest.approx(ay)
+        assert abs(float(cyl.p1[1]) - ay) > 1e-3
         # 0071: p0 has rear belly bias; B6 never rewrites p0 Y (only p1)
         from meshops.proportion.blockout_recipe import CALF_BELLY_REAR_FRAC
 
@@ -565,11 +575,15 @@ def test_recipe__calf_distal_syncs_to_ank_foot() -> None:
         # B6 Y rewrite from ank_foot → placement is full3d (even if emit was front_plane)
         assert dist.placement == "full3d"
         assert cyl.placement == "full3d"
-        assert any(f"calf_{side}: distal/cyl p1 Y synced to ank_foot" in m for m in pkg.messages)
+        assert any(f"calf_{side}: distal/taper p1 Y synced to ank_foot" in m for m in pkg.messages)
 
 
 def test_recipe__sync_calf_distal_upgrades_front_plane_placement() -> None:
-    """0034 P3-2: ankle-sourced Y rewrite marks distal/cyl placement full3d."""
+    """0034 P3-2: ankle-sourced Y rewrite marks distal/cyl placement full3d.
+
+    Cyl-only fixture: B6 still writes cyl.p1 when taper is absent (legacy).
+    Product path always emits RECIPE_calf_taper_dist_* (0096).
+    """
     parts = [
         RecipePart(
             name="RECIPE_calf_b_l",
@@ -1036,11 +1050,12 @@ def test_recipe__t6_thigh_adduction_engagement() -> None:
     """0046 T6 + 0070 B8/AI2 P2-2: chain-knee medial, length, engagement, co-move Δ.
 
     Chain end = taper_dist.p1 (not limb_thigh.p1 mid). Co-move Δ from dist.p1.
-    limb_thigh.p1 ≈ mid after tilt. Calf distal stays fixed.
+    limb_thigh.p1 ≈ mid after tilt. Calf taper.p1 stays ankle (cyl.p1 is mid).
     """
     import math
 
     from meshops.proportion.blockout_recipe import (
+        CALF_SPLIT_T,
         THIGH_ADDUCTION_MAX_MEDIAL_M,
         THIGH_SPLIT_T,
     )
@@ -1108,12 +1123,19 @@ def test_recipe__t6_thigh_adduction_engagement() -> None:
 
         cyl0 = by0[f"RECIPE_calf_cyl_{side}"]
         cyl1 = by[f"RECIPE_calf_cyl_{side}"]
+        taper0 = by0[f"RECIPE_calf_taper_dist_{side}"]
+        taper1 = by[f"RECIPE_calf_taper_dist_{side}"]
         assert cyl0.p0 is not None and cyl1.p0 is not None
         assert cyl0.p1 is not None and cyl1.p1 is not None
+        assert taper0.p1 is not None and taper1.p0 is not None and taper1.p1 is not None
         for i in range(3):
             assert float(cyl1.p0[i]) == pytest.approx(float(cyl0.p0[i]) + delta[i], abs=1e-5)
-            # Distal cylinder end not co-moved
-            assert float(cyl1.p1[i]) == pytest.approx(float(cyl0.p1[i]), abs=1e-5)
+            expected_mid = float(cyl1.p0[i]) + CALF_SPLIT_T * (
+                float(taper1.p1[i]) - float(cyl1.p0[i])
+            )
+            assert float(cyl1.p1[i]) == pytest.approx(expected_mid, abs=1e-5)
+            assert float(taper1.p0[i]) == pytest.approx(float(cyl1.p1[i]), abs=1e-5)
+            assert float(taper1.p1[i]) == pytest.approx(float(taper0.p1[i]), abs=1e-5)
 
         calf_b0 = by0[f"RECIPE_calf_b_{side}"]
         calf_b1 = by[f"RECIPE_calf_b_{side}"]

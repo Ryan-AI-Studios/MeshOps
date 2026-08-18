@@ -421,11 +421,11 @@ def test_t_elbow_mid_ok() -> None:
 
 
 def test_t_n_parts() -> None:
-    """T_n_parts: no new RECIPE names; class 128."""
+    """T_n_parts: no new RECIPE names; class 130 (0096 +2 shafts)."""
     report = _product_class_report()
     skel = build_blockout_skeleton(report)
     pkg = build_blockout_recipe(report, skeleton=skel, **_product_flags())  # type: ignore[arg-type]
-    assert len(pkg.parts) == 128
+    assert len(pkg.parts) == 130
 
 
 def test_t_schema() -> None:

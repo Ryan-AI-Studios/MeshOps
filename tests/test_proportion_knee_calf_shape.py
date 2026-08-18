@@ -186,9 +186,9 @@ def test_t0_const_freezes() -> None:
     assert KNEE_SOFT_OUTER_FRAC_RX == 0.06
     assert KNEE_SOFT_REAR_FRAC_RY == 0.10
     assert KNEE_SOFT_MAX_VS_THIGH_PROX == 1.25
-    assert CALF_BELLY_LAT_FRAC == 0.22
-    assert CALF_BELLY_REAR_FRAC == 0.28
-    assert CALF_BELLY_SCALE == 1.08
+    assert CALF_BELLY_LAT_FRAC == 0.30
+    assert CALF_BELLY_REAR_FRAC == 0.42
+    assert CALF_BELLY_SCALE == 1.18
     assert CALF_PROX_END_SCALE == 0.88
     assert CALF_DIST_END_SCALE == 0.72
 
@@ -295,7 +295,7 @@ def test_t5b_no_knee_skips_knee_soft() -> None:
 
 
 def test_t6_calf_split_names() -> None:
-    """T6: calf_a/cyl/b present; no limb_calf."""
+    """T6: calf_a/cyl/b + calf_taper_dist present; no limb_calf."""
     report = _limb_mass_report()
     pkg = build_blockout_recipe(report, limbs=True)
     by = {p.name: p for p in pkg.parts}
@@ -303,20 +303,22 @@ def test_t6_calf_split_names() -> None:
         assert f"RECIPE_calf_a_{side}" in by
         assert f"RECIPE_calf_cyl_{side}" in by
         assert f"RECIPE_calf_b_{side}" in by
+        assert f"RECIPE_calf_taper_dist_{side}" in by
         assert f"RECIPE_limb_calf_{side}" not in by
     assert not any("limb_calf" in p.name.lower() for p in pkg.parts)
 
 
 def test_t7_calf_p0_belly_bias_post_b6() -> None:
-    """T7: post-B6 (+feet): cyl.p0 lat+rear vs calf_a; p1 no rear belly offset."""
+    """T7: post-B6 (+feet): cyl.p0 lat+rear vs calf_a; taper.p1 no rear belly."""
     report = _limb_mass_report(include_feet_lms=True, calf_hw=0.05, knee_y=0.04)
     pkg = build_blockout_recipe(report, limbs=True, feet=True)
     by = {p.name: p for p in pkg.parts}
     for side in ("l", "r"):
         a = by[f"RECIPE_calf_a_{side}"]
         cyl = by[f"RECIPE_calf_cyl_{side}"]
+        taper = by[f"RECIPE_calf_taper_dist_{side}"]
         assert a.center is not None and cyl.p0 is not None and cyl.p1 is not None
-        assert cyl.radius_m is not None
+        assert taper.p1 is not None and cyl.radius_m is not None
         sign = 1.0 if side == "r" else -1.0
         cyl_r = float(cyl.radius_m)
         dx = sign * CALF_BELLY_LAT_FRAC * cyl_r
@@ -325,13 +327,15 @@ def test_t7_calf_p0_belly_bias_post_b6() -> None:
         assert float(cyl.p0[0]) == pytest.approx(float(a.center[0]) + dx, abs=1e-6)
         assert float(cyl.p0[1]) == pytest.approx(float(a.center[1]) + dy, abs=1e-6)
         assert float(cyl.p0[2]) == pytest.approx(float(a.center[2]), abs=1e-6)
-        # p1: B6 may set Y to ank_foot; no lat/rear belly bias on distal end
+        # taper.p1: B6 may set Y to ank_foot; no lat/rear belly bias on distal end
         b = by[f"RECIPE_calf_b_{side}"]
         assert b.center is not None
-        assert float(cyl.p1[0]) == pytest.approx(float(b.center[0]), abs=1e-6)
-        assert float(cyl.p1[1]) == pytest.approx(float(b.center[1]), abs=1e-6)
+        assert float(taper.p1[0]) == pytest.approx(float(b.center[0]), abs=1e-6)
+        assert float(taper.p1[1]) == pytest.approx(float(b.center[1]), abs=1e-6)
+        # cyl.p1 is mid (not ankle)
+        assert abs(float(cyl.p1[1]) - float(b.center[1])) > 1e-3
         # Distal Y is not proximal+rear (top-heavy gastroc only on p0)
-        assert abs(float(cyl.p1[1]) - (float(a.center[1]) + dy)) > 1e-3
+        assert abs(float(taper.p1[1]) - (float(a.center[1]) + dy)) > 1e-3
         assert any(f"calf_{side}: belly bias p0 lat=" in m for m in pkg.messages)
 
 
@@ -363,7 +367,7 @@ def test_t8_calf_ab_centers_not_biased() -> None:
 
 
 def test_t9_calf_radius_order() -> None:
-    """T9: b.rx < cyl.r and a.rx <= cyl.r."""
+    """T9: b.rx < taper.r < cyl.r and a.rx <= cyl.r."""
     report = _limb_mass_report(calf_hw=0.05)
     pkg = build_blockout_recipe(report, limbs=True)
     by = {p.name: p for p in pkg.parts}
@@ -371,8 +375,10 @@ def test_t9_calf_radius_order() -> None:
         a = by[f"RECIPE_calf_a_{side}"]
         b = by[f"RECIPE_calf_b_{side}"]
         cyl = by[f"RECIPE_calf_cyl_{side}"]
+        taper = by[f"RECIPE_calf_taper_dist_{side}"]
         assert a.rx_m is not None and b.rx_m is not None and cyl.radius_m is not None
-        assert float(b.rx_m) < float(cyl.radius_m)
+        assert taper.radius_m is not None
+        assert float(b.rx_m) < float(taper.radius_m) < float(cyl.radius_m)
         assert float(a.rx_m) <= float(cyl.radius_m) + 1e-12
 
 

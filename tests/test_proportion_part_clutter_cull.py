@@ -78,7 +78,7 @@ def _band(
 
 
 def _product_class_report(*, height_m: float = 1.72) -> ProportionReport:
-    """Synthetic product_0072up-class report → 128 parts with full flags + profile."""
+    """Synthetic product_0072up-class report → 130 parts with full flags + profile."""
     h = height_m
     lms = {
         "sole": _lm("sole", x_m=0.0, y_m=0.0, z_m=0.0),
@@ -224,7 +224,7 @@ def test_t1_default_soft_density_full() -> None:
     assert pkg.soft_density == "full"
     assert any(m == "soft_density=full" for m in pkg.messages)
     assert not any("soft_density=compact: culled=" in m for m in pkg.messages)
-    assert len(pkg.parts) == 128
+    assert len(pkg.parts) == 130
 
 
 # ---------------------------------------------------------------------------
@@ -410,21 +410,21 @@ def test_t10_package_json_soft_density_roundtrip(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# T11 n_parts == 91
+# T11 n_parts == 93
 # ---------------------------------------------------------------------------
 
 
-def test_t11_product_compact_n_parts_91() -> None:
-    """T11: product-class compact n_parts == 91 exact."""
+def test_t11_product_compact_n_parts_93() -> None:
+    """T11: product-class compact n_parts == 93 exact."""
     report = _product_class_report()
     full = build_blockout_recipe(report, **_product_flags())  # type: ignore[arg-type]
     compact = build_blockout_recipe(
         report,
         **_product_flags(soft_density="compact"),  # type: ignore[arg-type]
     )
-    assert len(full.parts) == 128
-    assert len(compact.parts) == 91
-    assert compact.counts.get("parts") == 91
+    assert len(full.parts) == 130
+    assert len(compact.parts) == 93
+    assert compact.counts.get("parts") == 93
 
 
 # ---------------------------------------------------------------------------
@@ -543,7 +543,7 @@ def test_t15_run_payload_soft_density(tmp_path: Path) -> None:
     )
     assert payload["soft_density"] == "compact"
     assert payload["ok"] is True
-    assert payload["counts"]["parts"] == 91
+    assert payload["counts"]["parts"] == 93
 
     recipe_json = next(Path(p) for p in payload["paths"] if p.endswith(".json"))
     setup_out = tmp_path / "setup_out"

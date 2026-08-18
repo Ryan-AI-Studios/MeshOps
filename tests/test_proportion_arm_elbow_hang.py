@@ -468,7 +468,7 @@ def test_t8_c2_mixed_null_front_plane() -> None:
 
 
 def test_t9_n_parts_schema_mcp() -> None:
-    """T9: n_parts 129 via product flags; schema 1.4.0 / skeleton 1.0.0; MCP 46."""
+    """T9: n_parts 131 via product flags; schema 1.4.0 / skeleton 1.0.0; MCP 46."""
     report = _product_class_report()
     skel = build_blockout_skeleton(report)
     pkg = build_blockout_recipe(
@@ -477,7 +477,7 @@ def test_t9_n_parts_schema_mcp() -> None:
         template_applied=_template(),
         **_product_flags(),  # type: ignore[arg-type]
     )
-    assert len(pkg.parts) == 129
+    assert len(pkg.parts) == 131
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
     assert SKELETON_SCHEMA_VERSION == "1.0.0"
     assert len(TOOL_NAMES) == 46
