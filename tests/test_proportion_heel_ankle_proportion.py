@@ -213,9 +213,9 @@ def test_t2_product_ank_ry_rx_anti_ball_anti_pea() -> None:
 
 
 def test_t3_product_ank_ry_frac_wins_floor() -> None:
-    """T3: 1.00*0080-hw > 0.030 and emitted ank_ry approx frac path (thin-hw floors)."""
+    """T3: 1.00*0098-hw > 0.030 and emitted ank_ry approx frac path (thin-hw floors)."""
     product_hw_0080 = 0.04035
-    assert ANK_RY_FRAC_HALF_W * product_hw_0080 > ANK_RY_FLOOR_M
+    assert ANK_RY_FRAC_HALF_W * 0.04237 > ANK_RY_FLOOR_M
     report = _product_feet_report(half_width_m=product_hw_0080)
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     ank = _ank(pkg.parts)

@@ -6,7 +6,8 @@ as law (Difficulty §12 / N6).
 
 All names stay RECIPE_* (never HAND_*/FOOT_*/DIGIT_* prefixes).
 Ankle mass labels must contain ank_foot (classifier -> ankle_bridge).
-0097: ank AP flatten + heel rear seat + sole pads recede (not boots / 0098).
+0097: ank AP flatten + heel rear seat + sole pads recede.
+0098: stature 0.150 + calf_diam 4.2 scale plus (not boots / width-frac reopen).
 """
 
 from __future__ import annotations
@@ -97,10 +98,10 @@ ARCH_SOFT_RY_FRAC_HALF_DEPTH: Final[float] = 0.26  # 0097 B3
 _HEEL_R_FRAC_FOOT: Final[float] = 0.18
 _HEEL_BRIDGE_OVERLAP_FRAC: Final[float] = 0.35  # 0040 reuse (reach overlap concept)
 # 0044 B1-B3 / B6-B8 visual mass freezes (+ 0072 B1-B3 / B10-B11 + 0080 full-figure)
-FOOT_LEN_VISUAL_MIN_FRAC_H: Final[float] = 0.145  # 0080 B1 (was 0.13 / 0072)
-FOOT_LEN_VISUAL_MAX_FRAC_H: Final[float] = 0.155  # 0080 B15 floor-induced anti-boat cap only
+FOOT_LEN_VISUAL_MIN_FRAC_H: Final[float] = 0.150  # 0098 B1 (was 0.145 / 0080)
+FOOT_LEN_VISUAL_MAX_FRAC_H: Final[float] = 0.155  # 0080 B15 fence
 FOOT_LEN_MIN_VS_ANK_HW: Final[float] = 4.8
-FOOT_LEN_MIN_VS_CALF_DIAM: Final[float] = 4.0  # 0080 B2 (was 1.55)
+FOOT_LEN_MIN_VS_CALF_DIAM: Final[float] = 4.2  # 0098 B2 (was 4.0 / 0080)
 # 0080 half-width visual floors (never shrink; calf_b distal only)
 FOOT_HW_MIN_FRAC_LEN: Final[float] = 0.16
 FOOT_HW_MIN_VS_CALF_R: Final[float] = 1.20  # calf_b distal only
@@ -404,7 +405,7 @@ def apply_foot_length_visual_floor(
     """0044/0080: mannequin visual length floor; never shrinks measured/template.
 
     Floor sources (skip when unavailable): stature FOOT_LEN_VISUAL_MIN_FRAC_H·H
-    (0.145·H), ank half-width 4.8·hw, calf distal diam 4.0·(2·calf_r). When H is
+    (0.150·H), ank half-width 4.8·hw, calf distal diam 4.2·(2·calf_r). When H is
     present, each floor candidate is capped at FOOT_LEN_VISUAL_MAX_FRAC_H·H
     (0.155·H, B15 anti-boat) *before* max — does not shrink measured/template
     already above the cap. Template length is not a floor when measured exists
@@ -603,6 +604,16 @@ def build_foot_parts(
             f"arch={ARCH_SOFT_RY_FRAC_HALF_DEPTH} "
             f"ball={BALL_SOFT_RY_FRAC_HALF_DEPTH} "
             f"tip={TOE_TIP_PAD_SCALE}"
+        )
+    # 0098 B12: sibling once after both L/R length visual floor lines (const-driven).
+    if any(m.startswith("foot_l: length visual floor") for m in msgs) and any(
+        m.startswith("foot_r: length visual floor") for m in msgs
+    ):
+        msgs.append(
+            f"foot scale plus: len_h={FOOT_LEN_VISUAL_MIN_FRAC_H} "
+            f"calf={FOOT_LEN_MIN_VS_CALF_DIAM} "
+            f"hw={FOOT_HW_MIN_FRAC_LEN} "
+            f"cap={FOOT_LEN_VISUAL_MAX_FRAC_H}"
         )
     return parts
 
