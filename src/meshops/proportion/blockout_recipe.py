@@ -26,6 +26,7 @@ schema stay 1.4.0.
 0067: breast_soft athletic rx cap + teardrop axes + sternum X (before hang); schema stay 1.4.0.
 0050: neck column forward tilt (p0/p1) + head/face co-move + radius ceiling vs head.rx;
 schema stay 1.4.0.
+0085: HEAD_PITCH_DEG extra nod of head+face about post-0050 neck tip; schema stay 1.4.0.
 0059: neck diameter ceiling 0.40*head.rx + base soft ellipsoid + SCM r from neck.r;
 schema stay 1.4.0.
 0052: glute_soft seat mass (ry floor + rear +Y) before 0036 outer align; schema stay 1.4.0.
@@ -230,6 +231,7 @@ BREAST_X_SHOULDER_MAX_FRAC: Final[float] = 0.45
 BREAST_ATTACH_Y_SCALE: Final[float] = 1.0  # B12 — do not re-anchor Y to chest
 # 0050 B1/B5: neck column forward tilt about +X (tip -Y) + radius ceiling vs head.rx.
 NECK_FORWARD_TILT_DEG: Final[float] = 12.0
+HEAD_PITCH_DEG: Final[float] = 6.0  # 0085 B4 — after 0050; chin -Y about neck tip
 NECK_R_MAX_FRAC_HEAD_RX: Final[float] = 0.40  # 0059 B1 — was 0.55
 # 0059 B2/B3: neck base soft ellipsoid + SCM radius scale from neck.r
 NECK_BASE_RX_FRAC_R: Final[float] = 1.25
@@ -4446,6 +4448,8 @@ def build_blockout_recipe(
 
     # 0050: mild forward neck tilt + head co-move + radius ceiling (after face kit if any)
     _apply_neck_column_priors(parts, messages)
+    # 0085: extra head/face pitch about post-0050 neck tip (before 0059 base so it skips)
+    _apply_head_pitch(parts, messages)
     # 0059: neck base soft + SCM radius scale (after 0050 priors; post-ceiling neck.r)
     _apply_neck_diameter_base(parts, messages)
 
@@ -4858,6 +4862,75 @@ def _apply_neck_column_priors(parts: list[RecipePart], messages: list[str]) -> N
     messages.append("neck_column_tilt_applied: true")
     messages.append(f"neck_column_tip_dy_m={dy_tip}")
     messages.append(f"neck_column_head_comove: {str(moved_head).lower()}")
+
+
+def _rotate_yz_about_x(point: list[float], pivot: list[float], theta: float) -> list[float]:
+    """Rotate *point* about +X through *pivot* by *theta* radians (chin -Y)."""
+    y = float(point[1]) - pivot[1]
+    z = float(point[2]) - pivot[2]
+    c = math.cos(theta)
+    s = math.sin(theta)
+    return [float(point[0]), pivot[1] + y * c - z * s, pivot[2] + y * s + z * c]
+
+
+def _apply_head_pitch(parts: list[RecipePart], messages: list[str]) -> None:
+    """0085 B4: extra chin-forward nod of head + face about post-0050 neck tip +X.
+
+    Neck cylinder endpoints stay. neck_base_soft stays (born after this pass).
+    SCM and neck_head_fuse rotate p1 only (p0 stays — 0050 glue / base).
+    """
+    theta = math.radians(HEAD_PITCH_DEG)
+    if not math.isfinite(theta) or abs(theta) <= 1e-15:
+        return
+
+    neck = next(
+        (
+            p
+            for p in parts
+            if p.name == "RECIPE_neck"
+            and p.kind == "cylinder"
+            and p.p1 is not None
+            and len(p.p1) >= 3
+        ),
+        None,
+    )
+    if neck is None or neck.p1 is None:
+        return
+
+    pivot = [float(neck.p1[0]), float(neck.p1[1]), float(neck.p1[2])]
+
+    def _rot_full(part: RecipePart) -> None:
+        if part.center is not None and len(part.center) >= 3:
+            part.center = _rotate_yz_about_x(part.center, pivot, theta)
+        if part.p0 is not None and len(part.p0) >= 3:
+            part.p0 = _rotate_yz_about_x(part.p0, pivot, theta)
+        if part.p1 is not None and len(part.p1) >= 3:
+            part.p1 = _rotate_yz_about_x(part.p1, pivot, theta)
+
+    for part in parts:
+        if part.name == "RECIPE_neck":
+            continue
+        name_l = part.name.lower()
+        if "neck_base_soft" in name_l:
+            continue
+        if "sternomastoid" in name_l:
+            if part.p1 is not None and len(part.p1) >= 3:
+                part.p1 = _rotate_yz_about_x(part.p1, pivot, theta)
+            continue
+        if "neck_head_fuse" in name_l:
+            if part.p1 is not None and len(part.p1) >= 3:
+                part.p1 = _rotate_yz_about_x(part.p1, pivot, theta)
+            continue
+        if part.name == "RECIPE_head" or any(t in name_l for t in _NECK_HEAD_ATTACHED_TOKENS):
+            _rot_full(part)
+
+    from meshops.proportion.face_recipe import _LIP_Z_FRAC, EYE_RADIUS_FRAC_H, EYE_RZ_FRAC_R
+
+    messages.append(
+        "head face hierarchy: "
+        f"r={EYE_RADIUS_FRAC_H} rz={EYE_RZ_FRAC_R} "
+        f"lip_z={_LIP_Z_FRAC} pitch={HEAD_PITCH_DEG}"
+    )
 
 
 def _apply_neck_diameter_base(parts: list[RecipePart], messages: list[str]) -> None:
@@ -6830,6 +6903,7 @@ __all__ = [
     "GLUTE_SEAT_Y_FLOOR_M",
     "GLUTE_SEAT_Z_DROP_FRAC_H",
     "GLUTE_TOP_OVER_PELVIS_ALLOW_M",
+    "HEAD_PITCH_DEG",
     "HIP_SOFT_CENTER",
     "HIP_SOFT_RX_SCALE",
     "HIP_SOFT_RY_FRAC_RX",
@@ -6930,6 +7004,7 @@ __all__ = [
     "_apply_arm_muscle_softs",
     "_apply_deltoid_socket_bury",
     "_apply_glute_seat_mass",
+    "_apply_head_pitch",
     "_apply_join_ready_overlaps",
     "_apply_mid_back_plane",
     "_apply_neck_column_priors",

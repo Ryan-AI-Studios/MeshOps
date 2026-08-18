@@ -2,6 +2,8 @@
 
 Opt-in blockout-grade face kit parented to head/neck skeleton or Loomis placement.
 Authoring only - not identity biometrics, not print success (Difficulty §12 / N6).
+0085: orbital scale EYE_RADIUS_FRAC_H 0.11 + EYE_RZ 0.58 + lip Z 0.24 (pitch lives
+in blockout_recipe HEAD_PITCH_DEG).
 
 All names stay RECIPE_* (never FACE_*/HAIR_*/NECKLINE_* prefixes).
 """
@@ -33,8 +35,9 @@ FACE_KIT_SKIP_BOUNDS: Final[str] = "face kit skipped — chin/top bounds unresol
 _EYE_Z_FRAC: Final[float] = 0.50
 _BROW_Z_FRAC: Final[float] = 0.67
 _NOSE_BASE_Z_FRAC: Final[float] = 0.33
-_LIP_Z_FRAC: Final[float] = 0.20  # authoring choice, not Loomis third
-_EYE_RADIUS_FRAC_H: Final[float] = 0.08
+_LIP_Z_FRAC: Final[float] = 0.24  # 0085 B3 (was 0.20) — mouth shelf above chin
+# 0085 B1: promote private 0.08 pin-dot → public orbital pad
+EYE_RADIUS_FRAC_H: Final[float] = 0.11
 # 0055 jaw soft mass ellipsoid; 0057 chin-strap polish (public; use HeadBounds.H for Z fracs)
 JAW_RX_FRAC_HEAD_RX: Final[float] = 0.74  # was 0.85 — 0057
 JAW_RY_FRAC_HEAD_RY: Final[float] = 0.42  # was 0.55 — 0078 left chin shelf
@@ -49,8 +52,8 @@ _JAW_FACE_Y_FRAC_RY: Final[float] = 0.40
 # Near-surface plane so eye/brow/lip/cheek read on solid workbench multi-view.
 FEATURE_FACE_Y_FRAC_RY: Final[float] = 0.90
 EYE_RX_FRAC_R: Final[float] = 1.00  # stay
-EYE_RY_FRAC_R: Final[float] = 0.95  # was 0.85 (B15 D7 left pad) / was 0.25
-EYE_RZ_FRAC_R: Final[float] = 0.45  # was 0.70
+EYE_RY_FRAC_R: Final[float] = 0.95  # 0058 stay
+EYE_RZ_FRAC_R: Final[float] = 0.58  # 0085 B2 (was 0.45) — pad height, not slit
 
 NOSE_RX_FRAC_H: Final[float] = 0.045
 NOSE_RY_FRAC_H: Final[float] = 0.055
@@ -372,7 +375,7 @@ def _build_face_features(
     ry = bounds.ry
     placement = bounds.placement
 
-    eye_r = _EYE_RADIUS_FRAC_H * h
+    eye_r = EYE_RADIUS_FRAC_H * h
     eye_z = z_chin + _EYE_Z_FRAC * h
     brow_z = z_chin + _BROW_Z_FRAC * h
     nose_base_z = z_chin + _NOSE_BASE_Z_FRAC * h
@@ -445,7 +448,7 @@ def _build_face_features(
         )
     messages.append(f"face: brow soft capsule r={brow_r:.4f} (floor frac={BROW_R_FRAC_H})")
 
-    # Eyes L/R - product-like orbital pads (0058: depth ≥ height; near-surface plane)
+    # Eyes L/R - product-like orbital pads (0085 scale + 0058 horizontal axes)
     eye_rx = EYE_RX_FRAC_R * eye_r
     eye_ry = EYE_RY_FRAC_R * eye_r
     eye_rz = EYE_RZ_FRAC_R * eye_r
@@ -878,6 +881,7 @@ __all__ = [
     "CHEEK_X_FRAC_HEAD_RX",
     "CHEEK_Y_BIAS_FRAC_RY",
     "CHEEK_Z_MIX",
+    "EYE_RADIUS_FRAC_H",
     "EYE_RX_FRAC_R",
     "EYE_RY_FRAC_R",
     "EYE_RZ_FRAC_R",

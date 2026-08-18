@@ -414,7 +414,9 @@ def test_jaw_soft__t11_classifier_and_axial() -> None:
     """T11: classifier RECIPE_jaw → head; axial rule does not fail on jaw Y."""
     role, _side = classify_part_name("RECIPE_jaw")
     assert role == "head"
-    report = _full_torso_report()
+    report = _full_torso_report(
+        extra_lms={"chest_front": _lm("chest_front", x_m=0.0, y_m=-0.13, z_m=1.25)}
+    )
     pkg = build_blockout_recipe(report, limbs=False, face=True)
     result = validate_constraints(pkg, report=report)
     by_id = {r.id: r for r in result.rules}
@@ -425,7 +427,9 @@ def test_jaw_soft__t11_classifier_and_axial() -> None:
 
 def test_jaw_soft__t11b_axial_exemption_covers_jaw() -> None:
     """T11b: B18 marks RECIPE_jaw axial-exempt; C_axial_depth_plane not fail with face."""
-    report = _full_torso_report()
+    report = _full_torso_report(
+        extra_lms={"chest_front": _lm("chest_front", x_m=0.0, y_m=-0.13, z_m=1.25)}
+    )
     pkg = build_blockout_recipe(report, limbs=False, face=True)
     result = validate_constraints(pkg, report=report)
     by_id = {r.id: r for r in result.rules}
