@@ -15,6 +15,7 @@ from meshops.proportion.blockout_recipe import (
     CROTCH_Z_FRAC_FALLBACK,
     HEAD_PITCH_DEG,
     MIDLINE_X_TOL_M,
+    NECK_NAPE_SETBACK_M,
     RECIPE_SCHEMA_VERSION,
     BlockoutRecipePackage,
     RecipePart,
@@ -2251,9 +2252,11 @@ def test_recipe__axial_chest_y_prefers_mid_not_front() -> None:
     pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
     neck = next(p for p in pkg.parts if p.name == "RECIPE_neck")
     assert neck.p0 is not None and neck.p1 is not None
-    assert neck.p0[1] == pytest.approx(0.0, abs=1e-6)
+    assert neck.p0[1] == pytest.approx(0.0 + NECK_NAPE_SETBACK_M, abs=1e-6)
     length = math.dist(neck.p0, neck.p1)
-    expected_tip_y = 0.0 - length * math.sin(math.radians(NECK_FORWARD_TILT_DEG))
+    expected_tip_y = (
+        0.0 + NECK_NAPE_SETBACK_M - length * math.sin(math.radians(NECK_FORWARD_TILT_DEG))
+    )
     assert neck.p1[1] == pytest.approx(expected_tip_y, abs=1e-6)
     ovals = [p for p in pkg.parts if p.name.startswith("RECIPE_torso_oval_")]
     assert ovals
@@ -2330,7 +2333,7 @@ def test_recipe__axial_chest_y_band_frac_times_height() -> None:
     expected = y_mid_frac * h  # 0.086
     neck = next(p for p in pkg.parts if p.name == "RECIPE_neck")
     assert neck.p0 is not None
-    assert neck.p0[1] == pytest.approx(expected, abs=1e-6)
+    assert neck.p0[1] == pytest.approx(expected + NECK_NAPE_SETBACK_M, abs=1e-6)
     assert expected == pytest.approx(0.086, abs=1e-6)
     assert any("source=band" in m for m in pkg.messages)
     # Must not use fraction as meters
@@ -2350,7 +2353,7 @@ def test_recipe__axial_chest_y_fallback0_message() -> None:
     pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
     neck = next(p for p in pkg.parts if p.name == "RECIPE_neck")
     assert neck.p0 is not None
-    assert neck.p0[1] == pytest.approx(0.0, abs=1e-9)
+    assert neck.p0[1] == pytest.approx(0.0 + NECK_NAPE_SETBACK_M, abs=1e-9)
     assert any("source=fallback0" in m for m in pkg.messages)
     # Never collapse to chest_front alone
     assert neck.p0[1] != pytest.approx(-0.13, abs=1e-3)
@@ -2397,7 +2400,7 @@ def test_recipe__head_no_y_uses_axial_chest_y() -> None:
     dy_tip = -length * math.sin(math.radians(NECK_FORWARD_TILT_DEG))
     pivot = [float(neck.p1[0]), float(neck.p1[1]), float(neck.p1[2])]
     head_pre = _rotate_yz_about_x(list(head.center), pivot, -math.radians(HEAD_PITCH_DEG))
-    assert head_pre[1] == pytest.approx(0.05 + dy_tip, abs=1e-6)
+    assert head_pre[1] == pytest.approx(0.05 + dy_tip + NECK_NAPE_SETBACK_M, abs=1e-6)
 
 
 def test_recipe__head_chin_y_preserved() -> None:
@@ -2416,7 +2419,7 @@ def test_recipe__head_chin_y_preserved() -> None:
     dy_tip = -length * math.sin(math.radians(NECK_FORWARD_TILT_DEG))
     pivot = [float(neck.p1[0]), float(neck.p1[1]), float(neck.p1[2])]
     head_pre = _rotate_yz_about_x(list(head.center), pivot, -math.radians(HEAD_PITCH_DEG))
-    assert head_pre[1] == pytest.approx(-0.04 + dy_tip, abs=1e-6)
+    assert head_pre[1] == pytest.approx(-0.04 + dy_tip + NECK_NAPE_SETBACK_M, abs=1e-6)
 
 
 def test_recipe__axial_soft_breast_glute_not_mid_forced() -> None:
@@ -2572,7 +2575,7 @@ def test_recipe__axial_band_skipped_when_height_null() -> None:
     pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
     neck = next(p for p in pkg.parts if p.name == "RECIPE_neck")
     assert neck.p0 is not None
-    assert neck.p0[1] == pytest.approx(0.0, abs=1e-9)
+    assert neck.p0[1] == pytest.approx(0.0 + NECK_NAPE_SETBACK_M, abs=1e-9)
     assert any("source=fallback0" in m for m in pkg.messages)
     assert neck.p0[1] != pytest.approx(0.05, abs=1e-4)
     assert pkg.honesty == RECIPE_HONESTY

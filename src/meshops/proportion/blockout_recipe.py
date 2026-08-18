@@ -27,6 +27,7 @@ schema stay 1.4.0.
 0050: neck column forward tilt (p0/p1) + head/face co-move + radius ceiling vs head.rx;
 schema stay 1.4.0.
 0085: HEAD_PITCH_DEG extra nod of head+face about post-0050 neck tip; schema stay 1.4.0.
+0086: NECK_NAPE_SETBACK_M +Y of post-0085 neck+head stack (before 0059 base); schema stay 1.4.0.
 0059: neck diameter ceiling 0.40*head.rx + base soft ellipsoid + SCM r from neck.r;
 schema stay 1.4.0.
 0052: glute_soft seat mass (ry floor + rear +Y) before 0036 outer align; schema stay 1.4.0.
@@ -232,6 +233,8 @@ BREAST_ATTACH_Y_SCALE: Final[float] = 1.0  # B12 — do not re-anchor Y to chest
 # 0050 B1/B5: neck column forward tilt about +X (tip -Y) + radius ceiling vs head.rx.
 NECK_FORWARD_TILT_DEG: Final[float] = 12.0
 HEAD_PITCH_DEG: Final[float] = 6.0  # 0085 B4 — after 0050; chin -Y about neck tip
+NECK_NAPE_SETBACK_M: Final[float] = 0.018  # 0086 B1 — +Y after 0085; chin/nod stay relative
+# Distinct from NECK_NAPE_CLEARANCE_M (0061 trap Z-clamp under neck top). Do not merge.
 NECK_R_MAX_FRAC_HEAD_RX: Final[float] = 0.40  # 0059 B1 — was 0.55
 # 0059 B2/B3: neck base soft ellipsoid + SCM radius scale from neck.r
 NECK_BASE_RX_FRAC_R: Final[float] = 1.25
@@ -4450,6 +4453,8 @@ def build_blockout_recipe(
     _apply_neck_column_priors(parts, messages)
     # 0085: extra head/face pitch about post-0050 neck tip (before 0059 base so it skips)
     _apply_head_pitch(parts, messages)
+    # 0086: +Y nape setback of neck+head stack (before 0059 so base is born at setback p0)
+    _apply_neck_nape_setback(parts, messages)
     # 0059: neck base soft + SCM radius scale (after 0050 priors; post-ceiling neck.r)
     _apply_neck_diameter_base(parts, messages)
 
@@ -4931,6 +4936,50 @@ def _apply_head_pitch(parts: list[RecipePart], messages: list[str]) -> None:
         f"r={EYE_RADIUS_FRAC_H} rz={EYE_RZ_FRAC_R} "
         f"lip_z={_LIP_Z_FRAC} pitch={HEAD_PITCH_DEG}"
     )
+
+
+def _apply_neck_nape_setback(parts: list[RecipePart], messages: list[str]) -> None:
+    """0086 B1: +Y nape setback of the post-0085 neck+head stack (before 0059 base).
+
+    Rigid world +Y — not a rotation. Neck p0+p1, head + attached tokens (full,
+    including neck_head_fuse), SCM both ends. Delts/traps/scap/clavicle/chest/
+    neckline stay. neck_base_soft is born after this pass. Quiet skip if no neck.
+    """
+    dy = NECK_NAPE_SETBACK_M
+    if not math.isfinite(dy) or abs(dy) <= 1e-15:
+        return
+
+    neck = next(
+        (
+            p
+            for p in parts
+            if p.name == "RECIPE_neck"
+            and p.kind == "cylinder"
+            and p.p0 is not None
+            and p.p1 is not None
+            and len(p.p0) >= 3
+            and len(p.p1) >= 3
+        ),
+        None,
+    )
+    if neck is None:
+        return
+
+    _shift_part_along_axis(neck, 1, dy)
+
+    for part in parts:
+        if part.name == "RECIPE_neck":
+            continue
+        name_l = part.name.lower()
+        if "neck_base_soft" in name_l:
+            continue
+        if "sternomastoid" in name_l:
+            _shift_part_along_axis(part, 1, dy)
+            continue
+        if part.name == "RECIPE_head" or any(t in name_l for t in _NECK_HEAD_ATTACHED_TOKENS):
+            _shift_part_along_axis(part, 1, dy)
+
+    messages.append(f"neck nape setback: dy={dy}")
 
 
 def _apply_neck_diameter_base(parts: list[RecipePart], messages: list[str]) -> None:
@@ -6935,6 +6984,7 @@ __all__ = [
     "NECK_BASE_Z_BURY_FRAC_RZ",
     "NECK_FORWARD_TILT_DEG",
     "NECK_NAPE_CLEARANCE_M",
+    "NECK_NAPE_SETBACK_M",
     "NECK_R_MAX_FRAC_HEAD_RX",
     "PELVIS_BUCKET_HALF_DEPTH_FRAC",
     "PELVIS_BUCKET_HW_FRAC",
@@ -7009,6 +7059,7 @@ __all__ = [
     "_apply_mid_back_plane",
     "_apply_neck_column_priors",
     "_apply_neck_diameter_base",
+    "_apply_neck_nape_setback",
     "_apply_scap_plane",
     "_apply_shoulder_girdle_softs",
     "_apply_soft_density_cull",
