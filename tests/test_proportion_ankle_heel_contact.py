@@ -163,7 +163,7 @@ def _contact_overlap(pkg_parts: list, side: str = "l") -> float:
 
 def test_t0_exports_named_freezes_in_retune_bands() -> None:
     """T0: all ANK_* + HEEL_CONTACT_* exported and in plan §0 retune bands (0076)."""
-    assert 1.15 <= ANK_RY_FRAC_HALF_W <= 1.30
+    assert 0.90 <= ANK_RY_FRAC_HALF_W <= 1.08
     assert 0.028 <= ANK_RY_FLOOR_M <= 0.033
     assert 1.70 <= ANK_RZ_FRAC_HALF_W <= 1.90
     assert 0.042 <= ANK_RZ_FLOOR_M <= 0.046
@@ -171,7 +171,7 @@ def test_t0_exports_named_freezes_in_retune_bands() -> None:
     assert 0.55 <= ANK_RZ_MAX_FRAC_ANK_Z <= 0.65
     assert 0.003 <= HEEL_CONTACT_OVERLAP_TARGET_M <= 0.010
     # Exact defaults from plan freezes (0076 anti-ball / mild column)
-    assert pytest.approx(1.22) == ANK_RY_FRAC_HALF_W
+    assert pytest.approx(1.00) == ANK_RY_FRAC_HALF_W
     assert pytest.approx(0.030) == ANK_RY_FLOOR_M
     assert pytest.approx(1.80) == ANK_RZ_FRAC_HALF_W
     assert pytest.approx(0.044) == ANK_RZ_FLOOR_M
@@ -210,12 +210,13 @@ def test_t2_product_ank_rz_frac_wins() -> None:
 
 
 def test_t3_product_ank_ry_frac_wins() -> None:
-    """T3: product ank_ry >= frac*hw (frac wins — AI2 P2-3)."""
-    report = _product_feet_report(half_width_m=PRODUCT_HW_M)
+    """T3: 0080-class hw — product ank_ry >= frac*hw (frac wins)."""
+    product_hw_0080 = 0.04035
+    report = _product_feet_report(half_width_m=product_hw_0080)
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     ank = _ank(pkg.parts)
     assert ank.ry_m is not None
-    frac_ry = ANK_RY_FRAC_HALF_W * PRODUCT_HW_M
+    frac_ry = ANK_RY_FRAC_HALF_W * product_hw_0080
     assert float(ank.ry_m) >= frac_ry - EPS
     assert frac_ry > ANK_RY_FLOOR_M
     assert float(ank.ry_m) > ANK_RY_FLOOR_M + EPS or abs(float(ank.ry_m) - frac_ry) < 1e-5
@@ -279,7 +280,7 @@ def test_t7_0044_length_heel_fence() -> None:
     assert pytest.approx(0.145) == FOOT_LEN_VISUAL_MIN_FRAC_H
     assert pytest.approx(4.8) == FOOT_LEN_MIN_VS_ANK_HW
     assert pytest.approx(4.0) == FOOT_LEN_MIN_VS_CALF_DIAM
-    assert pytest.approx(0.10) == HEEL_REAR_Y_BIAS_FRAC_DEPTH  # 0076 B3 (was 0.06)
+    assert pytest.approx(0.14) == HEEL_REAR_Y_BIAS_FRAC_DEPTH  # 0097 B2 (was 0.10 / 0076)
     # 0056 true freezes — HEEL_Z_FRAC_ANK is Z (not ry)
     assert pytest.approx(0.42) == HEEL_Z_FRAC_ANK
     assert pytest.approx(0.48) == HEEL_RZ_CAP_FRAC_ANK
@@ -311,8 +312,8 @@ def test_t9_rz_frac_wins_on_product_hw() -> None:
 
 
 def test_t9b_ry_frac_wins_on_product_hw() -> None:
-    """T9b: ANK_RY_FRAC_HALF_W * 0.0263 > ANK_RY_FLOOR_M (AI2 P2-3)."""
-    assert ANK_RY_FRAC_HALF_W * PRODUCT_HW_M > ANK_RY_FLOOR_M
+    """T9b: 0080-class hw — ANK_RY_FRAC * 0.04035 > floor (thin 0.0263 floor-binds)."""
+    assert ANK_RY_FRAC_HALF_W * 0.04035 > ANK_RY_FLOOR_M
 
 
 # ---------------------------------------------------------------------------
