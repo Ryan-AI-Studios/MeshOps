@@ -495,7 +495,9 @@ def test_t11_fence_knee_thigh_hip_elbow_foot() -> None:
         from_parts = _calf_distal_r_from_parts(pkg.parts, side)
         assert from_parts == pytest.approx(float(calf_b.rx_m), abs=1e-9)  # type: ignore[arg-type]
         expect_len = FOOT_LEN_MIN_VS_CALF_DIAM * (2.0 * float(calf_b.rx_m))  # type: ignore[arg-type]
-        assert expect_len == pytest.approx(0.2522, abs=1e-3)
+        plate = by_name[f"RECIPE_foot_plate_{side}"]
+        assert plate.half_depth_m is not None
+        assert (2.0 * float(plate.half_depth_m)) == pytest.approx(expect_len, abs=1e-3)
     assert any("calf_diam" in m for m in pkg.messages)
 
 

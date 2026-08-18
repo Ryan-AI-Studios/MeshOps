@@ -401,7 +401,7 @@ def test_t8_0072_heel_and_0056_ank_freezes_unchanged() -> None:
     assert pytest.approx(0.012) == HEEL_REAR_OVERHANG_M
     assert pytest.approx(0.34) == HEEL_RY_MAX_FRAC_HALF_DEPTH
     assert pytest.approx(0.24) == BALL_SOFT_RY_FRAC_HALF_DEPTH
-    assert pytest.approx(0.145) == FOOT_LEN_VISUAL_MIN_FRAC_H
+    assert pytest.approx(0.150) == FOOT_LEN_VISUAL_MIN_FRAC_H
     assert pytest.approx(1.00) == ANK_RY_FRAC_HALF_W  # 0097 B1 (was 1.22 / 0076)
     assert pytest.approx(0.030) == ANK_RY_FLOOR_M  # 0076 B1 (was 0.036)
     assert pytest.approx(1.80) == ANK_RZ_FRAC_HALF_W  # 0076 B2 (was 2.00)

@@ -277,9 +277,9 @@ def test_t6_0054_sole_toe_fence() -> None:
 def test_t7_0044_length_heel_fence() -> None:
     """T7: 0056 true freezes + 0072 retargets for length/heel ry/bias."""
     # 0080 B1/B2 / 0072 B1 retargets (value changes by design)
-    assert pytest.approx(0.145) == FOOT_LEN_VISUAL_MIN_FRAC_H
+    assert pytest.approx(0.150) == FOOT_LEN_VISUAL_MIN_FRAC_H
     assert pytest.approx(4.8) == FOOT_LEN_MIN_VS_ANK_HW
-    assert pytest.approx(4.0) == FOOT_LEN_MIN_VS_CALF_DIAM
+    assert pytest.approx(4.2) == FOOT_LEN_MIN_VS_CALF_DIAM
     assert pytest.approx(0.14) == HEEL_REAR_Y_BIAS_FRAC_DEPTH  # 0097 B2 (was 0.10 / 0076)
     # 0056 true freezes — HEEL_Z_FRAC_ANK is Z (not ry)
     assert pytest.approx(0.42) == HEEL_Z_FRAC_ANK
@@ -312,8 +312,8 @@ def test_t9_rz_frac_wins_on_product_hw() -> None:
 
 
 def test_t9b_ry_frac_wins_on_product_hw() -> None:
-    """T9b: 0080-class hw — ANK_RY_FRAC * 0.04035 > floor (thin 0.0263 floor-binds)."""
-    assert ANK_RY_FRAC_HALF_W * 0.04035 > ANK_RY_FLOOR_M
+    """T9b: 0098-class hw — ANK_RY_FRAC * 0.04237 > floor (thin 0.0263 floor-binds)."""
+    assert ANK_RY_FRAC_HALF_W * 0.04237 > ANK_RY_FLOOR_M
 
 
 # ---------------------------------------------------------------------------

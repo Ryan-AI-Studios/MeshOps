@@ -790,10 +790,10 @@ def _report_foot_span(
 
 
 def test_ext__t0_0080_constants() -> None:
-    """T0: 0080 freezes for length/width floors + B15 anti-boat cap."""
-    assert pytest.approx(0.145) == FOOT_LEN_VISUAL_MIN_FRAC_H
+    """T0: 0098 freezes for length/width floors + B15 anti-boat cap."""
+    assert pytest.approx(0.150) == FOOT_LEN_VISUAL_MIN_FRAC_H
     assert pytest.approx(0.155) == FOOT_LEN_VISUAL_MAX_FRAC_H
-    assert pytest.approx(4.0) == FOOT_LEN_MIN_VS_CALF_DIAM
+    assert pytest.approx(4.2) == FOOT_LEN_MIN_VS_CALF_DIAM
     assert pytest.approx(4.8) == FOOT_LEN_MIN_VS_ANK_HW
     assert pytest.approx(0.16) == FOOT_HW_MIN_FRAC_LEN
     assert pytest.approx(1.20) == FOOT_HW_MIN_VS_CALF_R
@@ -829,7 +829,7 @@ def test_ext__t2_long_measured_not_shrunk() -> None:
 
 
 def test_ext__t3_apply_foot_length_visual_floor_calf() -> None:
-    """T3: unit floor calf_r=0.08, H=None, hw=0.02 -> 4.0*2*0.08=0.64; source calf_diam."""
+    """T3: unit floor calf_r=0.08, H=None, hw=0.02 -> const*2*0.08; source calf_diam."""
     msgs: list[str] = []
     out = apply_foot_length_visual_floor(
         0.10,
@@ -842,7 +842,6 @@ def test_ext__t3_apply_foot_length_visual_floor_calf() -> None:
     expect = FOOT_LEN_MIN_VS_CALF_DIAM * (2.0 * 0.08)
     assert out >= expect - 1e-9
     assert out == pytest.approx(expect, abs=1e-9)
-    assert out == pytest.approx(0.64, abs=1e-9)
     assert any("calf_diam" in m for m in msgs)
     assert any("0.1000->" in m or "length visual floor" in m for m in msgs)
 
@@ -881,7 +880,7 @@ def test_ext__t3c_wide_hw_not_shrunk() -> None:
 
 
 def test_ext__t3d_b15_length_floor_cap() -> None:
-    """T3d: B15 caps calf length floor at 0.155*H (not raw 4.0*diam)."""
+    """T3d: B15 caps calf length floor at 0.155*H (not raw calf_diam)."""
     msgs: list[str] = []
     out = apply_foot_length_visual_floor(
         0.10,
@@ -891,7 +890,7 @@ def test_ext__t3d_b15_length_floor_cap() -> None:
         messages=msgs,
         side="l",
     )
-    raw_calf = FOOT_LEN_MIN_VS_CALF_DIAM * (2.0 * 0.08)  # 0.64
+    raw_calf = FOOT_LEN_MIN_VS_CALF_DIAM * (2.0 * 0.08)
     cap = FOOT_LEN_VISUAL_MAX_FRAC_H * 1.72  # 0.2666
     assert raw_calf > cap
     assert out <= cap + 1e-9
