@@ -167,18 +167,18 @@ def _half_depth(pkg_parts: list, side: str = "l") -> float:
 
 
 def test_t0_public_freezes_0076() -> None:
-    """T0: B1-B3 exacts + contact/heel_ry/overhang fences."""
-    assert pytest.approx(1.22) == ANK_RY_FRAC_HALF_W
+    """T0: B1-B3 exacts + contact/heel_ry/overhang fences (0097 invert)."""
+    assert pytest.approx(1.00) == ANK_RY_FRAC_HALF_W
     assert pytest.approx(0.030) == ANK_RY_FLOOR_M
     assert pytest.approx(1.80) == ANK_RZ_FRAC_HALF_W
     assert pytest.approx(0.044) == ANK_RZ_FLOOR_M
-    assert pytest.approx(0.10) == HEEL_REAR_Y_BIAS_FRAC_DEPTH
-    # Bands (open retune)
-    assert 1.15 <= ANK_RY_FRAC_HALF_W <= 1.30
+    assert pytest.approx(0.14) == HEEL_REAR_Y_BIAS_FRAC_DEPTH
+    # Bands (open retune) — 0097 AP flatten after 0080 hw growth
+    assert 0.90 <= ANK_RY_FRAC_HALF_W <= 1.08
     assert 0.028 <= ANK_RY_FLOOR_M <= 0.033
     assert 1.70 <= ANK_RZ_FRAC_HALF_W <= 1.90
     assert 0.042 <= ANK_RZ_FLOOR_M <= 0.046
-    assert 0.08 <= HEEL_REAR_Y_BIAS_FRAC_DEPTH <= 0.14
+    assert 0.12 <= HEEL_REAR_Y_BIAS_FRAC_DEPTH <= 0.16
     # Unchanged fences
     assert pytest.approx(0.005) == HEEL_CONTACT_OVERLAP_TARGET_M
     assert pytest.approx(0.30) == HEEL_RY_MIN_FRAC_DEPTH
@@ -203,24 +203,25 @@ def test_t1_product_contact_gap_ge_target() -> None:
 
 
 def test_t2_product_ank_ry_rx_anti_ball_anti_pea() -> None:
-    """T2: product ank_ry/rx ≤ 1.30 AND ≥ 1.15 (anti-ball + anti-pea)."""
+    """T2: product ank_ry/rx AP flatten (0.90-1.08) + pea floor still holds."""
     report = _product_feet_report()
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     ank = _ank(pkg.parts)
     assert ank.rx_m is not None and ank.ry_m is not None
     ratio = float(ank.ry_m) / float(ank.rx_m)
-    assert 1.15 <= ratio <= 1.30, f"ank_ry/rx={ratio}"
+    assert 0.90 <= ratio <= 1.08, f"ank_ry/rx={ratio}"
 
 
 def test_t3_product_ank_ry_frac_wins_floor() -> None:
-    """T3: 1.22*hw > 0.030 and emitted ank_ry approx frac path on floored hw."""
-    assert ANK_RY_FRAC_HALF_W * PRODUCT_HW_M > ANK_RY_FLOOR_M
-    report = _product_feet_report(half_width_m=PRODUCT_HW_M)
+    """T3: 1.00*0080-hw > 0.030 and emitted ank_ry approx frac path (thin-hw floors)."""
+    product_hw_0080 = 0.04035
+    assert ANK_RY_FRAC_HALF_W * product_hw_0080 > ANK_RY_FLOOR_M
+    report = _product_feet_report(half_width_m=product_hw_0080)
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     ank = _ank(pkg.parts)
     assert ank.ry_m is not None
     assert ank.rx_m is not None
-    # 0080 width floor may raise hw above PRODUCT_HW; ry uses floored ank.rx
+    # 0080 width floor may raise hw; ry uses floored ank.rx
     frac_ry = ANK_RY_FRAC_HALF_W * float(ank.rx_m)
     assert float(ank.ry_m) == pytest.approx(frac_ry, abs=1e-5)
     assert float(ank.ry_m) >= ANK_RY_FLOOR_M - 1e-9
@@ -277,7 +278,7 @@ def test_t7_sole_toe_freezes_unchanged_smoke() -> None:
     assert pytest.approx(0.009) == TOE_R_FLOOR_M
     assert pytest.approx(0.028) == TOE_TIP_MAX_PAST_BALL_M
     assert pytest.approx(0.12) == TOE_TIP_MAX_PAST_BALL_FRAC
-    assert pytest.approx(1.15) == TOE_TIP_PAD_SCALE
+    assert pytest.approx(1.00) == TOE_TIP_PAD_SCALE
     report = _product_feet_report(height_m=1.72)
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     plate = _plate(pkg.parts)

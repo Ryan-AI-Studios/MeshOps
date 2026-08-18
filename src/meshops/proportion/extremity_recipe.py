@@ -6,6 +6,7 @@ as law (Difficulty §12 / N6).
 
 All names stay RECIPE_* (never HAND_*/FOOT_*/DIGIT_* prefixes).
 Ankle mass labels must contain ank_foot (classifier -> ankle_bridge).
+0097: ank AP flatten + heel rear seat + sole pads recede (not boots / 0098).
 """
 
 from __future__ import annotations
@@ -83,12 +84,14 @@ TOE_TIP_MAX_PAST_M: Final[float] = 0.024  # 0075 B3 plate absolute tip budget (w
 TOE_TIP_MAX_PAST_FRAC: Final[float] = 0.12  # 0075 B3 plate proportional tip budget (was 0.15)
 TOE_TIP_MAX_PAST_BALL_M: Final[float] = 0.028  # 0075 B2 ball absolute tip budget
 TOE_TIP_MAX_PAST_BALL_FRAC: Final[float] = 0.12  # 0075 B2 ball proportional tip budget
-TOE_TIP_PAD_SCALE: Final[float] = 1.15  # 0075 B5 tip pad mass vs digit r
+TOE_TIP_PAD_SCALE: Final[float] = 1.00  # 0097 B5 (was 1.15 / 0075)
 TOE_SPLAY_FRAC_HALF_W: Final[float] = 1.25
 TOE_MIN_CENTER_SPACING_VS_R: Final[float] = 1.0  # soft B15
 TOE_WEDGE_RZ_FRAC_SOLE: Final[float] = 0.85
-_BALL_SOFT_R_FRAC_FOOT: Final[float] = 0.14
-BALL_SOFT_RY_FRAC_HALF_DEPTH: Final[float] = 0.32  # 0072 B8 (was bare 0.28)
+_BALL_SOFT_R_FRAC_FOOT: Final[float] = 0.10  # 0097 B4b (was 0.14); keep 1.1 so 0.24*hd wins
+BALL_SOFT_RY_FRAC_HALF_DEPTH: Final[float] = 0.24  # 0097 B4 (was 0.32 / 0072)
+# 0044 / 0072 arch pad (was bare half_depth * 0.38)
+ARCH_SOFT_RY_FRAC_HALF_DEPTH: Final[float] = 0.26  # 0097 B3
 # Rounded sole: ellipsoid foot_plate (not world-axis square box).
 # Heel min-floor inside max(...) — rear pad primary (0044 B6-B8), not tower.
 _HEEL_R_FRAC_FOOT: Final[float] = 0.18
@@ -102,7 +105,7 @@ FOOT_LEN_MIN_VS_CALF_DIAM: Final[float] = 4.0  # 0080 B2 (was 1.55)
 FOOT_HW_MIN_FRAC_LEN: Final[float] = 0.16
 FOOT_HW_MIN_VS_CALF_R: Final[float] = 1.20  # calf_b distal only
 FOOT_HW_MIN_FRAC_H: Final[float] = 0.022
-HEEL_REAR_Y_BIAS_FRAC_DEPTH: Final[float] = 0.10  # 0076 B3 (was 0.06 / 0072)
+HEEL_REAR_Y_BIAS_FRAC_DEPTH: Final[float] = 0.14  # 0097 B2 (was 0.10 / 0076)
 HEEL_REAR_OVERHANG_M: Final[float] = 0.012  # 0072 B3 rear tip clamp budget
 HEEL_Z_FRAC_ANK: Final[float] = 0.42
 HEEL_RZ_CAP_FRAC_ANK: Final[float] = 0.48
@@ -110,7 +113,7 @@ HEEL_RY_MIN_FRAC_DEPTH: Final[float] = 0.30  # 0072 B1 (was 0.42)
 HEEL_RY_MIN_VS_RZ_FRAC: Final[float] = 0.70  # 0072 B1c (was bare 0.70)
 HEEL_RY_MAX_FRAC_HALF_DEPTH: Final[float] = 0.34  # 0072 B11 composition accept
 # 0056 ank/heel contact mass freezes (B1-B7, B13) + 0076 anti-ball / mild column
-ANK_RY_FRAC_HALF_W: Final[float] = 1.22  # 0076 B1 anti-ball (was 1.45)
+ANK_RY_FRAC_HALF_W: Final[float] = 1.00  # 0097 B1 AP flatten (was 1.22 / 0076)
 ANK_RY_FLOOR_M: Final[float] = 0.030  # 0076 B1 (was 0.036; product frac wins)
 ANK_RZ_FRAC_HALF_W: Final[float] = 1.80  # 0076 B2 mild column (was 2.00)
 ANK_RZ_FLOOR_M: Final[float] = 0.044  # 0076 B2 (was 0.048; product frac wins)
@@ -590,6 +593,17 @@ def build_foot_parts(
                 existing_parts=existing_parts,
             )
         )
+    # 0097 B12: sibling once after both L/R heel/ank proportion lines (const-driven).
+    if any(m.startswith("foot_l: heel/ank proportion") for m in msgs) and any(
+        m.startswith("foot_r: heel/ank proportion") for m in msgs
+    ):
+        msgs.append(
+            f"foot stack hierarchy: ank_ry={ANK_RY_FRAC_HALF_W} "
+            f"bias={HEEL_REAR_Y_BIAS_FRAC_DEPTH} "
+            f"arch={ARCH_SOFT_RY_FRAC_HALF_DEPTH} "
+            f"ball={BALL_SOFT_RY_FRAC_HALF_DEPTH} "
+            f"tip={TOE_TIP_PAD_SCALE}"
+        )
     return parts
 
 
@@ -849,7 +863,7 @@ def _build_foot_side(
     # Arch always with --feet (R5b2), including toes=none. Role stays ball_soft.
     arch_y = plate_y + half_depth * 0.08
     arch_rx = half_width * 0.92
-    arch_ry = half_depth * 0.38  # elongated along foot
+    arch_ry = ARCH_SOFT_RY_FRAC_HALF_DEPTH * half_depth  # 0097 B3 (was bare 0.38)
     arch_rz = max(sole_rz * 1.15, half_width * 0.28)  # low pad, not a perched sphere
     arch_z = sole_cz + sole_rz * 0.25  # mostly embedded; slight instep rise only
     out.append(
@@ -1272,6 +1286,7 @@ __all__ = [
     "ANK_RZ_FRAC_HALF_W",
     "ANK_RZ_MAX_FRAC_ANK_Z",
     "ANK_RZ_MIN_VS_CALF_B",
+    "ARCH_SOFT_RY_FRAC_HALF_DEPTH",
     "BALL_SOFT_RY_FRAC_HALF_DEPTH",
     "FINGER_TIERS",
     "FOOT_HW_MIN_FRAC_H",

@@ -186,7 +186,7 @@ def test_t0_public_freezes() -> None:
     assert pytest.approx(0.40) == TOE_BALL_NEST_FRAC
     assert pytest.approx(0.028) == TOE_TIP_MAX_PAST_BALL_M
     assert pytest.approx(0.12) == TOE_TIP_MAX_PAST_BALL_FRAC
-    assert pytest.approx(1.15) == TOE_TIP_PAD_SCALE
+    assert pytest.approx(1.00) == TOE_TIP_PAD_SCALE
     assert pytest.approx(0.55) == TOE_TIP_PAST_FRAC
     assert pytest.approx(0.024) == TOE_TIP_MAX_PAST_M
     assert pytest.approx(0.12) == TOE_TIP_MAX_PAST_FRAC
@@ -274,7 +274,7 @@ def test_t3_ball_primary_plate_secondary() -> None:
 
 
 def test_t4_tip_pads_present_and_scale() -> None:
-    """T4: tip pads present; r_pad = min(1.15*r_i, cap); big pad >= mid pad."""
+    """T4: tip pads present; r_pad = min(TOE_TIP_PAD_SCALE*r_i, cap); big >= mid."""
     report = _product_feet_report()
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     plate = _plate(pkg.parts)
@@ -294,11 +294,6 @@ def test_t4_tip_pads_present_and_scale() -> None:
             assert r_pad == pytest.approx(expect, abs=1e-6), (
                 f"toe_tip_{i}_{side} r={r_pad} != expect={expect} (r_i={r_i} cap={r_cap})"
             )
-            # Mid toes (uncapped path): pad is at least 1.12 * digit r
-            if i != 1:
-                assert r_pad >= 1.12 * r_i - EPS, (
-                    f"toe_tip_{i}_{side} r={r_pad} < 1.12*r_i={1.12 * r_i}"
-                )
         big_pad = float(_toe_tip(pkg.parts, 1, side=side).rx_m or 0.0)
         mid_pad = float(_toe_tip(pkg.parts, 3, side=side).rx_m or 0.0)
         assert big_pad >= mid_pad - EPS, f"big pad {big_pad} < mid pad {mid_pad}"
@@ -402,12 +397,12 @@ def test_t8_0072_heel_and_0056_ank_freezes_unchanged() -> None:
     """T8: 0072 heel fence + 0076 ank freezes + contact fence."""
     assert pytest.approx(0.30) == HEEL_RY_MIN_FRAC_DEPTH
     assert pytest.approx(0.70) == HEEL_RY_MIN_VS_RZ_FRAC
-    assert pytest.approx(0.10) == HEEL_REAR_Y_BIAS_FRAC_DEPTH  # 0076 B3 (was 0.06)
+    assert pytest.approx(0.14) == HEEL_REAR_Y_BIAS_FRAC_DEPTH  # 0097 B2 (was 0.10 / 0076)
     assert pytest.approx(0.012) == HEEL_REAR_OVERHANG_M
     assert pytest.approx(0.34) == HEEL_RY_MAX_FRAC_HALF_DEPTH
-    assert pytest.approx(0.32) == BALL_SOFT_RY_FRAC_HALF_DEPTH
+    assert pytest.approx(0.24) == BALL_SOFT_RY_FRAC_HALF_DEPTH
     assert pytest.approx(0.145) == FOOT_LEN_VISUAL_MIN_FRAC_H
-    assert pytest.approx(1.22) == ANK_RY_FRAC_HALF_W  # 0076 B1 (was 1.45)
+    assert pytest.approx(1.00) == ANK_RY_FRAC_HALF_W  # 0097 B1 (was 1.22 / 0076)
     assert pytest.approx(0.030) == ANK_RY_FLOOR_M  # 0076 B1 (was 0.036)
     assert pytest.approx(1.80) == ANK_RZ_FRAC_HALF_W  # 0076 B2 (was 2.00)
     assert pytest.approx(0.044) == ANK_RZ_FLOOR_M  # 0076 B2 (was 0.048)
