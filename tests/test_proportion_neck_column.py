@@ -9,6 +9,7 @@ import pytest
 from meshops.proportion.blockout_recipe import (
     HEAD_PITCH_DEG,
     NECK_FORWARD_TILT_DEG,
+    NECK_NAPE_SETBACK_M,
     NECK_R_MAX_FRAC_HEAD_RX,
     RECIPE_SCHEMA_VERSION,
     RecipePart,
@@ -292,7 +293,7 @@ def test_neck_column__t3_head_shift_preserve() -> None:
     # 0085: 0050 shift still holds in pre-pitch space
     pivot = [float(neck.p1[0]), float(neck.p1[1]), float(neck.p1[2])]
     head_pre = _rotate_yz_about_x(list(head.center), pivot, -math.radians(HEAD_PITCH_DEG))
-    assert float(head_pre[1]) == pytest.approx(pre_head_y + dy_tip, abs=1e-5)
+    assert float(head_pre[1]) == pytest.approx(pre_head_y + dy_tip + NECK_NAPE_SETBACK_M, abs=1e-5)
     # Absolute head≈tip should NOT hold when chin offset present
     assert float(head.center[1]) != pytest.approx(float(neck.p1[1]), abs=1e-3)
 
@@ -325,7 +326,7 @@ def test_neck_column__t4_face_soft_comoves() -> None:
     pivot = [float(neck.p1[0]), float(neck.p1[1]), float(neck.p1[2])]
     th = -math.radians(HEAD_PITCH_DEG)
     head_pre = _rotate_yz_about_x(list(head.center), pivot, th)
-    assert float(head_pre[1]) == pytest.approx(pre_head_y + dy_tip, abs=1e-5)
+    assert float(head_pre[1]) == pytest.approx(pre_head_y + dy_tip + NECK_NAPE_SETBACK_M, abs=1e-5)
     # ear_soft sits at bounds.y (same pre as head); after co-move matches head Y
     ear = next((p for p in pkg.parts if "ear_soft" in p.name.lower()), None)
     jaw = next((p for p in pkg.parts if p.name == "RECIPE_jaw"), None)
@@ -333,7 +334,9 @@ def test_neck_column__t4_face_soft_comoves() -> None:
     assert soft is not None and soft.center is not None
     if ear is not None and ear.center is not None:
         ear_pre = _rotate_yz_about_x(list(ear.center), pivot, th)
-        assert float(ear_pre[1]) == pytest.approx(pre_head_y + dy_tip, abs=1e-5)
+        assert float(ear_pre[1]) == pytest.approx(
+            pre_head_y + dy_tip + NECK_NAPE_SETBACK_M, abs=1e-5
+        )
         assert float(ear.center[1]) == pytest.approx(float(head.center[1]), abs=1e-5)
     else:
         # Jaw is face_y + JAW_Y_BIAS_FRAC_RY*ry (0.08) then + dy_tip; still moved faceward with head
