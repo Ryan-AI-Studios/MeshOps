@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 import meshops.proportion.face_recipe as face_recipe_mod
 from meshops.proportion.blockout_recipe import (
     _NECK_HEAD_ATTACHED_TOKENS,
+    HEAD_PITCH_DEG,
+    _rotate_yz_about_x,
     build_blockout_recipe,
 )
 from meshops.proportion.constraints import classify_part_name, validate_constraints
@@ -19,6 +23,7 @@ from meshops.proportion.face_recipe import (
     CHEEK_X_FRAC_HEAD_RX,
     CHEEK_Y_BIAS_FRAC_RY,
     CHEEK_Z_MIX,
+    EYE_RADIUS_FRAC_H,
     EYE_RX_FRAC_R,
     EYE_RY_FRAC_R,
     EYE_RZ_FRAC_R,
@@ -192,6 +197,7 @@ def _head_skeleton() -> BlockoutSkeleton:
 
 
 _PUBLIC_FEATURE_CONSTS: tuple[str, ...] = (
+    "EYE_RADIUS_FRAC_H",
     "EYE_RX_FRAC_R",
     "EYE_RY_FRAC_R",
     "EYE_RZ_FRAC_R",
@@ -218,7 +224,8 @@ def test_feature_softs__t0_constants_and_all() -> None:
     """T0: Constants match freezes; all public names in face_recipe.__all__."""
     assert pytest.approx(1.00) == EYE_RX_FRAC_R
     assert pytest.approx(0.95) == EYE_RY_FRAC_R  # B15 D7 left pad (was 0.85)
-    assert pytest.approx(0.45) == EYE_RZ_FRAC_R
+    assert pytest.approx(0.11) == EYE_RADIUS_FRAC_H  # 0085 B1 (was private 0.08)
+    assert pytest.approx(0.58) == EYE_RZ_FRAC_R  # 0085 B2 (was 0.45)
     assert pytest.approx(0.90) == FEATURE_FACE_Y_FRAC_RY  # D7 near-surface plane
     assert pytest.approx(0.045) == NOSE_RX_FRAC_H
     assert pytest.approx(0.055) == NOSE_RY_FRAC_H
@@ -257,14 +264,21 @@ def test_feature_softs__t2_nose_ellipsoid() -> None:
     pkg = build_blockout_recipe(report, limbs=False, face=True)
     head = next(p for p in pkg.parts if p.name == "RECIPE_head")
     nose = next(p for p in pkg.parts if p.name == "RECIPE_nose_soft")
+    neck = next(p for p in pkg.parts if p.name == "RECIPE_neck")
     assert nose.kind == "ellipsoid"
     assert nose.rx_m is not None and nose.ry_m is not None and nose.center is not None
     assert head.rz_m is not None and head.center is not None and head.ry_m is not None
+    assert neck.p1 is not None
     # H ≈ 2 * head.rz for full3d ellipsoid head
     h = 2.0 * float(head.rz_m)
     assert float(nose.rx_m) >= 0.040 * h - 1e-9
-    expected_tip_y = float(head.center[1]) - NOSE_TIP_Y_FRAC_RY * float(head.ry_m)
-    assert float(nose.center[1]) - float(nose.ry_m) == pytest.approx(expected_tip_y, abs=1e-6)
+    # 0085: compare 0058 tip law in pre-pitch space (nod about neck tip)
+    pivot = [float(neck.p1[0]), float(neck.p1[1]), float(neck.p1[2])]
+    th = -math.radians(HEAD_PITCH_DEG)
+    head_pre = _rotate_yz_about_x(list(head.center), pivot, th)
+    nose_pre = _rotate_yz_about_x(list(nose.center), pivot, th)
+    expected_tip_y = float(head_pre[1]) - NOSE_TIP_Y_FRAC_RY * float(head.ry_m)
+    assert float(nose_pre[1]) - float(nose.ry_m) == pytest.approx(expected_tip_y, abs=1e-6)
 
 
 def test_feature_softs__t3_lip_brow_floors() -> None:
@@ -307,7 +321,9 @@ def test_feature_softs__t5_classify_and_axial() -> None:
     assert role == "head"
     role_r, _ = classify_part_name("RECIPE_cheek_soft_r")
     assert role_r == "head"
-    report = _full_torso_report()
+    report = _full_torso_report(
+        extra_lms={"chest_front": _lm("chest_front", x_m=0.0, y_m=-0.13, z_m=1.25)}
+    )
     pkg = build_blockout_recipe(report, limbs=False, face=True)
     result = validate_constraints(pkg, report=report)
     by_id = {r.id: r for r in result.rules}
@@ -324,11 +340,11 @@ def test_feature_softs__t6_jaw_freezes_untouched() -> None:
 
 
 def test_feature_softs__t7_loomis_z_private() -> None:
-    """T7: Loomis Z private fracs still 0.50/0.67/0.33/0.20."""
+    """T7: Loomis Z private fracs still 0.50/0.67/0.33; lip shelf 0.24 (0085)."""
     assert pytest.approx(0.50) == face_recipe_mod._EYE_Z_FRAC
     assert pytest.approx(0.67) == face_recipe_mod._BROW_Z_FRAC
     assert pytest.approx(0.33) == face_recipe_mod._NOSE_BASE_Z_FRAC
-    assert pytest.approx(0.20) == face_recipe_mod._LIP_Z_FRAC
+    assert pytest.approx(0.24) == face_recipe_mod._LIP_Z_FRAC
 
 
 def test_feature_softs__t8_messages_feature_softs() -> None:
@@ -357,23 +373,27 @@ def test_feature_softs__cheek_center_geometry() -> None:
     eye = next(p for p in pkg.parts if p.name == "RECIPE_eye_soft_l")
     cheek_l = next(p for p in pkg.parts if p.name == "RECIPE_cheek_soft_l")
     cheek_r = next(p for p in pkg.parts if p.name == "RECIPE_cheek_soft_r")
+    neck = next(p for p in pkg.parts if p.name == "RECIPE_neck")
     assert head.center is not None and head.rx_m is not None and head.ry_m is not None
     assert head.rz_m is not None and eye.center is not None and cheek_l.center is not None
-    assert cheek_r.center is not None
+    assert cheek_r.center is not None and neck.p1 is not None
     rx = float(head.rx_m)
     ry = float(head.ry_m)
     h = 2.0 * float(head.rz_m)
-    feature_face_y = float(head.center[1]) - FEATURE_FACE_Y_FRAC_RY * ry
-    # z_chin from head: z_c - rz
-    z_chin = float(head.center[2]) - float(head.rz_m)
+    pivot = [float(neck.p1[0]), float(neck.p1[1]), float(neck.p1[2])]
+    th = -math.radians(HEAD_PITCH_DEG)
+    head_pre = _rotate_yz_about_x(list(head.center), pivot, th)
+    cheek_pre = _rotate_yz_about_x(list(cheek_l.center), pivot, th)
+    feature_face_y = float(head_pre[1]) - FEATURE_FACE_Y_FRAC_RY * ry
+    z_chin = float(head_pre[2]) - float(head.rz_m)
     eye_z = z_chin + 0.50 * h
     nose_base_z = z_chin + 0.33 * h
     expected_z = CHEEK_Z_MIX * eye_z + (1.0 - CHEEK_Z_MIX) * nose_base_z
     expected_y = feature_face_y + CHEEK_Y_BIAS_FRAC_RY * ry
     assert cheek_l.center[0] == pytest.approx(-CHEEK_X_FRAC_HEAD_RX * rx, abs=1e-6)
     assert cheek_r.center[0] == pytest.approx(CHEEK_X_FRAC_HEAD_RX * rx, abs=1e-6)
-    assert cheek_l.center[1] == pytest.approx(expected_y, abs=1e-6)
-    assert cheek_l.center[2] == pytest.approx(expected_z, abs=1e-6)
+    assert float(cheek_pre[1]) == pytest.approx(expected_y, abs=1e-6)
+    assert float(cheek_pre[2]) == pytest.approx(expected_z, abs=1e-6)
     assert cheek_l.rx_m == pytest.approx(CHEEK_RX_FRAC_HEAD_RX * rx, abs=1e-6)
     assert cheek_l.ry_m == pytest.approx(CHEEK_RY_FRAC_HEAD_RY * ry, abs=1e-6)
     assert cheek_l.rz_m == pytest.approx(CHEEK_RZ_FRAC_H * h, abs=1e-6)

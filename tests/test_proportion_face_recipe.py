@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -10,8 +11,10 @@ from typer.testing import CliRunner
 
 from meshops.cli import app
 from meshops.proportion.blockout_recipe import (
+    HEAD_PITCH_DEG,
     RECIPE_SCHEMA_VERSION,
     RecipePart,
+    _rotate_yz_about_x,
     build_blockout_recipe,
     load_blockout_recipe,
     write_blockout_recipe,
@@ -347,7 +350,8 @@ def test_face__headbounds_shared_with_head_and_eyes() -> None:
     pkg = build_blockout_recipe(report, limbs=False, face=True)
     head = next(p for p in pkg.parts if p.name == "RECIPE_head")
     eye = next(p for p in pkg.parts if p.name == "RECIPE_eye_soft_l")
-    assert head.center is not None and eye.center is not None
+    neck = next(p for p in pkg.parts if p.name == "RECIPE_neck")
+    assert head.center is not None and eye.center is not None and neck.p1 is not None
     # Rebuild HeadBounds independently and check consistency
     msgs: list[str] = []
     bounds = resolve_head_bounds(
@@ -357,16 +361,22 @@ def test_face__headbounds_shared_with_head_and_eyes() -> None:
         messages=msgs,
     )
     assert bounds is not None
-    assert head.center[2] == pytest.approx(bounds.z_c)
+    pivot = [float(neck.p1[0]), float(neck.p1[1]), float(neck.p1[2])]
+    th = -math.radians(HEAD_PITCH_DEG)
+    head_pre = _rotate_yz_about_x(list(head.center), pivot, th)
+    eye_pre = _rotate_yz_about_x(list(eye.center), pivot, th)
+    assert head_pre[2] == pytest.approx(bounds.z_c)
     assert head.rx_m == pytest.approx(bounds.rx)
     assert head.rz_m == pytest.approx(bounds.rz)
     expected_eye_z = bounds.z_chin + 0.50 * bounds.H
-    assert eye.center[2] == pytest.approx(expected_eye_z)
+    assert eye_pre[2] == pytest.approx(expected_eye_z)
 
 
 def test_face__axial_exemption_with_face() -> None:
     """B18: --face recipe must not fail C_axial_depth_plane from face softs."""
-    report = _full_torso_report()
+    report = _full_torso_report(
+        extra_lms={"chest_front": _lm("chest_front", x_m=0.0, y_m=-0.13, z_m=1.25)}
+    )
     pkg = build_blockout_recipe(report, limbs=False, face=True)
     result = validate_constraints(pkg, report=report)
     by_id = {r.id: r for r in result.rules}
@@ -462,11 +472,17 @@ def test_face__nose_tip_y_freeze() -> None:
     pkg = build_blockout_recipe(report, limbs=False, face=True)
     head = next(p for p in pkg.parts if p.name == "RECIPE_head")
     nose = next(p for p in pkg.parts if p.name == "RECIPE_nose_soft")
+    neck = next(p for p in pkg.parts if p.name == "RECIPE_neck")
     assert head.center is not None and head.ry_m is not None
     assert nose.kind == "ellipsoid"
     assert nose.center is not None and nose.ry_m is not None
-    expected_tip_y = float(head.center[1]) - NOSE_TIP_Y_FRAC_RY * float(head.ry_m)
-    assert float(nose.center[1]) - float(nose.ry_m) == pytest.approx(expected_tip_y, abs=1e-6)
+    assert neck.p1 is not None
+    pivot = [float(neck.p1[0]), float(neck.p1[1]), float(neck.p1[2])]
+    th = -math.radians(HEAD_PITCH_DEG)
+    head_pre = _rotate_yz_about_x(list(head.center), pivot, th)
+    nose_pre = _rotate_yz_about_x(list(nose.center), pivot, th)
+    expected_tip_y = float(head_pre[1]) - NOSE_TIP_Y_FRAC_RY * float(head.ry_m)
+    assert float(nose_pre[1]) - float(nose.ry_m) == pytest.approx(expected_tip_y, abs=1e-6)
 
 
 def test_face__neckline_v_proxy() -> None:
@@ -591,9 +607,12 @@ def test_face__top_prefers_hair_crown_when_vertex_z_none() -> None:
     assert FACE_KIT_SKIP_BOUNDS not in pkg.messages
     assert any(p.role == "jaw" for p in pkg.parts)
     head = next(p for p in pkg.parts if p.name == "RECIPE_head")
-    assert head.center is not None
-    # z_top=1.68, chin=1.50 → z_c = 1.59
-    assert head.center[2] == pytest.approx(1.59, abs=1e-6)
+    neck = next(p for p in pkg.parts if p.name == "RECIPE_neck")
+    assert head.center is not None and neck.p1 is not None
+    # z_top=1.68, chin=1.50 → z_c = 1.59 (pre-0085 pitch)
+    pivot = [float(neck.p1[0]), float(neck.p1[1]), float(neck.p1[2])]
+    head_pre = _rotate_yz_about_x(list(head.center), pivot, -math.radians(HEAD_PITCH_DEG))
+    assert head_pre[2] == pytest.approx(1.59, abs=1e-6)
 
 
 def test_face__headbounds_type() -> None:

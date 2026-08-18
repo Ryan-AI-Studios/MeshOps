@@ -13,11 +13,13 @@ from meshops.cli import app
 from meshops.proportion.blockout_recipe import (
     AXIS_NOTES,
     CROTCH_Z_FRAC_FALLBACK,
+    HEAD_PITCH_DEG,
     MIDLINE_X_TOL_M,
     RECIPE_SCHEMA_VERSION,
     BlockoutRecipePackage,
     RecipePart,
     _align_glute_outer_to_hip_bridge,
+    _rotate_yz_about_x,
     _sync_calf_distal_to_ankle,
     build_blockout_recipe,
     emit_bpy_script,
@@ -2393,7 +2395,9 @@ def test_recipe__head_no_y_uses_axial_chest_y() -> None:
     assert head.center is not None and neck.p0 is not None and neck.p1 is not None
     length = math.dist(neck.p0, neck.p1)
     dy_tip = -length * math.sin(math.radians(NECK_FORWARD_TILT_DEG))
-    assert head.center[1] == pytest.approx(0.05 + dy_tip, abs=1e-6)
+    pivot = [float(neck.p1[0]), float(neck.p1[1]), float(neck.p1[2])]
+    head_pre = _rotate_yz_about_x(list(head.center), pivot, -math.radians(HEAD_PITCH_DEG))
+    assert head_pre[1] == pytest.approx(0.05 + dy_tip, abs=1e-6)
 
 
 def test_recipe__head_chin_y_preserved() -> None:
@@ -2410,7 +2414,9 @@ def test_recipe__head_chin_y_preserved() -> None:
     assert head.center is not None and neck.p0 is not None and neck.p1 is not None
     length = math.dist(neck.p0, neck.p1)
     dy_tip = -length * math.sin(math.radians(NECK_FORWARD_TILT_DEG))
-    assert head.center[1] == pytest.approx(-0.04 + dy_tip, abs=1e-6)
+    pivot = [float(neck.p1[0]), float(neck.p1[1]), float(neck.p1[2])]
+    head_pre = _rotate_yz_about_x(list(head.center), pivot, -math.radians(HEAD_PITCH_DEG))
+    assert head_pre[1] == pytest.approx(-0.04 + dy_tip, abs=1e-6)
 
 
 def test_recipe__axial_soft_breast_glute_not_mid_forced() -> None:
