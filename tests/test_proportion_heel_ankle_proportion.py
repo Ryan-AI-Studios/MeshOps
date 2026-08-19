@@ -40,6 +40,8 @@ from meshops.proportion.models import (
 
 # Product-class ankle half-width — same as 0056 suite.
 PRODUCT_HW_M: float = 0.0263
+# 0098-class full-figure hw (never-shrink; stays above 0.16*stature length).
+_PRODUCT_HW_0098_M: float = 0.04237
 PRODUCT_H_M: float = 1.72
 PRODUCT_ANK_Z_M: float = 0.1314
 EPS: float = 1e-6
@@ -214,16 +216,17 @@ def test_t2_product_ank_ry_rx_anti_ball_anti_pea() -> None:
 
 def test_t3_product_ank_ry_frac_wins_floor() -> None:
     """T3: 1.00*0098-hw > 0.030 and emitted ank_ry approx frac path (thin-hw floors)."""
-    product_hw_0080 = 0.04035
-    assert ANK_RY_FRAC_HALF_W * 0.04237 > ANK_RY_FLOOR_M
-    report = _product_feet_report(half_width_m=product_hw_0080)
+    assert ANK_RY_FRAC_HALF_W * _PRODUCT_HW_0098_M > ANK_RY_FLOOR_M
+    report = _product_feet_report(half_width_m=_PRODUCT_HW_0098_M)
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     ank = _ank(pkg.parts)
     assert ank.ry_m is not None
     assert ank.rx_m is not None
-    # 0080 width floor may raise hw; ry uses floored ank.rx
+    # 0098 hw stays above width floor; ry uses emitted ank.rx
     frac_ry = ANK_RY_FRAC_HALF_W * float(ank.rx_m)
     assert float(ank.ry_m) == pytest.approx(frac_ry, abs=1e-5)
+    assert float(ank.rx_m) == pytest.approx(0.04237, abs=1e-4)
+    assert float(ank.ry_m) == pytest.approx(0.04237, abs=1e-4)
     assert float(ank.ry_m) >= ANK_RY_FLOOR_M - 1e-9
 
 

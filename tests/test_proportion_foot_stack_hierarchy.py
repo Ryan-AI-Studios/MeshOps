@@ -49,7 +49,7 @@ from meshops.proportion.skeleton import build_blockout_skeleton
 _PRODUCT_NOFUSE = Path("work/rogue-v3/blockout/product_0097up/nofuse")
 _MID_R = 0.0613
 _CALF_HW = 0.04379
-_PRODUCT_HW_0080_M = 0.04237
+_PRODUCT_HW_0098_M = 0.04237
 _THIN_HW_M = 0.0263
 _EXPECT_FOOT_LEN = 0.2648
 _EXPECT_SOLE_RZ = 0.0301
@@ -107,7 +107,7 @@ def _band(
 def _product_feet_report(
     *,
     height_m: float | None = 1.72,
-    half_width_m: float = _PRODUCT_HW_0080_M,
+    half_width_m: float = _PRODUCT_HW_0098_M,
     ank_z: float = 0.1314,
     heel_y: float = 0.06,
     toe_y: float = -0.12,
@@ -350,7 +350,7 @@ def test_t1_product_class_parts_present() -> None:
 
 def test_t2_product_hw_ank_ry_equals_rx() -> None:
     """T2: 0098-class hw 0.04237 — ank.ry == ank.rx * 1.00 and above pea floor."""
-    report = _product_feet_report(half_width_m=_PRODUCT_HW_0080_M)
+    report = _product_feet_report(half_width_m=_PRODUCT_HW_0098_M)
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     for side in ("l", "r"):
         ank = _ank(pkg.parts, side)
@@ -361,7 +361,7 @@ def test_t2_product_hw_ank_ry_equals_rx() -> None:
 
 def test_t3_heel_rear_past_and_dy() -> None:
     """T3 B6/B20: heel_rear - ank_rear >= 0.012; dy approx bias*plate.ry after clamp."""
-    report = _product_feet_report(half_width_m=_PRODUCT_HW_0080_M)
+    report = _product_feet_report(half_width_m=_PRODUCT_HW_0098_M)
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     for side in ("l", "r"):
         ank = _ank(pkg.parts, side)
@@ -382,7 +382,7 @@ def test_t3_heel_rear_past_and_dy() -> None:
 
 def test_t4_arch_ball_frac_wins() -> None:
     """T4: arch.ry == 0.26*hd; B4b fl_term < 0.24*hd so ball.ry is frac; rz sole-class."""
-    report = _product_feet_report(half_width_m=_PRODUCT_HW_0080_M)
+    report = _product_feet_report(half_width_m=_PRODUCT_HW_0098_M)
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     for side in ("l", "r"):
         plate = _plate(pkg.parts, side)
@@ -404,7 +404,7 @@ def test_t4_arch_ball_frac_wins() -> None:
 
 def test_t5_tip_pad_equals_digit() -> None:
     """T5: tip r == digit r at scale 1.00; 0075 tip_past_ball fence holds."""
-    report = _product_feet_report(half_width_m=_PRODUCT_HW_0080_M)
+    report = _product_feet_report(half_width_m=_PRODUCT_HW_0098_M)
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     plate = _plate(pkg.parts)
     ball = _ball(pkg.parts)
@@ -515,7 +515,7 @@ def test_t10_fence_0080_0072_0054_0095() -> None:
         assert plate.half_depth_m is not None
         foot_len = 2.0 * float(plate.half_depth_m)
         assert foot_len == pytest.approx(_EXPECT_FOOT_LEN, abs=1e-4)
-        assert float(plate.top_half_width_m or 0.0) == pytest.approx(_PRODUCT_HW_0080_M, abs=1e-4)
+        assert float(plate.top_half_width_m or 0.0) == pytest.approx(_PRODUCT_HW_0098_M, abs=1e-4)
         assert float(plate.rz_m or 0.0) == pytest.approx(_EXPECT_SOLE_RZ, abs=1e-4)
         hd = float(plate.half_depth_m)
         assert float(heel.ry_m or 0.0) == pytest.approx(HEEL_RY_MIN_FRAC_DEPTH * hd, abs=2e-3)
