@@ -3066,13 +3066,24 @@ def _build_calf_split(
     return parts
 
 
+def _calf_split_mid(p0: list[float], dest: list[float]) -> list[float]:
+    """0096/0100: belly mid = lerp(offset p0, ankle-end, CALF_SPLIT_T)."""
+    t = CALF_SPLIT_T
+    return [
+        float(p0[0]) + t * (dest[0] - float(p0[0])),
+        float(p0[1]) + t * (dest[1] - float(p0[1])),
+        float(p0[2]) + t * (dest[2] - float(p0[2])),
+    ]
+
+
 def _sync_calf_distal_to_ankle(
     parts: list[RecipePart],
     messages: list[str],
 ) -> None:
-    """0034 B6 / 0096: set calf_distal Y and taper (or legacy cyl) p1 Y to ank.
+    """0034 B6 / 0096 / 0100: set calf_distal Y and taper (or legacy cyl) p1 Y to ank.
 
     Prefer RECIPE_calf_taper_dist_*.p1 when present — belly cyl.p1 is mid.
+    After the taper p1 Y write, recompute mid so CALF_SPLIT_T holds in 3D.
     Legacy cyl-only fixtures still write cyl.p1. Idempotent absolute set.
     """
     by_name = {p.name: p for p in parts}
@@ -3091,6 +3102,13 @@ def _sync_calf_distal_to_ankle(
         if taper is not None and taper.p1 is not None and len(taper.p1) >= 3:
             taper.p1 = [float(taper.p1[0]), ay, float(taper.p1[2])]
             taper.placement = "full3d"
+            cyl = by_name.get(f"RECIPE_calf_cyl_{side}")
+            if cyl is not None and cyl.p0 is not None and len(cyl.p0) >= 3:
+                dest = [float(taper.p1[0]), float(taper.p1[1]), float(taper.p1[2])]
+                mid = _calf_split_mid(list(cyl.p0), dest)
+                cyl.p1 = list(mid)
+                taper.p0 = list(mid)
+                cyl.placement = "full3d"
             updated = True
         else:
             cyl = by_name.get(f"RECIPE_calf_cyl_{side}")
@@ -5407,12 +5425,7 @@ def _apply_thigh_adduction(
                         float(calf_b.center[2]),
                     ]
             if dest is not None and taper is not None:
-                split_t = CALF_SPLIT_T
-                mid = [
-                    float(cyl.p0[0]) + split_t * (dest[0] - float(cyl.p0[0])),
-                    float(cyl.p0[1]) + split_t * (dest[1] - float(cyl.p0[1])),
-                    float(cyl.p0[2]) + split_t * (dest[2] - float(cyl.p0[2])),
-                ]
+                mid = _calf_split_mid(list(cyl.p0), dest)
                 cyl.p1 = list(mid)
                 taper.p0 = list(mid)
 
