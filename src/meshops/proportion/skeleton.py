@@ -1195,13 +1195,16 @@ def _resolve_limb_side(
     glenoid_plane_class = False
     glenoid_src = "invent"
 
-    def _apply_distal_prior(joint_id: str) -> float:
-        y_new = _arm_forward_y(
+    def _distal_prior_y() -> float:
+        return _arm_forward_y(
             y_plane_distal,
             half_depth=half_depth,
             height_m=height_m,
             chest_front_y=chest_front_y,
         )
+
+    def _apply_distal_prior(joint_id: str) -> float:
+        y_new = _distal_prior_y()
         dy = y_new - y_plane_distal
         messages.append(
             f"joint {joint_id}: arm forward prior (distal; from {glenoid_src}; Δy={dy:.4f})"
@@ -1356,10 +1359,8 @@ def _resolve_limb_side(
             if y is None and z is not None:
                 if glenoid_plane_class:
                     wr_y = joints[wr_id].y_m
-                    y = _elbow_hang_y(
-                        y_plane_distal,
-                        float(wr_y) if _finite(wr_y) else _apply_distal_prior(el_id),
-                    )
+                    wr_end = float(wr_y) if _finite(wr_y) else _distal_prior_y()
+                    y = _elbow_hang_y(y_plane_distal, wr_end)
                     y_from = False
                     y_depth = False
                     messages.append(
