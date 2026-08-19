@@ -64,6 +64,7 @@ TOOL_NAMES: frozenset[str] = frozenset(
         "mesh_proportion_blockout_validate_constraints",
         "mesh_proportion_blockout_optimize",
         "mesh_proportion_blockout_emit_setup",
+        "mesh_proportion_blockout_open_setup",
         "mesh_proportion_blockout_fuse_plan",
         "mesh_proportion_skeleton_build",
         "mesh_proportion_depth_heatmap",
@@ -716,6 +717,26 @@ def build_server(work_root: Path | None = None) -> Any:
             recipe=recipe,
             out=out,
             force=force,
+        )
+
+    @mcp.tool()
+    def mesh_proportion_blockout_open_setup(
+        setup: str,
+        spawn: bool = False,
+        background: bool = False,
+    ) -> dict[str, Any]:
+        """Print (or spawn) Blender 5.2 with absolute --python setup_blockout_recipe.py.
+
+        File, directory, or recipe JSON (sibling py). Refuses relative setup when
+        cwd is Windows System32. Authoring only —
+        proportion_blockout_setup_launch_not_mesh_or_print_success (N6).
+        Raises on failure.
+        """
+        return T.mesh_proportion_blockout_open_setup(
+            wr,
+            setup=setup,
+            spawn=spawn,
+            background=background,
         )
 
     @mcp.tool()

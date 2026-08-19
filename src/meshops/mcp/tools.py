@@ -1066,6 +1066,23 @@ def mesh_proportion_blockout_emit_setup(
     )
 
 
+def mesh_proportion_blockout_open_setup(
+    work_root: Path,
+    *,
+    setup: str,
+    spawn: bool = False,
+    background: bool = False,
+) -> dict[str, Any]:
+    """Print (or spawn) abs Blender --python setup. Authoring only — SETUP_LAUNCH_HONESTY / N6."""
+    from meshops.proportion.setup_launch import run_blockout_open_setup
+
+    return run_blockout_open_setup(
+        _resolve_tool_path(setup, work_root),
+        spawn=bool(spawn),
+        background=bool(background),
+    )
+
+
 def mesh_proportion_blockout_fuse_plan(
     work_root: Path,
     *,

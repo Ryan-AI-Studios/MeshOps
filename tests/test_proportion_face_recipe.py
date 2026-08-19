@@ -494,7 +494,7 @@ def test_face__neckline_v_proxy() -> None:
 
 
 def test_face__mcp_schema_properties_and_tool_count() -> None:
-    """B12: catalog 46 (0043); inputSchema properties include face/hair/neckline."""
+    """B12: catalog 47 (0110); inputSchema properties include face/hair/neckline."""
     import asyncio
 
     pytest.importorskip("mcp")
@@ -503,14 +503,14 @@ def test_face__mcp_schema_properties_and_tool_count() -> None:
     from meshops.mcp import TOOL_NAMES
     from meshops.mcp.server import build_server
 
-    assert len(TOOL_NAMES) == 46
+    assert len(TOOL_NAMES) == 47
 
     async def _body() -> None:
         server = build_server()
         async with Client(server) as client:
             listed = await client.list_tools()
             names = {t.name for t in listed.tools}
-            assert len(names) == 46
+            assert len(names) == 47
             assert names >= TOOL_NAMES
             tool = next(t for t in listed.tools if t.name == "mesh_proportion_blockout_recipe")
             schema = tool.input_schema

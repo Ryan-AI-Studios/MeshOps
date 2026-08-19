@@ -138,4 +138,4 @@ def test_t6_0097_hierarchy_held() -> None:
 def test_t7_schema_mcp_held() -> None:
     """T7: schema 1.4.0 / MCP 46 / no src emit change in this track."""
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
-    assert len(TOOL_NAMES) == 46
+    assert len(TOOL_NAMES) == 47

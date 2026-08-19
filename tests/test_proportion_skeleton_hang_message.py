@@ -205,10 +205,10 @@ def test_t5_off_plane_inherit_no_hang() -> None:
 
 
 def test_t6_schema_catalog() -> None:
-    """T6: skeleton 1.0.0; recipe 1.4.0; MCP catalog 46."""
+    """T6: skeleton 1.0.0; recipe 1.4.0; MCP catalog 47."""
     assert SKELETON_SCHEMA_VERSION == "1.0.0"
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
-    assert len(TOOL_NAMES) == 46
+    assert len(TOOL_NAMES) == 47
 
 
 def test_t7_all_hold_no_new_name() -> None:

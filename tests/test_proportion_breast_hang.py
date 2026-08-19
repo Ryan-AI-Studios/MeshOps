@@ -793,7 +793,7 @@ def test_t12_schema_stays_1_4_0() -> None:
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
     pkg = build_blockout_recipe(_report_soft_cs(), limbs=False, breast_tilt_deg=20.0)
     assert pkg.schema_version == "1.4.0"
-    assert len(TOOL_NAMES) == 46
+    assert len(TOOL_NAMES) == 47
 
 
 def test_t13_messages_drop_anchor_chest_ref() -> None:

@@ -462,7 +462,7 @@ def test_mcp__anatomy_profiles_catalog_and_recipe_params() -> None:
     from meshops.mcp.server import TOOL_NAMES, build_server
 
     assert "mesh_proportion_anatomy_profiles" in TOOL_NAMES
-    assert len(TOOL_NAMES) == 46
+    assert len(TOOL_NAMES) == 47
 
     async def _body() -> None:
         server = build_server()
@@ -470,7 +470,7 @@ def test_mcp__anatomy_profiles_catalog_and_recipe_params() -> None:
             listed = await client.list_tools()
             names = {t.name for t in listed.tools}
             assert "mesh_proportion_anatomy_profiles" in names
-            assert len(names) == 46
+            assert len(names) == 47
             recipe = next(t for t in listed.tools if t.name == "mesh_proportion_blockout_recipe")
             raw_schema: object | None = getattr(recipe, "input_schema", None)
             if raw_schema is None:
