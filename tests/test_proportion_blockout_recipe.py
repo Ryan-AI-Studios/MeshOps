@@ -569,8 +569,22 @@ def test_recipe__calf_distal_syncs_to_ank_foot() -> None:
         assert float(dist.center[1]) == pytest.approx(ay)
         assert float(taper.p1[1]) == pytest.approx(ay)
         assert abs(float(cyl.p1[1]) - ay) > 1e-3
+        from meshops.proportion.blockout_recipe import CALF_BELLY_REAR_FRAC, CALF_SPLIT_T
+
+        dest = [float(taper.p1[0]), float(taper.p1[1]), float(taper.p1[2])]
+        mid = [
+            float(cyl.p0[0]) + CALF_SPLIT_T * (dest[0] - float(cyl.p0[0])),
+            float(cyl.p0[1]) + CALF_SPLIT_T * (dest[1] - float(cyl.p0[1])),
+            float(cyl.p0[2]) + CALF_SPLIT_T * (dest[2] - float(cyl.p0[2])),
+        ]
+        assert float(cyl.p1[0]) == pytest.approx(mid[0], abs=1e-9)
+        assert float(cyl.p1[1]) == pytest.approx(mid[1], abs=1e-9)
+        assert float(cyl.p1[2]) == pytest.approx(mid[2], abs=1e-9)
+        assert taper.p0 is not None
+        assert float(taper.p0[0]) == pytest.approx(float(cyl.p1[0]), abs=1e-9)
+        assert float(taper.p0[1]) == pytest.approx(float(cyl.p1[1]), abs=1e-9)
+        assert float(taper.p0[2]) == pytest.approx(float(cyl.p1[2]), abs=1e-9)
         # 0071: p0 has rear belly bias; B6 never rewrites p0 Y (only p1)
-        from meshops.proportion.blockout_recipe import CALF_BELLY_REAR_FRAC
 
         assert cyl.radius_m is not None
         expected_p0_y = 0.0 + CALF_BELLY_REAR_FRAC * float(cyl.radius_m)

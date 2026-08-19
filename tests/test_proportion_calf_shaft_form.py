@@ -525,11 +525,24 @@ def test_t13_b6_writes_taper_not_cyl() -> None:
         a = by_name[f"RECIPE_calf_a_{side}"]
         assert ank.center is not None and b.center is not None
         assert cyl.p0 is not None and cyl.p1 is not None
-        assert taper.p1 is not None and a.center is not None and cyl.radius_m is not None
+        assert taper.p0 is not None and taper.p1 is not None
+        assert a.center is not None and cyl.radius_m is not None
         ay = float(ank.center[1])
         assert float(b.center[1]) == pytest.approx(ay, abs=1e-6)
         assert float(taper.p1[1]) == pytest.approx(ay, abs=1e-6)
         assert abs(float(cyl.p1[1]) - ay) > 1e-3
+        dest = [float(taper.p1[0]), float(taper.p1[1]), float(taper.p1[2])]
+        mid = [
+            float(cyl.p0[0]) + CALF_SPLIT_T * (dest[0] - float(cyl.p0[0])),
+            float(cyl.p0[1]) + CALF_SPLIT_T * (dest[1] - float(cyl.p0[1])),
+            float(cyl.p0[2]) + CALF_SPLIT_T * (dest[2] - float(cyl.p0[2])),
+        ]
+        assert float(cyl.p1[0]) == pytest.approx(mid[0], abs=1e-9)
+        assert float(cyl.p1[1]) == pytest.approx(mid[1], abs=1e-9)
+        assert float(cyl.p1[2]) == pytest.approx(mid[2], abs=1e-9)
+        assert float(taper.p0[0]) == pytest.approx(float(cyl.p1[0]), abs=1e-9)
+        assert float(taper.p0[1]) == pytest.approx(float(cyl.p1[1]), abs=1e-9)
+        assert float(taper.p0[2]) == pytest.approx(float(cyl.p1[2]), abs=1e-9)
         dy = CALF_BELLY_REAR_FRAC * float(cyl.radius_m)
         assert float(cyl.p0[1]) == pytest.approx(float(a.center[1]) + dy, abs=1e-6)
         assert any(f"calf_{side}: distal/taper p1 Y synced to ank_foot" in m for m in pkg.messages)
