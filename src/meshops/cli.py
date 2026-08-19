@@ -90,7 +90,7 @@ proportion_app = typer.Typer(
         "Verbs: template | templates | apply-template | analyze | show | scaffold | guides | "
         "capture | depth-samples | blockout-recipe | anatomy-profiles | "
         "blockout-validate-constraints | "
-        "blockout-optimize | blockout-emit-setup | blockout-fuse-plan | "
+        "blockout-optimize | blockout-emit-setup | blockout-open-setup | blockout-fuse-plan | "
         "skeleton-build | depth-heatmap | depth-hint | silhouette-compare | "
         "blockout-feedback. "
         "Assist-first landmarks + head-unit checks + blockout-grade XYZ; "
@@ -108,6 +108,8 @@ proportion_app = typer.Typer(
         "blockout-optimize constrained free-DOF adjust, --freeze-feet default "
         "(OPTIMIZE_HONESTY — N6; free-name optimizers are NOT product); "
         "blockout-emit-setup re-emits setup_*.py from recipe JSON (N6); "
+        "blockout-open-setup prints abs Blender --python setup_blockout_recipe.py "
+        "(refuses System32-relative — N6); "
         "blockout-fuse-plan writes fuse_plan.json procedure (FUSE_HONESTY — N6); "
         "skeleton-build emits joint/bone blockout_skeleton.json + optional SKEL_* bpy "
         "(SKELETON_HONESTY — authoring scaffold only, not animation rig — N6); "
@@ -2576,6 +2578,55 @@ def proportion_blockout_emit_setup_cmd(
             typer.echo(f"  note: {msg}")
         typer.echo(f"honesty: {RECIPE_HONESTY}")
         typer.echo("emit-setup only — not mesh or print success")
+    raise typer.Exit(0)
+
+
+@proportion_app.command("blockout-open-setup")
+def proportion_blockout_open_setup_cmd(
+    setup: Path = typer.Option(
+        ...,
+        "--setup",
+        help="File, directory, or recipe JSON (sibling setup_blockout_recipe.py).",
+    ),
+    spawn: bool = typer.Option(
+        False,
+        "--spawn",
+        help="Detach GUI Blender (do not wait). Default is print-only.",
+    ),
+    background: bool = typer.Option(
+        False,
+        "--background",
+        help="Insert -b and --python-exit-code 1 (headless).",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
+) -> None:
+    """Print (or --spawn) a Blender 5.2 command with absolute --python setup_blockout_recipe.py.
+
+    Refuses relative setup when cwd is Windows System32. Authoring only — N6.
+    """
+    from meshops.proportion.errors import ProportionError
+    from meshops.proportion.honesty import SETUP_LAUNCH_HONESTY
+    from meshops.proportion.setup_launch import run_blockout_open_setup
+
+    try:
+        payload = run_blockout_open_setup(setup, spawn=spawn, background=background)
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    if json_out:
+        _emit_json(payload)
+    else:
+        typer.echo(payload.get("command", ""))
+        typer.echo(
+            f"blockout-open-setup spawned={payload.get('spawned')} "
+            f"background={payload.get('background')}"
+        )
+        for msg in payload.get("messages") or []:
+            typer.echo(f"  note: {msg}")
+        typer.echo(f"honesty: {SETUP_LAUNCH_HONESTY}")
+        typer.echo("setup launch only — not mesh or print success")
     raise typer.Exit(0)
 
 

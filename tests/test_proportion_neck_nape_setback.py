@@ -432,7 +432,7 @@ def test_t8_n_parts_schema_mcp() -> None:
     assert len(pkg.parts) == 131
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
     assert pkg.schema_version == "1.4.0"
-    assert len(TOOL_NAMES) == 46
+    assert len(TOOL_NAMES) == 47
 
 
 def test_t9_base_and_scm_follow_p0_neckline_stays() -> None:

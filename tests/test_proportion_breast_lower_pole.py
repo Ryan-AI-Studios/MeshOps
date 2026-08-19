@@ -592,7 +592,7 @@ def test_t14_schema_and_mcp_catalog() -> None:
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
     pkg = build_blockout_recipe(_report_soft_cs(), limbs=False, breast_tilt_deg=20.0)
     assert pkg.schema_version == "1.4.0"
-    assert len(TOOL_NAMES) == 46
+    assert len(TOOL_NAMES) == 47
 
 
 def test_t15_hang_suite_smoke_still_works() -> None:

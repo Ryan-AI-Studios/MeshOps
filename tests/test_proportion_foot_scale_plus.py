@@ -475,7 +475,7 @@ def test_t9_n_parts_schema_mcp() -> None:
     pkg = _product_pkg()
     assert len(pkg.parts) == 131
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
-    assert len(TOOL_NAMES) == 46
+    assert len(TOOL_NAMES) == 47
 
 
 def test_t10_product_path_constraints() -> None:

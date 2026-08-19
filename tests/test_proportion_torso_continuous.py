@@ -461,7 +461,7 @@ def test_t9_product_n_parts_131_schema_mcp() -> None:
     pkg = build_blockout_recipe(report, skeleton=skel, **_product_flags())  # type: ignore[arg-type]
     assert len(pkg.parts) == 131
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
-    assert len(TOOL_NAMES) == 46
+    assert len(TOOL_NAMES) == 47
     result = validate_constraints(pkg, report=report)
     by_id = {r.id: r for r in result.rules}
     assert "C_palm_ellipsoid" in by_id

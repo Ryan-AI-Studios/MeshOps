@@ -46,6 +46,10 @@ ProportionErrorCode = Literal[
     "skeleton_empty",
     "skeleton_failed",
     "profile_unknown",
+    "setup_not_found",
+    "setup_cwd_unsafe",
+    "setup_spawn_failed",
+    "blender_missing",
     "unknown",
 ]
 
