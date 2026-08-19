@@ -26,6 +26,7 @@ from meshops.proportion.blockout_recipe import (
     RecipePart,
     load_blockout_recipe,
 )
+from meshops.proportion.body_template import APPLIED_JSON_BASENAME, load_template_applied
 from meshops.proportion.errors import ProportionError
 from meshops.proportion.honesty import CONSTRAINT_HONESTY, OPTIMIZE_HONESTY
 
@@ -597,12 +598,33 @@ def _optional_report(path: Path | str | None) -> Any | None:
     return load_report(path)
 
 
-def _optional_template(path: Path | str | None) -> Any | None:
-    if path is None:
-        return None
-    from meshops.proportion.body_template import load_template_applied
+def _optional_template(path: Path | str | None) -> tuple[Any | None, list[str]]:
+    """Load template_applied when present; skip missing (validate/optimize only).
 
-    return load_template_applied(path)
+    File-class: existing file, or missing path whose suffix is .json (no parent hop).
+    Directory-class: is_dir(), or missing without .json suffix — try dir/file then
+    one parent hop. Invalid / unknown id still raise via load_template_applied.
+    """
+    if path is None:
+        return None, []
+    raw = Path(path)
+    notes: list[str] = []
+    file_class = raw.is_file() or (not raw.exists() and raw.suffix.lower() == ".json")
+    if file_class:
+        candidates = [raw]
+    else:
+        candidates = [raw / APPLIED_JSON_BASENAME, raw.parent / APPLIED_JSON_BASENAME]
+
+    existing = next((p for p in candidates if p.is_file()), None)
+    if existing is None:
+        tried = ", ".join(str(p.resolve()) for p in candidates)
+        notes.append(f"template_applied skipped: not found {tried}")
+        return None, notes
+
+    pkg = load_template_applied(existing)
+    if existing.resolve() != candidates[0].resolve():
+        notes.append(f"template_applied: resolved from parent {existing.resolve()}")
+    return pkg, notes
 
 
 def _lm_y(report: Any | None, landmark_id: str) -> float | None:
@@ -2185,8 +2207,10 @@ def run_blockout_validate_constraints(
     try:
         package = load_blockout_recipe(recipe)
         rep = _optional_report(report)
-        tpl = _optional_template(template_applied)
+        tpl, tpl_notes = _optional_template(template_applied)
         constraints = validate_constraints(package, report=rep, template_applied=tpl)
+        if tpl_notes:
+            constraints.messages = [*tpl_notes, *constraints.messages]
         out_path = _resolve_json_out(out, CONSTRAINTS_REPORT_BASENAME)
         _write_json(
             out_path,
@@ -2235,7 +2259,7 @@ def run_blockout_optimize(
         )
     try:
         package = load_blockout_recipe(recipe)
-        tpl = _optional_template(template_applied)
+        tpl, tpl_notes = _optional_template(template_applied)
         optimized, result = optimize_package(
             package,
             mode=mode_n,  # type: ignore[arg-type]
@@ -2259,6 +2283,9 @@ def run_blockout_optimize(
             # Single .json → treat as optimize_result; recipe alongside
             result_path = out_base
             recipe_path = out_base.parent / OPTIMIZED_RECIPE_BASENAME
+
+        if tpl_notes:
+            result.messages = [*tpl_notes, *result.messages]
 
         _write_json(
             recipe_path,

@@ -748,6 +748,8 @@ def build_server(work_root: Path | None = None) -> Any:
 
         Authoring QA only — proportion_blockout_constraints_not_mesh_or_print_success (N6).
         Raises ProportionError on failure (never ok:false success). Report ok=false is data.
+        template_applied is optional: missing skips soft template rules; hard C_* still
+        run. Directory without the file also tries parent/template_applied.json.
         """
         return T.mesh_proportion_blockout_validate_constraints(
             wr,
@@ -774,6 +776,8 @@ def build_server(work_root: Path | None = None) -> Any:
         Authoring QA only — proportion_blockout_optimize_not_mesh_or_print_success (N6).
         Free-name random optimizers are NOT product. Slow mode requires mesh.
         Raises ProportionError on failure (never ok:false success).
+        template_applied is optional: missing skips soft template rules; hard C_* still
+        run. Directory without the file also tries parent/template_applied.json.
         """
         return T.mesh_proportion_blockout_optimize(
             wr,

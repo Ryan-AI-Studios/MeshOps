@@ -1098,7 +1098,11 @@ def mesh_proportion_blockout_validate_constraints(
     template_applied: str | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
-    """Validate named-role hard constraints. Authoring only — CONSTRAINT_HONESTY / N6."""
+    """Validate named-role hard constraints. Authoring only — CONSTRAINT_HONESTY / N6.
+
+    template_applied is optional: missing file skips soft template rules (hard C_*
+    still run). A directory without the file also tries parent/template_applied.json.
+    """
     from meshops.proportion.constraints import run_blockout_validate_constraints
 
     ends_sep = out.endswith(("/", "\\"))
@@ -1130,7 +1134,11 @@ def mesh_proportion_blockout_optimize(
     template_applied: str | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
-    """Constrained free-DOF optimize. Authoring only — OPTIMIZE_HONESTY / N6."""
+    """Constrained free-DOF optimize. Authoring only — OPTIMIZE_HONESTY / N6.
+
+    template_applied is optional: missing file skips soft template rules (hard C_*
+    still run). A directory without the file also tries parent/template_applied.json.
+    """
     from meshops.proportion.constraints import run_blockout_optimize
 
     ends_sep = out.endswith(("/", "\\"))
