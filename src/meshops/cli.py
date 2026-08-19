@@ -2728,7 +2728,11 @@ def proportion_blockout_validate_constraints_cmd(
     template_applied: Path | None = typer.Option(
         None,
         "--template-applied",
-        help="Optional template_applied.json (soft gap priors)",
+        help=(
+            "Optional template_applied.json (soft gap priors). File or directory. "
+            "Missing file skips soft template rules; hard C_* still run. "
+            "Directory without the file also tries parent/template_applied.json."
+        ),
     ),
     force: bool = typer.Option(
         False,
@@ -2810,7 +2814,11 @@ def proportion_blockout_optimize_cmd(
     template_applied: Path | None = typer.Option(
         None,
         "--template-applied",
-        help="Optional template_applied.json (soft gap / mild targets)",
+        help=(
+            "Optional template_applied.json (soft gap / mild targets). File or directory. "
+            "Missing file skips soft template rules; hard C_* still run. "
+            "Directory without the file also tries parent/template_applied.json."
+        ),
     ),
     force: bool = typer.Option(
         False,
