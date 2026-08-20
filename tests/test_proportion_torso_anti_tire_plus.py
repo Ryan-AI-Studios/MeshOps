@@ -1,8 +1,8 @@
-"""Track 0089 — torso continuous silhouette (z_norm pull + overlap floor).
+"""Track 0105 — torso anti-tire plus (asymmetric z_norm + overlap 0.080).
 
 Authoring honesty only (Difficulty §12 / N6 / RECIPE_HONESTY).
 Schema 1.4.0 / MCP 47 stay. Not mesh/print success.
-0105 retarget: z_norm 0.20/0.50/0.78 + overlap 0.080 (band upper 0.082).
+Does not reopen 0073 rz, 0090/0092 plates, 0093 mid_back, 0118 sit, or 0104 curl.
 """
 
 from __future__ import annotations
@@ -16,7 +16,10 @@ from meshops.proportion.anatomy_profile import load_anatomy_profile
 from meshops.proportion.blockout_recipe import (
     MID_BACK_Z_BELOW_WAIST_M,
     RECIPE_SCHEMA_VERSION,
+    TORSO_CHEST_Y_REAR_BIAS_FRAC_RY,
+    TORSO_HIP_Y_REAR_BIAS_FRAC_RY,
     TORSO_OVAL_OVERLAP_FLOOR_M,
+    TORSO_OVAL_RY_CHEST_FRAC,
     TORSO_OVAL_RY_HIP_FRAC,
     TORSO_OVAL_RZ_CHEST_FRAC,
     TORSO_OVAL_RZ_GROW_CAP_M,
@@ -50,10 +53,13 @@ _CHEST = "RECIPE_torso_oval_chest"
 _WAIST = "RECIPE_torso_oval_waist"
 _HIP = "RECIPE_torso_oval_hip"
 
-# 0073 even-thirds (not public law) — T1 relative pull baseline only.
-_OLD_Z_NORM_CHEST = 0.15
-_OLD_Z_NORM_WAIST = 0.50
-_OLD_Z_NORM_HIP = 0.85
+# 0089 leftover even-thirds (not public law) — T2 relative pull baseline only.
+_PREV_Z_NORM_CHEST = 0.18
+_PREV_Z_NORM_HIP = 0.82
+
+_SIT_APPLIED = "breast_sit_on_chest_applied: true"
+_SIT_PREFIX = "breast sit-on chest:"
+_LIVE_CHEST_FRONT_Y = -0.046
 
 
 def _lm(
@@ -308,58 +314,74 @@ def _pair_overlaps(by: dict[str, RecipePart]) -> tuple[float, float]:
     return ov_cw, ov_wh
 
 
-def test_t0_public_z_norm_and_overlap_floor() -> None:
-    """T0: named z_norm 0.20/0.50/0.78; rz fracs + grow cap unchanged; overlap 0.080."""
+def test_t0_public_z_norm_overlap_and_fences() -> None:
+    """T0: z_norm 0.20/0.50/0.78; overlap 0.080; rz/grow/0090/0092 fences."""
     assert TORSO_OVAL_Z_NORM_CHEST == 0.20
     assert TORSO_OVAL_Z_NORM_WAIST == 0.50
     assert TORSO_OVAL_Z_NORM_HIP == 0.78
     assert 0.16 <= TORSO_OVAL_Z_NORM_CHEST <= 0.22
     assert TORSO_OVAL_Z_NORM_WAIST == 0.50
     assert 0.76 <= TORSO_OVAL_Z_NORM_HIP <= 0.84
+    assert TORSO_OVAL_OVERLAP_FLOOR_M == 0.080
+    assert 0.075 <= TORSO_OVAL_OVERLAP_FLOOR_M <= 0.082
+    assert TORSO_OVAL_OVERLAP_FLOOR_M < 0.085
     assert TORSO_OVAL_RZ_CHEST_FRAC == 0.28
     assert TORSO_OVAL_RZ_WAIST_FRAC == 0.16
     assert TORSO_OVAL_RZ_HIP_FRAC == 0.24
     assert TORSO_OVAL_RZ_GROW_CAP_M == 0.030
-    assert TORSO_OVAL_OVERLAP_FLOOR_M == 0.080
-    assert 0.075 <= TORSO_OVAL_OVERLAP_FLOOR_M <= 0.082
+    assert TORSO_OVAL_RY_CHEST_FRAC == 0.72
+    assert TORSO_CHEST_Y_REAR_BIAS_FRAC_RY == 0.51
+    assert TORSO_OVAL_RY_HIP_FRAC == 0.64
+    assert TORSO_HIP_Y_REAR_BIAS_FRAC_RY == 0.33
 
 
-def test_t1_layer_z_pull_relative_to_even_thirds() -> None:
-    """T1: chest z < 0.15-class; hip z > 0.85-class; waist Δz < 2 mm."""
+def test_t1_asymmetric_delta_z_norm_waist_stays() -> None:
+    """T1: (waist-chest)==0.30; (hip-waist)==0.28; not equal. Waist still 0.50."""
+    d_cw = TORSO_OVAL_Z_NORM_WAIST - TORSO_OVAL_Z_NORM_CHEST
+    d_wh = TORSO_OVAL_Z_NORM_HIP - TORSO_OVAL_Z_NORM_WAIST
+    assert d_cw == pytest.approx(0.30, abs=1e-12)
+    assert d_wh == pytest.approx(0.28, abs=1e-12)
+    assert d_cw != d_wh
+    assert TORSO_OVAL_Z_NORM_WAIST == 0.50
+
+
+def test_t2_product_like_asymmetric_pull_vs_0089() -> None:
+    """T2: chest z < 0.18-class; hip z > 0.82-class; waist Δz < 2 mm vs 0.50-class."""
     m = _metrics_for_ovals(chest_y=0.0)
     msgs: list[str] = []
     parts = _build_torso_ovals(m, msgs, taper=0.22)
     by = {p.name: p for p in parts}
     z_top = _z_top_from_metrics(m)
     span = _span_from_metrics(m)
-    old_c = z_top - _OLD_Z_NORM_CHEST * span
-    old_w = z_top - _OLD_Z_NORM_WAIST * span
-    old_h = z_top - _OLD_Z_NORM_HIP * span
+    prev_c = z_top - _PREV_Z_NORM_CHEST * span
+    prev_w = z_top - TORSO_OVAL_Z_NORM_WAIST * span
+    prev_h = z_top - _PREV_Z_NORM_HIP * span
     c_c, c_w, c_h = by[_CHEST].center, by[_WAIST].center, by[_HIP].center
     assert c_c is not None and c_w is not None and c_h is not None
     z_c = float(c_c[2])
     z_w = float(c_w[2])
     z_h = float(c_h[2])
-    assert z_c < old_c - 1e-9
-    assert z_h > old_h + 1e-9
-    assert abs(z_w - old_w) < 0.002
+    assert z_c < prev_c - 1e-9
+    assert z_h > prev_h + 1e-9
+    assert abs(z_w - prev_w) < 0.002
     assert z_c == pytest.approx(z_top - TORSO_OVAL_Z_NORM_CHEST * span, abs=1e-9)
     assert z_w == pytest.approx(z_top - TORSO_OVAL_Z_NORM_WAIST * span, abs=1e-9)
     assert z_h == pytest.approx(z_top - TORSO_OVAL_Z_NORM_HIP * span, abs=1e-9)
 
 
-def test_t2_pairwise_overlap_floor() -> None:
-    """T2: pairwise overlap ≥ TORSO_OVAL_OVERLAP_FLOOR_M after B2 grow."""
+def test_t3_pairwise_overlap_floor_080() -> None:
+    """T3: pairwise overlap ≥ 0.080 after B2 grow."""
     report = _full_torso_report()
     pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
     by = {p.name: p for p in pkg.parts}
     ov_cw, ov_wh = _pair_overlaps(by)
     assert ov_cw >= TORSO_OVAL_OVERLAP_FLOOR_M - 1e-9
     assert ov_wh >= TORSO_OVAL_OVERLAP_FLOOR_M - 1e-9
+    assert TORSO_OVAL_OVERLAP_FLOOR_M == 0.080
 
 
-def test_t3_rz_order_not_equal_triad() -> None:
-    """T3: not all-three rz equal; chest > hip > waist (waist thinnest)."""
+def test_t4_rz_order_not_equal_triad() -> None:
+    """T4: not all-three rz equal; chest > hip > waist (waist thinnest)."""
     report = _full_torso_report()
     pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
     by = {p.name: p for p in pkg.parts}
@@ -368,12 +390,11 @@ def test_t3_rz_order_not_equal_triad() -> None:
     rz_h = float(by[_HIP].rz_m or 0.0)
     eps = 1e-6
     assert not (abs(rz_c - rz_w) < eps and abs(rz_w - rz_h) < eps)
-    assert rz_w < rz_h - eps
-    assert rz_h < rz_c - eps
+    assert rz_c > rz_h > rz_w
 
 
-def test_t4_pinch_cap_when_taper_gate_on() -> None:
-    """T4: 0065 pinch rx_w/rx_c ≤ 0.80 when taper gate on."""
+def test_t5_pinch_cap_when_taper_gate_on() -> None:
+    """T5: 0065 pinch rx_w/rx_c ≤ 0.80 when taper gate on."""
     report = _full_torso_report(shoulder_x=0.25, hip_x=0.24, chest_mid_y=0.0)
     pkg = build_blockout_recipe(
         report,
@@ -387,80 +408,73 @@ def test_t4_pinch_cap_when_taper_gate_on() -> None:
     assert rx_w <= TORSO_WAIST_RX_MAX_FRAC_CHEST * rx_c + 1e-9
 
 
-def test_t5_hip_ry_frac_and_pelvis_order() -> None:
-    """T5: hip ry frac 0.64; ry_hip > ry_pelvis."""
-    half_hip = 0.13
-    report = _full_torso_report(hip_depth_m=0.26)
-    pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
-    by = {p.name: p for p in pkg.parts}
-    ry_h = float(by[_HIP].ry_m or 0.0)
-    ry_p = float(by["RECIPE_pelvis_oval"].ry_m or 0.0)
-    assert ry_h == pytest.approx(half_hip * TORSO_OVAL_RY_HIP_FRAC, abs=1e-9)
-    assert TORSO_OVAL_RY_HIP_FRAC == 0.64
-    assert ry_h > ry_p + 1e-9
-
-
-def test_t6_rear_bias_full3d_and_front_plane_mid() -> None:
-    """T6: full3d waist/hip cy > chest_y; front_plane cy mid."""
-    report = _full_torso_report(chest_mid_y=0.0)
-    pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
-    by = {p.name: p for p in pkg.parts}
-    chest_y = 0.0
-    w_c, h_c = by[_WAIST].center, by[_HIP].center
-    assert w_c is not None and h_c is not None
-    assert float(w_c[1]) > chest_y + 1e-9
-    assert float(h_c[1]) > chest_y + 1e-9
-
+def test_t6_chest_front_rear_match_0090_bias_algebra() -> None:
+    """T6: 0090 chest front/rear poles match bias algebra (do not retune ry/bias)."""
+    half_chest = 0.12
+    y_mid = 0.0
+    m = _metrics_for_ovals(chest_y=y_mid, half_chest=half_chest)
     msgs: list[str] = []
-    m = _metrics_for_ovals(chest_y=None)
-    parts = _build_torso_ovals(m, msgs, taper=0.14)
-    by_fp = {p.name: p for p in parts}
-    for name in (_CHEST, _WAIST, _HIP):
-        fp_c = by_fp[name].center
-        assert fp_c is not None
-        assert by_fp[name].placement == "front_plane"
-        assert float(fp_c[1]) == pytest.approx(0.0, abs=1e-9)
+    parts = _build_torso_ovals(m, msgs, taper=0.22)
+    by = {p.name: p for p in parts}
+    chest = by[_CHEST]
+    assert chest.center is not None and chest.ry_m is not None
+    ry = float(chest.ry_m)
+    cy = float(chest.center[1])
+    want_ry = half_chest * TORSO_OVAL_RY_CHEST_FRAC
+    want_cy = y_mid + TORSO_CHEST_Y_REAR_BIAS_FRAC_RY * want_ry
+    assert ry == pytest.approx(want_ry, abs=1e-9)
+    assert cy == pytest.approx(want_cy, abs=1e-9)
+    assert (cy - ry) == pytest.approx(want_cy - want_ry, abs=1e-9)
+    assert (cy + ry) == pytest.approx(want_cy + want_ry, abs=1e-9)
 
 
-def test_t7_form_message_includes_z_norm() -> None:
-    """T7: form silhouette line includes const-driven z_norm=c/w/h."""
+def test_t7_hip_rear_bias_and_pelvis_order() -> None:
+    """T7: 0092 hip rear ≈ cy+ry with bias 0.33; ry_hip > ry_pelvis."""
+    half_hip = 0.13
+    y_mid = 0.0
+    m = _metrics_for_ovals(chest_y=y_mid, half_hip=half_hip)
+    msgs: list[str] = []
+    parts = _build_torso_ovals(m, msgs, taper=0.22)
+    by = {p.name: p for p in parts}
+    hip = by[_HIP]
+    assert hip.center is not None and hip.ry_m is not None
+    ry = float(hip.ry_m)
+    cy = float(hip.center[1])
+    want_ry = half_hip * TORSO_OVAL_RY_HIP_FRAC
+    want_cy = y_mid + TORSO_HIP_Y_REAR_BIAS_FRAC_RY * want_ry
+    assert ry == pytest.approx(want_ry, abs=1e-9)
+    assert cy == pytest.approx(want_cy, abs=1e-9)
+    assert (cy + ry) == pytest.approx(want_cy + want_ry, abs=1e-9)
+    ry_p = float(by["RECIPE_pelvis_oval"].ry_m or 0.0)
+    assert ry > ry_p + 1e-9
+
+
+def test_t8_form_message_z_norm_and_overlap_wh() -> None:
+    """T8: form message z_norm=c/w/h=0.20/0.50/0.78 and overlap_wh= ≥ 0.080."""
     report = _full_torso_report()
     pkg = build_blockout_recipe(report, limbs=False, torso="ovals")
     form = [m for m in pkg.messages if m.startswith("torso form silhouette:")]
     assert len(form) == 1
     msg = form[0]
-    assert "z_norm=" in msg
     want = (
         f"z_norm=c/w/h={TORSO_OVAL_Z_NORM_CHEST:.2f}/"
         f"{TORSO_OVAL_Z_NORM_WAIST:.2f}/{TORSO_OVAL_Z_NORM_HIP:.2f}"
     )
     assert want in msg
+    assert "0.20/0.50/0.78" in msg
+    _ov_cw, ov_wh = _pair_overlaps({p.name: p for p in pkg.parts})
+    assert ov_wh >= 0.080 - 1e-9
+    assert f"overlap_wh={ov_wh:.4f}" in msg
 
 
-def test_t8_front_plane_still_b1_b3() -> None:
-    """T8: front_plane still applies z_norm + overlap grow; no rear bias."""
-    msgs: list[str] = []
-    m = _metrics_for_ovals(chest_y=None)
-    parts = _build_torso_ovals(m, msgs, taper=0.14)
-    by = {p.name: p for p in parts}
-    z_top = _z_top_from_metrics(m)
-    span = _span_from_metrics(m)
-    chest_c = by[_CHEST].center
-    assert chest_c is not None
-    assert float(chest_c[2]) == pytest.approx(z_top - TORSO_OVAL_Z_NORM_CHEST * span, abs=1e-9)
-    assert float(chest_c[1]) == pytest.approx(0.0, abs=1e-9)
-    ov_cw, ov_wh = _pair_overlaps(by)
-    assert ov_cw >= TORSO_OVAL_OVERLAP_FLOOR_M - 1e-9
-    assert ov_wh >= TORSO_OVAL_OVERLAP_FLOOR_M - 1e-9
-
-
-def test_t9_product_n_parts_131_schema_mcp() -> None:
+def test_t9_product_n_parts_131_schema_mcp47() -> None:
     """T9: n_parts 131 via hair=short + profile; schema 1.4.0; MCP 47."""
     report = _product_class_report()
     skel = build_blockout_skeleton(report)
     pkg = build_blockout_recipe(report, skeleton=skel, **_product_flags())  # type: ignore[arg-type]
     assert len(pkg.parts) == 131
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
+    assert pkg.schema_version == "1.4.0"
     assert len(TOOL_NAMES) == 47
     result = validate_constraints(pkg, report=report)
     by_id = {r.id: r for r in result.rules}
@@ -468,24 +482,40 @@ def test_t9_product_n_parts_131_schema_mcp() -> None:
     assert by_id["C_palm_ellipsoid"].status == "pass"
 
 
-def test_t10_grow_respects_cap_never_shrink() -> None:
-    """T10: 0073 grow still respects cap 0.030; never shrink."""
-    shoulder_z = 1.30
-    hip_z = 0.95
-    span = shoulder_z - hip_z
+def test_t10_grow_cap_product_class_waist_under_030() -> None:
+    """T10: grow respects cap 0.030; never shrink. Product-span ≈0.478 waist grow ≈0.023 < 0.030."""
+    # Live 0104up span ≈0.478 (z_top 1.38 / hip_z 0.902).
+    m = _metrics_for_ovals(shoulder_z=1.38, hip_z=0.901875, chest_y=0.0)
     msgs: list[str] = []
-    m = _metrics_for_ovals(shoulder_z=shoulder_z, hip_z=hip_z, chest_y=0.0)
-    parts = _build_torso_ovals(m, msgs, taper=0.14)
+    parts = _build_torso_ovals(m, msgs, taper=0.22)
     by = {p.name: p for p in parts}
+    span = _span_from_metrics(m)
+    assert span == pytest.approx(0.478, abs=0.002)
     planned = _planned_rz(span)
     for name in (_CHEST, _WAIST, _HIP):
         grown = float(by[name].rz_m or 0.0) - planned[name]
         assert grown >= -1e-12, f"{name} shrunk"
         assert grown <= TORSO_OVAL_RZ_GROW_CAP_M + 1e-9
+    waist_grow = float(by[_WAIST].rz_m or 0.0) - planned[_WAIST]
+    assert waist_grow == pytest.approx(0.023, abs=0.004)
+    assert waist_grow < TORSO_OVAL_RZ_GROW_CAP_M
+
+    report = _product_class_report()
+    skel = build_blockout_skeleton(report)
+    pkg = build_blockout_recipe(report, skeleton=skel, **_product_flags())  # type: ignore[arg-type]
+    by_pkg = {p.name: p for p in pkg.parts}
+    c_c, c_h = by_pkg[_CHEST].center, by_pkg[_HIP].center
+    assert c_c is not None and c_h is not None
+    span_pkg = (float(c_c[2]) - float(c_h[2])) / (TORSO_OVAL_Z_NORM_HIP - TORSO_OVAL_Z_NORM_CHEST)
+    planned_pkg = _planned_rz(span_pkg)
+    for name in (_CHEST, _WAIST, _HIP):
+        grown = float(by_pkg[name].rz_m or 0.0) - planned_pkg[name]
+        assert grown >= -1e-12, f"{name} shrunk"
+        assert grown <= TORSO_OVAL_RZ_GROW_CAP_M + 1e-9
 
 
 def test_t11_mid_back_follows_waist_hang_applied() -> None:
-    """T11: mid_back z ~ waist - z_below; breast hang applied (do not pin z=1.228)."""
+    """T11: mid_back z ~ waist - 0.035; breast hang applied (do not pin z=1.228)."""
     report = _product_class_report()
     skel = build_blockout_skeleton(report)
     pkg = build_blockout_recipe(report, skeleton=skel, **_product_flags())  # type: ignore[arg-type]
@@ -506,19 +536,69 @@ def test_t11_mid_back_follows_waist_hang_applied() -> None:
     assert chest_c is not None
     chest_z = float(chest_c[2])
     ref_msgs = [m for m in pkg.messages if m.startswith("breast_hang_z_chest_ref_m=")]
-    assert ref_msgs, "B15 hang band must emit chest-ref (follows oval z)"
+    assert ref_msgs, "hang band must emit chest-ref (follows oval z)"
     ref_z = float(ref_msgs[0].split("=", 1)[1])
     assert ref_z == pytest.approx(chest_z, abs=2e-3)
     for b in breasts:
         assert b.center is not None
         assert math.isfinite(float(b.center[2]))
+        assert float(b.center[2]) != pytest.approx(1.228, abs=1e-6)
 
 
-def test_t12_all_exports_z_norm_consts() -> None:
-    """T12: __all__ exports the three TORSO_OVAL_Z_NORM_* consts."""
+def test_t12_front_plane_still_b1_b3() -> None:
+    """T12: front_plane still applies z_norm + overlap grow; no rear bias."""
+    msgs: list[str] = []
+    m = _metrics_for_ovals(chest_y=None)
+    parts = _build_torso_ovals(m, msgs, taper=0.14)
+    by = {p.name: p for p in parts}
+    z_top = _z_top_from_metrics(m)
+    span = _span_from_metrics(m)
+    chest_c = by[_CHEST].center
+    assert chest_c is not None
+    assert float(chest_c[2]) == pytest.approx(z_top - TORSO_OVAL_Z_NORM_CHEST * span, abs=1e-9)
+    assert float(chest_c[1]) == pytest.approx(0.0, abs=1e-9)
+    assert by[_CHEST].placement == "front_plane"
+    ov_cw, ov_wh = _pair_overlaps(by)
+    assert ov_cw >= TORSO_OVAL_OVERLAP_FLOOR_M - 1e-9
+    assert ov_wh >= TORSO_OVAL_OVERLAP_FLOOR_M - 1e-9
+
+
+def test_t13_sit_still_applies_chest_front_y_hold() -> None:
+    """T13: 0118 sit applies on product-class; chest front Y not more proud than -0.046 ± 3 mm."""
+    report = _product_class_report()
+    skel = build_blockout_skeleton(report)
+    pkg = build_blockout_recipe(report, skeleton=skel, **_product_flags())  # type: ignore[arg-type]
+    assert any(m == _SIT_APPLIED for m in pkg.messages)
+    sit_hits = [m for m in pkg.messages if m.startswith(_SIT_PREFIX)]
+    assert len(sit_hits) == 1
+    assert "bury=" in sit_hits[0]
+    chest = next(p for p in pkg.parts if p.name == _CHEST)
+    assert chest.center is not None and chest.ry_m is not None
+    chest_front = float(chest.center[1]) - float(chest.ry_m)
+    assert chest_front == pytest.approx(_LIVE_CHEST_FRONT_Y, abs=0.003)
+
+
+def test_t14_compact_still_emits_three_torso_ovals() -> None:
+    """T14: compact soft_density still emits the three torso ovals (not culled)."""
+    report = _product_class_report()
+    skel = build_blockout_skeleton(report)
+    pkg = build_blockout_recipe(
+        report,
+        skeleton=skel,
+        **_product_flags(soft_density="compact"),  # type: ignore[arg-type]
+    )
+    names = {p.name for p in pkg.parts}
+    assert _CHEST in names
+    assert _WAIST in names
+    assert _HIP in names
+
+
+def test_t15_all_already_exports_z_norm_consts() -> None:
+    """T15: __all__ already exports the three TORSO_OVAL_Z_NORM_* (no new names)."""
     from meshops.proportion import blockout_recipe as br
 
     names = set(br.__all__)
     assert "TORSO_OVAL_Z_NORM_CHEST" in names
     assert "TORSO_OVAL_Z_NORM_WAIST" in names
     assert "TORSO_OVAL_Z_NORM_HIP" in names
+    assert "TORSO_OVAL_OVERLAP_FLOOR_M" in names

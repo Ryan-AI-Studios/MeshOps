@@ -203,13 +203,14 @@ TORSO_OVAL_RZ_HIP_FRAC: Final[float] = 0.24
 # 0073 B4: legacy equal-span symbol — documentation fence only; emit must NOT use it
 TORSO_OVAL_RZ_SPAN_FRAC: Final[float] = 0.22  # fence 0040 / mean reference
 TORSO_OVAL_RZ_FLOOR_M: Final[float] = 0.025
-# 0089 B1: layer z_norm pull (0073 B7 deferred even-thirds). Waist stays 0.50
-# so 0074 mid_back Z=waist does not move.
-TORSO_OVAL_Z_NORM_CHEST: Final[float] = 0.18  # was 0.15
+# 0105 B1: asymmetric z_norm pull (0089 leftover even Δz). Hip more than chest.
+# Waist stays 0.50 so 0074/0093 mid_back Z=waist does not move.
+TORSO_OVAL_Z_NORM_CHEST: Final[float] = 0.20  # was 0.18 (0089; even-thirds 0.15)
 TORSO_OVAL_Z_NORM_WAIST: Final[float] = 0.50  # stay — 0074 mid_back Z
-TORSO_OVAL_Z_NORM_HIP: Final[float] = 0.82  # was 0.85
-# 0073 B2 + 0089 B3: pairwise vertical overlap floor + cumulative grow cap
-TORSO_OVAL_OVERLAP_FLOOR_M: Final[float] = 0.070  # was 0.055 — AI2 F1
+TORSO_OVAL_Z_NORM_HIP: Final[float] = 0.78  # was 0.82 (0089; even-thirds 0.85)
+# 0073 B2 + 0089 B3 + 0105 B3: pairwise vertical overlap floor + cumulative grow cap.
+# 0089 Michelin ceiling: overlap ≥ 0.085 is too much (do not raise floor to 0.085).
+TORSO_OVAL_OVERLAP_FLOOR_M: Final[float] = 0.080  # was 0.070 (0089; 0073 0.055)
 TORSO_OVAL_RZ_GROW_CAP_M: Final[float] = 0.030
 TORSO_WAIST_RX_MAX_FRAC_CHEST: Final[float] = 0.80
 TORSO_WAIST_PINCH_TAPER_GATE: Final[float] = 0.10
