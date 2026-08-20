@@ -165,12 +165,12 @@ def _t_xz_along_ua(center: list[float], p0: list[float], p1: list[float]) -> flo
 
 
 def test_t0_const_freezes() -> None:
-    """T0: 0060 DELT constant freezes."""
+    """T0: DELT constant freezes (0103 retarget: 0.62 / 1.08 / t=0.36)."""
     assert DELT_ARM_RADIUS_SCALE == 1.35
-    assert DELT_RY_FRAC == 0.72
-    assert DELT_RZ_FRAC == 0.78
+    assert DELT_RY_FRAC == 0.62
+    assert DELT_RZ_FRAC == 1.08
     assert DELT_OUTER_X_FRAC == 0.08
-    assert DELT_DISTAL_BURY_T == 0.18
+    assert DELT_DISTAL_BURY_T == 0.36
 
 
 def test_t1_profile_rx_keeps_bulk() -> None:
@@ -188,7 +188,7 @@ def test_t1_profile_rx_keeps_bulk() -> None:
 
 
 def test_t2_base_axes_anisotropy() -> None:
-    """T2: base path limbs=False: ry~0.72*rx, rz~0.78*rx."""
+    """T2: base path limbs=False: ry/rz follow DELT_* fracs (0103 const-driven)."""
     arm_hw = 0.04
     report = _limb_mass_report(arm_hw=arm_hw)
     pkg = build_blockout_recipe(report, limbs=False)
@@ -199,8 +199,6 @@ def test_t2_base_axes_anisotropy() -> None:
         rx = float(d.rx_m)
         assert d.ry_m == pytest.approx(rx * DELT_RY_FRAC, abs=1e-9)
         assert d.rz_m == pytest.approx(rx * DELT_RZ_FRAC, abs=1e-9)
-        assert DELT_RY_FRAC == 0.72
-        assert DELT_RZ_FRAC == 0.78
 
 
 def test_t3_product_class_shelf() -> None:
@@ -416,8 +414,8 @@ def test_t11_t2_constants_export_smoke() -> None:
     assert len(delts) == 2
     for d in delts:
         assert d.rx_m is not None and d.ry_m is not None and d.rz_m is not None
-        assert d.ry_m == pytest.approx(float(d.rx_m) * 0.72, abs=1e-9)
-        assert d.rz_m == pytest.approx(float(d.rx_m) * 0.78, abs=1e-9)
+        assert d.ry_m == pytest.approx(float(d.rx_m) * DELT_RY_FRAC, abs=1e-9)
+        assert d.rz_m == pytest.approx(float(d.rx_m) * DELT_RZ_FRAC, abs=1e-9)
 
 
 def test_t12_m_profile_scale() -> None:

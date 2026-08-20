@@ -564,7 +564,7 @@ def test_t9_scap_soft_axes_unchanged() -> None:
 
 
 def test_t10_delt_fence_0060() -> None:
-    """T10: 0060 fence — delt ry/rx ~ 0.72; bury messages when UA present."""
+    """T10: 0060 fence — delt ry/rx follows DELT_RY_FRAC; bury messages when UA present."""
     pkg = _build_profile_pkg(limbs=True)
     delts = [p for p in pkg.parts if p.role == "deltoid_soft"]
     assert len(delts) == 2

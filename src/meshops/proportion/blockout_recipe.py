@@ -134,11 +134,14 @@ KNEE_SOFT_REAR_FRAC_RY: Final[float] = 0.10  # B6: rear +Y center bias (* ry)
 KNEE_SOFT_MAX_VS_THIGH_PROX: Final[float] = 1.25  # 0081 B15 anti-Michelin vs thigh prox
 # 0046 B1: deltoid scale vs upper_arm half-width (profile + base).
 # 0060: keep bulk; retune axes/outer + distal socket bury (X-Z only).
+# 0103: leftover 0060 squat ball (ry 0.72 / rz 0.78 / t=0.18) still perched on
+# the chest disc. Invert to a tall cap (rz 1.08) + flatter depth (ry 0.62) +
+# 2x distal bury (t=0.36). Fail rz>=1.18 (Michelin sausage) / t>=0.50 (bicep swallow).
 DELT_ARM_RADIUS_SCALE: Final[float] = 1.35
-DELT_RY_FRAC: Final[float] = 0.72  # was 0.90; depth flatten (cap silhouette)
-DELT_RZ_FRAC: Final[float] = 0.78  # was 0.85; vertical de-sphere
+DELT_RY_FRAC: Final[float] = 0.62  # was 0.72 (0060); depth flatten (left ball)
+DELT_RZ_FRAC: Final[float] = 1.08  # was 0.78 (0060 squat); tall cap along hanging-arm Z
 DELT_OUTER_X_FRAC: Final[float] = 0.08  # was 0.25; * rx, sign by side (r:+, l:-); midline skip
-DELT_DISTAL_BURY_T: Final[float] = 0.18  # fraction of UA p0->p1 (prox half) along X-Z
+DELT_DISTAL_BURY_T: Final[float] = 0.36  # was 0.18 (0060); fraction of UA p0->p1 along X-Z
 _DELT_BURY_LEN_FLOOR: Final[float] = 1e-4
 # 0061 — shoulder girdle softs (clavicle / trap)
 CLAVICLE_RADIUS_FRAC_H: Final[float] = 0.012
