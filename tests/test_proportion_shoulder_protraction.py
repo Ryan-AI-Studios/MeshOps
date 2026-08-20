@@ -377,10 +377,10 @@ def test_t_plane_class_zero_lm() -> None:
 
 
 def test_t_fence_0060() -> None:
-    """T_fence_0060: DELT bury/axes constants unchanged."""
-    assert DELT_DISTAL_BURY_T == 0.18
-    assert DELT_RY_FRAC == 0.72
-    assert DELT_RZ_FRAC == 0.78
+    """T_fence_0060: 0103 happened — bury/axes 0.36 / 0.62 / 1.08."""
+    assert DELT_DISTAL_BURY_T == 0.36
+    assert DELT_RY_FRAC == 0.62
+    assert DELT_RZ_FRAC == 1.08
 
 
 def test_t_clav_lat() -> None:
