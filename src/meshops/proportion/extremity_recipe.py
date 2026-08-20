@@ -122,6 +122,11 @@ ANK_RZ_MIN_VS_CALF_B: Final[float] = 1.35
 ANK_RZ_MAX_FRAC_ANK_Z: Final[float] = 0.60  # AI2 P2-2 ceiling
 HEEL_CONTACT_OVERLAP_TARGET_M: Final[float] = 0.005  # B7 all three sites (0056 fence)
 _FINGER_Y_BIAS_FRAC: Final[float] = 0.10  # hang and no-tip slight -Y (never primary -Y)
+_FINGER_CURL_PIP_DEG: Final[float] = 14.0  # 0104 B1 — +deg toward palm
+_FINGER_CURL_DIP_DEG: Final[float] = 20.0  # 0104 B2
+_THUMB_CURL_IP_DEG: Final[float] = 12.0  # 0104 B3
+_PALM_FACE_NORMAL: Final[tuple[float, float, float]] = (0.0, -1.0, 0.0)
+_CURL_HINGE_DEGEN: Final[float] = 1e-6  # B27; stricter than _NEAR_ZERO 1e-9
 # Mirror constraints.AXIAL_DEPTH_MARGIN_M / skeleton._GLENOID_PLANE_MARGIN_M (0084 B21).
 _FINGERTIP_PLANE_MARGIN_M: Final[float] = 0.02
 _NEAR_ZERO: Final[float] = 1e-9
@@ -213,6 +218,77 @@ def _normalize(v: tuple[float, float, float]) -> tuple[float, float, float] | No
 
 def _add(p: list[float], d: tuple[float, float, float], scale: float) -> list[float]:
     return [p[0] + d[0] * scale, p[1] + d[1] * scale, p[2] + d[2] * scale]
+
+
+def _cross(
+    a: tuple[float, float, float],
+    b: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    """3-vector cross. No live helper in this module (0104 / opencode m-01)."""
+    return (
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    )
+
+
+def _rotate_about_axis(
+    v: tuple[float, float, float],
+    hinge: tuple[float, float, float],
+    deg: float,
+) -> tuple[float, float, float]:
+    """Rodrigues rotate ``v`` about ``hinge``. 0 deg is identity; NaN is skip (B25)."""
+    if not math.isfinite(deg):
+        return v
+    kn = _normalize(hinge)
+    if kn is None:
+        return v
+    rad = math.radians(deg)
+    c = math.cos(rad)
+    s = math.sin(rad)
+    kx, ky, kz = kn
+    vx, vy, vz = v
+    cx = ky * vz - kz * vy
+    cy = kz * vx - kx * vz
+    cz = kx * vy - ky * vx
+    kdotv = kx * vx + ky * vy + kz * vz
+    one_c = 1.0 - c
+    return (
+        vx * c + cx * s + kx * kdotv * one_c,
+        vy * c + cy * s + ky * kdotv * one_c,
+        vz * c + cz * s + kz * kdotv * one_c,
+    )
+
+
+def _hinge_toward_palm(axis: tuple[float, float, float]) -> tuple[float, float, float]:
+    """Flexion hinge: cross(axis, palm normal); B27 degen then palm-toward flip."""
+    raw = _cross(axis, _PALM_FACE_NORMAL)
+    n = math.sqrt(raw[0] ** 2 + raw[1] ** 2 + raw[2] ** 2)
+    hinge = _normalize(raw) if n >= _CURL_HINGE_DEGEN else (1.0, 0.0, 0.0)
+    if hinge is None:
+        hinge = (1.0, 0.0, 0.0)
+    probe = _rotate_about_axis(axis, hinge, 1.0)
+    if probe[1] > axis[1]:
+        hinge = (-hinge[0], -hinge[1], -hinge[2])
+    return hinge
+
+
+def _digit_seg_dirs(
+    axis: tuple[float, float, float],
+    *,
+    pip_deg: float,
+    dip_deg: float,
+) -> tuple[
+    tuple[float, float, float],
+    tuple[float, float, float],
+    tuple[float, float, float],
+]:
+    """Prox stays on ``axis``; mid = PIP; dist = DIP. One hinge from original axis."""
+    d0 = _normalize(axis) or axis
+    hinge = _hinge_toward_palm(d0)
+    d1 = _normalize(_rotate_about_axis(d0, hinge, pip_deg)) or d0
+    d2 = _normalize(_rotate_about_axis(d1, hinge, dip_deg)) or d1
+    return d0, d1, d2
 
 
 def _ellipsoid(
@@ -1060,6 +1136,11 @@ def build_hand_parts(
             f"digit_L={dict(_FINGER_DIGIT_L_SCALE)} digit_R={dict(_FINGER_DIGIT_R_SCALE)} "
             f"thumb_distal={_THUMB_DISTAL_L_SCALE}/{_THUMB_DISTAL_R_SCALE} anti-sausage"
         )
+        msgs.append(
+            f"hand curl: pip={_FINGER_CURL_PIP_DEG:g} "
+            f"dip={_FINGER_CURL_DIP_DEG:g} "
+            f"thumb_ip={_THUMB_CURL_IP_DEG:g}"
+        )
     return parts
 
 
@@ -1225,14 +1306,20 @@ def _build_hand_side(
         # Mirror lateral splay: left flips sign so fingers fan correctly in +X world
         dx = (-t if side == "l" else t) * splay * 0.5
         base = _add([palm_c[0] + dx, palm_c[1], palm_c[2]], axis, 0.12 * hand_len)
-        along = 0.0
+        d0, d1, d2 = _digit_seg_dirs(
+            axis,
+            pip_deg=_FINGER_CURL_PIP_DEG,
+            dip_deg=_FINGER_CURL_DIP_DEG,
+        )
+        dirs = (d0, d1, d2)
+        cursor = base
         for si in range(3):
             seg_l = _FINGER_SEG_FRACS_HAND[si] * hand_len * digit_L
             r = fr * _FINGER_R_SCALES_SEG[si] * digit_R
             r = max(r, _FINGER_R_FLOOR_M)  # B16 post-scale floor
-            p0 = _add(base, axis, along)
-            p1 = _add(base, axis, along + seg_l)
-            along += seg_l
+            p0 = cursor
+            p1 = _add(cursor, dirs[si], seg_l)
+            cursor = p1
             out.append(
                 _capsule(
                     f"RECIPE_finger_{fname}_{si}_{side}",
@@ -1271,12 +1358,17 @@ def _build_hand_side(
     )
     thumb_lens = (thumb_seg0, thumb_seg1)
     thumb_rs = (thumb_r0, thumb_r1)
-    along_t = 0.0
+    thumb_hinge = _hinge_toward_palm(thumb_dir)
+    thumb_d1 = (
+        _normalize(_rotate_about_axis(thumb_dir, thumb_hinge, _THUMB_CURL_IP_DEG)) or thumb_dir
+    )
+    thumb_dirs = (thumb_dir, thumb_d1)
+    cursor_t = thumb_base
     for si in range(2):
         seg_l = thumb_lens[si]
-        p0 = _add(thumb_base, thumb_dir, along_t)
-        p1 = _add(thumb_base, thumb_dir, along_t + seg_l)
-        along_t += seg_l
+        p0 = cursor_t
+        p1 = _add(cursor_t, thumb_dirs[si], seg_l)
+        cursor_t = p1
         out.append(
             _capsule(
                 f"RECIPE_thumb_soft_{si}_{side}",
@@ -1337,13 +1429,18 @@ __all__ = [
     "TOE_TIP_PAD_SCALE",
     "TOE_TIP_PAST_FRAC",
     "TOE_WEDGE_RZ_FRAC_SOLE",
+    "_CURL_HINGE_DEGEN",
     "_FINGERTIP_PLANE_MARGIN_M",
+    "_FINGER_CURL_DIP_DEG",
+    "_FINGER_CURL_PIP_DEG",
     "_FINGER_DIGIT_L_SCALE",
     "_FINGER_DIGIT_R_SCALE",
     "_FINGER_R_SCALES_SEG",
     "_FINGER_SEG_FRACS_HAND",
+    "_PALM_FACE_NORMAL",
     "_PALM_PAD_RY_FRAC_TH",
     "_PALM_THICKNESS_FRAC_HAND",
+    "_THUMB_CURL_IP_DEG",
     "_THUMB_DISTAL_L_SCALE",
     "_THUMB_DISTAL_R_SCALE",
     "_THUMB_PALM_PITCH",
