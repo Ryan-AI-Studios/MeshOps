@@ -1,7 +1,7 @@
 """Track 0090 — torso thoracic front plane (chest ry 0.72 + rear bias 0.51).
 
 Authoring honesty only (Difficulty §12 / N6 / RECIPE_HONESTY).
-Schema 1.4.0 / MCP 46 stay. Not mesh/print success.
+Schema 1.4.0 / MCP 47 stay. Not mesh/print success.
 """
 
 from __future__ import annotations
@@ -313,10 +313,10 @@ def test_t0_public_freezes_and_fences() -> None:
     assert TORSO_CHEST_Y_REAR_BIAS_FRAC_RY == 0.51
     assert 0.70 <= TORSO_OVAL_RY_CHEST_FRAC <= 0.76
     assert 0.46 <= TORSO_CHEST_Y_REAR_BIAS_FRAC_RY <= 0.56
-    assert TORSO_OVAL_Z_NORM_CHEST == 0.18
+    assert TORSO_OVAL_Z_NORM_CHEST == 0.20
     assert TORSO_OVAL_Z_NORM_WAIST == 0.50
-    assert TORSO_OVAL_Z_NORM_HIP == 0.82
-    assert TORSO_OVAL_OVERLAP_FLOOR_M == 0.070
+    assert TORSO_OVAL_Z_NORM_HIP == 0.78
+    assert TORSO_OVAL_OVERLAP_FLOOR_M == 0.080
     assert TORSO_OVAL_RZ_CHEST_FRAC == 0.28
     assert TORSO_OVAL_RZ_WAIST_FRAC == 0.16
     assert TORSO_OVAL_RZ_HIP_FRAC == 0.24
@@ -475,7 +475,7 @@ def test_t8_breast_still_proud_of_new_front() -> None:
 
 
 def test_t9_product_n_parts_131_schema_mcp() -> None:
-    """T9: n_parts 131 via hair=short + profile; schema 1.4.0; MCP 46."""
+    """T9: n_parts 131 via hair=short + profile; schema 1.4.0; MCP 47."""
     report = _product_class_report()
     skel = build_blockout_skeleton(report)
     pkg = build_blockout_recipe(report, skeleton=skel, **_product_flags())  # type: ignore[arg-type]

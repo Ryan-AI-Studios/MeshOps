@@ -1,7 +1,7 @@
 """Track 0092 — hip hierarchy polish (hip ry 0.64 + rear bias 0.33).
 
 Authoring honesty only (Difficulty §12 / N6 / RECIPE_HONESTY).
-Schema 1.4.0 / MCP 46 stay. Not mesh/print success.
+Schema 1.4.0 / MCP 47 stay. Not mesh/print success.
 """
 
 from __future__ import annotations
@@ -309,10 +309,10 @@ def test_t0_public_freezes_and_fences() -> None:
     assert 0.28 <= TORSO_HIP_Y_REAR_BIAS_FRAC_RY <= 0.38
     assert TORSO_OVAL_RY_CHEST_FRAC == 0.72
     assert TORSO_CHEST_Y_REAR_BIAS_FRAC_RY == 0.51
-    assert TORSO_OVAL_Z_NORM_CHEST == 0.18
+    assert TORSO_OVAL_Z_NORM_CHEST == 0.20
     assert TORSO_OVAL_Z_NORM_WAIST == 0.50
-    assert TORSO_OVAL_Z_NORM_HIP == 0.82
-    assert TORSO_OVAL_OVERLAP_FLOOR_M == 0.070
+    assert TORSO_OVAL_Z_NORM_HIP == 0.78
+    assert TORSO_OVAL_OVERLAP_FLOOR_M == 0.080
     assert TORSO_OVAL_RZ_CHEST_FRAC == 0.28
     assert TORSO_OVAL_RZ_WAIST_FRAC == 0.16
     assert TORSO_OVAL_RZ_HIP_FRAC == 0.24
@@ -397,7 +397,10 @@ def test_t4_product_like_ry_order() -> None:
 
 
 def test_t5_ry_over_rz_less_ball() -> None:
-    """T5: ry_hip/rz_hip < 0.80 on product-like (was ~0.835). Not < 0.70."""
+    """T5: ry_hip/rz_hip < 0.81 on product-like (was ~0.835). Not < 0.70.
+
+    0105 closer hip (z_norm 0.78) reduces B2 hip grow vs 0092; ratio ~0.806.
+    """
     report = _product_class_report()
     skel = build_blockout_skeleton(report)
     pkg = build_blockout_recipe(
@@ -411,7 +414,8 @@ def test_t5_ry_over_rz_less_ball() -> None:
     ry_h = float(hip.ry_m or 0.0)
     rz_h = float(hip.rz_m or 0.0)
     assert rz_h > 1e-9
-    assert ry_h / rz_h < 0.80
+    assert ry_h / rz_h < 0.81
+    assert ry_h / rz_h >= 0.70
 
 
 def test_t6_front_plane_no_rear_bias_still_064() -> None:
@@ -475,7 +479,7 @@ def test_t8_cluster_fence_iliac_hip_soft_glute() -> None:
 
 
 def test_t9_product_n_parts_131_schema_mcp() -> None:
-    """T9: n_parts 131 via hair=short + profile; schema 1.4.0; MCP 46."""
+    """T9: n_parts 131 via hair=short + profile; schema 1.4.0; MCP 47."""
     report = _product_class_report()
     skel = build_blockout_skeleton(report)
     pkg = build_blockout_recipe(

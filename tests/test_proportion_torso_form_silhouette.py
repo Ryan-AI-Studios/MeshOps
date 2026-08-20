@@ -236,18 +236,18 @@ def _pair_overlaps(by: dict[str, RecipePart]) -> tuple[float, float]:
 
 
 def test_t0_public_freezes_exported_in_bands() -> None:
-    """T0: public freezes exported; within §0 bands; GROW_CAP=0.030; OVERLAP=0.070."""
+    """T0: public freezes exported; within §0 bands; GROW_CAP=0.030; OVERLAP=0.080."""
     assert 0.26 <= TORSO_OVAL_RZ_CHEST_FRAC <= 0.32
     assert 0.14 <= TORSO_OVAL_RZ_WAIST_FRAC <= 0.18
     assert 0.22 <= TORSO_OVAL_RZ_HIP_FRAC <= 0.28
-    assert 0.060 <= TORSO_OVAL_OVERLAP_FLOOR_M <= 0.080
+    assert 0.075 <= TORSO_OVAL_OVERLAP_FLOOR_M <= 0.082
     assert 0.025 <= TORSO_OVAL_RZ_GROW_CAP_M <= 0.035
     assert 0.61 <= TORSO_OVAL_RY_HIP_FRAC <= 0.68
     # exact defaults
     assert TORSO_OVAL_RZ_CHEST_FRAC == 0.28
     assert TORSO_OVAL_RZ_WAIST_FRAC == 0.16
     assert TORSO_OVAL_RZ_HIP_FRAC == 0.24
-    assert TORSO_OVAL_OVERLAP_FLOOR_M == 0.070
+    assert TORSO_OVAL_OVERLAP_FLOOR_M == 0.080
     assert TORSO_OVAL_RZ_GROW_CAP_M == 0.030
     assert TORSO_OVAL_RY_HIP_FRAC == 0.64
     assert TORSO_OVAL_RZ_FLOOR_M == 0.025
