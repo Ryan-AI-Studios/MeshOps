@@ -1,4 +1,4 @@
-"""Track 0091 sit-on — retargeted by 0118 bury (proud air-gap retired).
+"""Track 0118 — bury dual breast_soft into 0090 chest front (close 0091 air gap).
 
 Authoring honesty only (Difficulty §12 / N6 / RECIPE_HONESTY).
 Schema 1.4.0 / MCP 47 stay. Not hang-Z / tear / tilt / extra pad / 0083 delt.
@@ -310,9 +310,59 @@ def _breasts(parts: list[RecipePart]) -> list[RecipePart]:
     return [p for p in parts if p.role == "breast_soft"]
 
 
+def _ys_named(pkg: object, name_token: str) -> list[float]:
+    out: list[float] = []
+    for p in pkg.parts:  # type: ignore[attr-defined]
+        if name_token not in p.name:
+            continue
+        if p.center is not None:
+            out.append(float(p.center[1]))
+        elif p.p0 is not None:
+            out.append(float(p.p0[1]))
+    return out
+
+
+def _capture_pre_sit(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+    """Snapshot breasts + neighbor Y immediately before sit (agy m-02 / B26)."""
+    orig = blockout_recipe_mod._apply_breast_sit_on_chest
+    bag: dict[str, object] = {}
+
+    def _wrap(parts: list[RecipePart], messages: list[str]) -> None:
+        bag["pre_breasts"] = {
+            p.name: p.model_copy(deep=True) for p in parts if p.role == "breast_soft"
+        }
+        bag["pre_chest_y"] = [
+            float(p.center[1])
+            for p in parts
+            if "torso_oval_chest" in p.name and p.center is not None
+        ]
+        bag["pre_delt_y"] = [
+            float(p.center[1]) for p in parts if "deltoid_soft" in p.name and p.center is not None
+        ]
+        clav_y: list[float] = []
+        for p in parts:
+            if "clavicle" not in p.name:
+                continue
+            if p.center is not None:
+                clav_y.append(float(p.center[1]))
+            elif p.p0 is not None:
+                clav_y.append(float(p.p0[1]))
+        bag["pre_clav_y"] = clav_y
+        orig(parts, messages)
+        bag["post_breasts"] = {
+            p.name: p.model_copy(deep=True) for p in parts if p.role == "breast_soft"
+        }
+
+    monkeypatch.setattr(blockout_recipe_mod, "_apply_breast_sit_on_chest", _wrap)
+    return bag
+
+
 def test_t0_const_freezes() -> None:
-    """T0: B1 bury (0118); hold hang / athletic / attach / 0090 chest plate."""
+    """T0: B1 bury; hold hang / athletic / attach / 0090 chest plate. Proud gone."""
     assert BREAST_SIT_CHEST_BURY_M == 0.004
+    assert 0.000 <= BREAST_SIT_CHEST_BURY_M <= 0.008
+    assert BREAST_SIT_CHEST_BURY_M < 0.016
+    assert BREAST_SIT_CHEST_BURY_M >= 0.0
     assert BREAST_HANG_Z_DROP_FRAC_RZ == 0.55
     assert BREAST_HANG_Z_MIN_DROP_FRAC_RZ == 0.40
     assert BREAST_ATHLETIC_RX_MAX_FRAC_H == 0.042
@@ -322,9 +372,6 @@ def test_t0_const_freezes() -> None:
     assert BREAST_ATTACH_Y_SCALE == 1.0
     assert TORSO_OVAL_RY_CHEST_FRAC == 0.72
     assert TORSO_CHEST_Y_REAR_BIAS_FRAC_RY == 0.51
-    assert 0.000 <= BREAST_SIT_CHEST_BURY_M <= 0.008
-    assert BREAST_SIT_CHEST_BURY_M < 0.016
-    assert BREAST_SIT_CHEST_BURY_M >= 0.0
     assert not hasattr(blockout_recipe_mod, "BREAST_SIT_PROUD_OF_CHEST_FRONT_M")
 
 
@@ -359,19 +406,12 @@ def test_t2_product_sit_law() -> None:
 
 
 def test_t3_sit_does_not_change_xz_axes_rot(monkeypatch: pytest.MonkeyPatch) -> None:
-    """T3: sit-on is Y-only vs pre-sit part copy (not bury=0); hang drop still ~0.55*rz."""
-    orig = blockout_recipe_mod._apply_breast_sit_on_chest
-    bag: dict[str, dict[str, RecipePart]] = {}
-
-    def _wrap(parts: list[RecipePart], messages: list[str]) -> None:
-        bag["pre"] = {p.name: p.model_copy(deep=True) for p in parts if p.role == "breast_soft"}
-        orig(parts, messages)
-        bag["post"] = {p.name: p.model_copy(deep=True) for p in parts if p.role == "breast_soft"}
-
-    monkeypatch.setattr(blockout_recipe_mod, "_apply_breast_sit_on_chest", _wrap)
+    """T3: sit is Y-only vs pre-sit copy (not bury=0, not no-chest); hang ~0.55*rz."""
+    bag = _capture_pre_sit(monkeypatch)
     pkg = _product_pkg()
-    pre = bag["pre"]
-    post = bag["post"]
+    pre = bag["pre_breasts"]
+    post = bag["post_breasts"]
+    assert isinstance(pre, dict) and isinstance(post, dict)
     assert pre and post
     assert any(m == "breast_hang_z_applied: true" for m in pkg.messages)
     drop_s = _msg_value(pkg.messages, "breast_hang_z_drop_m")
@@ -412,12 +452,13 @@ def test_t5_unit_bury_zero_kiss_and_004(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(blockout_recipe_mod, "BREAST_SIT_CHEST_BURY_M", 0.0)
     _apply_breast_sit_on_chest(parts0, msgs0)
     assert any(m == "breast_sit_on_chest_applied: true" for m in msgs0)
-    for p in _breasts(parts0):
-        assert p.center is not None and p.ry_m is not None
-        rear = float(p.center[1]) + float(p.ry_m)
+    breasts0 = _breasts(parts0)
+    for b in breasts0:
+        assert b.center is not None and b.ry_m is not None
+        rear = float(b.center[1]) + float(b.ry_m)
         assert rear == pytest.approx(chest_front0, abs=1e-9)
-        assert float(p.center[0]) != 0.0
-        assert float(p.center[2]) == pytest.approx(1.22814, abs=1e-12)
+        assert float(b.center[0]) != 0.0
+        assert float(b.center[2]) == pytest.approx(1.22814, abs=1e-12)
 
     parts = _dual_breast_and_chest()
     chest = next(p for p in parts if p.name == "RECIPE_torso_oval_chest")
@@ -477,7 +518,7 @@ def test_t7_sibling_message_once_const_driven() -> None:
 
 
 def test_t8_n_parts_schema_mcp() -> None:
-    """T8: n_parts 131; schema 1.4.0; MCP 46."""
+    """T8: n_parts 131; schema 1.4.0; MCP 47 stay."""
     pkg = _product_pkg()
     assert len(pkg.parts) == 131
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
@@ -487,59 +528,36 @@ def test_t8_n_parts_schema_mcp() -> None:
 
 def test_t9_dual_y_equal_neighbors_hold(monkeypatch: pytest.MonkeyPatch) -> None:
     """T9: L/R same Y; chest / delt / clavicle Y hold vs pre-sit."""
-    orig = blockout_recipe_mod._apply_breast_sit_on_chest
-    bag: dict[str, list[float]] = {}
-
-    def _wrap(parts: list[RecipePart], messages: list[str]) -> None:
-        def _y(name_token: str) -> list[float]:
-            out: list[float] = []
-            for p in parts:
-                if name_token not in p.name:
-                    continue
-                if p.center is not None:
-                    out.append(float(p.center[1]))
-                elif p.p0 is not None:
-                    out.append(float(p.p0[1]))
-            return out
-
-        bag["chest"] = _y("torso_oval_chest")
-        bag["delt"] = _y("deltoid_soft")
-        bag["clav"] = _y("clavicle")
-        orig(parts, messages)
-
-    monkeypatch.setattr(blockout_recipe_mod, "_apply_breast_sit_on_chest", _wrap)
+    bag = _capture_pre_sit(monkeypatch)
     pkg_on = _product_pkg()
     breasts = _breasts(pkg_on.parts)
     ys = [float(b.center[1]) for b in breasts if b.center is not None]
     assert len(ys) == 2
     assert ys[0] == pytest.approx(ys[1], abs=1e-12)
-
-    def _y_pkg(pkg, name_token: str) -> list[float]:
-        out: list[float] = []
-        for p in pkg.parts:
-            if name_token not in p.name:
-                continue
-            if p.center is not None:
-                out.append(float(p.center[1]))
-            elif p.p0 is not None:
-                out.append(float(p.p0[1]))
-        return out
-
-    assert _y_pkg(pkg_on, "torso_oval_chest") == pytest.approx(bag["chest"], abs=1e-12)
-    assert _y_pkg(pkg_on, "deltoid_soft") == pytest.approx(bag["delt"], abs=1e-12)
-    assert _y_pkg(pkg_on, "clavicle") == pytest.approx(bag["clav"], abs=1e-12)
+    assert _ys_named(pkg_on, "torso_oval_chest") == pytest.approx(
+        bag["pre_chest_y"],  # type: ignore[arg-type]
+        abs=1e-12,
+    )
+    assert _ys_named(pkg_on, "deltoid_soft") == pytest.approx(
+        bag["pre_delt_y"],  # type: ignore[arg-type]
+        abs=1e-12,
+    )
+    assert _ys_named(pkg_on, "clavicle") == pytest.approx(
+        bag["pre_clav_y"],  # type: ignore[arg-type]
+        abs=1e-12,
+    )
 
 
 def test_t10_const_is_module_attribute_not_in_all() -> None:
-    """T10: import as module attribute (0067 pattern); do not add a lone BREAST_* to __all__."""
+    """T10: bury is a module attribute; do not add a lone BREAST_* to __all__."""
     assert hasattr(blockout_recipe_mod, "BREAST_SIT_CHEST_BURY_M")
     assert "BREAST_SIT_CHEST_BURY_M" not in blockout_recipe_mod.__all__
     breast_exports = [n for n in blockout_recipe_mod.__all__ if n.startswith("BREAST_")]
     assert breast_exports == []
 
 
-def test_t11_compact_still_sits() -> None:
-    """T11: compact still applies sit-on; cull set unchanged; n_parts 94 (hair) / 93 helper."""
+def test_t11_compact_still_contacts() -> None:
+    """T11: compact still applies sit-on; cull set unchanged; n_parts 94 hair / 93 helper."""
     assert "breast_soft" not in COMPACT_CULL_ROLES
     assert "RECIPE_breast_soft_l" not in COMPACT_CULL_NAME_EXACT
     assert not any(p.startswith("RECIPE_breast") for p in COMPACT_CULL_NAME_PREFIXES)
@@ -553,8 +571,9 @@ def test_t11_compact_still_sits() -> None:
         assert b.center is not None and b.ry_m is not None
         rear = float(b.center[1]) + float(b.ry_m)
         assert rear == pytest.approx(chest_front + BREAST_SIT_CHEST_BURY_M, abs=1e-4)
-    # 0085-class + hair=short compact is 94; 0082 helper (no hair) stays 93.
     assert len(pkg.parts) == 94
+    helper = _product_pkg(soft_density="compact", hair="none")
+    assert len(helper.parts) == 93
 
 
 def test_t12_no_chest_oval_quiet_skip() -> None:
@@ -590,11 +609,34 @@ def test_t13_male_pec_skip() -> None:
     assert not any(_SIT_PREFIX in m for m in pkg.messages)
 
 
-def test_t14_b20_b24_band_and_no_extra_parts() -> None:
-    """T14: no breast_pad / lower_pole_soft names (0118: proud band dropped)."""
+def test_t14_b20_b25_no_extra_parts_front_vs_delt() -> None:
+    """T14: B20 names; B25 breast front vs delt front >= 0.10 m more -Y."""
     pkg = _product_pkg()
     joined = " ".join(p.name for p in pkg.parts).lower()
     assert "breast_pad" not in joined
     assert "lower_pole_soft" not in joined
     assert not any("breast_pad" in (p.role or "") for p in pkg.parts)
     assert not any("lower_pole_soft" in (p.role or "") for p in pkg.parts)
+    delts = [p for p in pkg.parts if "deltoid_soft" in p.name]
+    assert delts
+    for b in _breasts(pkg.parts):
+        assert b.center is not None and b.ry_m is not None
+        breast_front = float(b.center[1]) - float(b.ry_m)
+        for d in delts:
+            assert d.center is not None and d.ry_m is not None
+            delt_front = float(d.center[1]) - float(d.ry_m)
+            assert (delt_front - breast_front) >= 0.10
+
+
+def test_t15_inverted_0091_proud_law_must_fail() -> None:
+    """T15: 0091 rear == chest_front - 0.016 must fail under bury law."""
+    pkg = _product_pkg()
+    chest = next(p for p in pkg.parts if p.name == "RECIPE_torso_oval_chest")
+    assert chest.center is not None and chest.ry_m is not None
+    chest_front = float(chest.center[1]) - float(chest.ry_m)
+    for b in _breasts(pkg.parts):
+        assert b.center is not None and b.ry_m is not None
+        rear = float(b.center[1]) + float(b.ry_m)
+        with pytest.raises(AssertionError):
+            assert rear == pytest.approx(chest_front - 0.016, abs=1e-4)
+        assert rear == pytest.approx(chest_front + BREAST_SIT_CHEST_BURY_M, abs=1e-4)

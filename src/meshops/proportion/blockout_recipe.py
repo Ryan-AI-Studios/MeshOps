@@ -28,8 +28,8 @@ schema stay 1.4.0.
 schema stay 1.4.0.
 0085: HEAD_PITCH_DEG extra nod of head+face about post-0050 neck tip; schema stay 1.4.0.
 0086: NECK_NAPE_SETBACK_M +Y of post-0085 neck+head stack (before 0059 base); schema stay 1.4.0.
-0091: BREAST_SIT_PROUD_OF_CHEST_FRONT_M -Y sit of dual breast_soft vs 0090 chest front
-(after 0067 / before 0049 hang); schema stay 1.4.0.
+0118: BREAST_SIT_CHEST_BURY_M +Y bury of dual breast_soft into 0090 chest front
+(after 0067 / before 0049 hang; retires 0091 proud air-gap); schema stay 1.4.0.
 0059: neck diameter ceiling 0.40*head.rx + base soft ellipsoid + SCM r from neck.r;
 schema stay 1.4.0.
 0052: glute_soft seat mass (ry floor + rear +Y) before 0036 outer align; schema stay 1.4.0.
@@ -232,7 +232,8 @@ BREAST_STERNUM_CLEARANCE_M: Final[float] = 0.010
 BREAST_X_SHOULDER_FLOOR_FRAC: Final[float] = 0.25
 BREAST_X_SHOULDER_MAX_FRAC: Final[float] = 0.45
 BREAST_ATTACH_Y_SCALE: Final[float] = 1.0  # B12 — do not re-anchor Y to chest
-BREAST_SIT_PROUD_OF_CHEST_FRONT_M: Final[float] = 0.016  # 0091 B1 — -Y vs 0090 chest front
+BREAST_SIT_CHEST_BURY_M: Final[float] = 0.004  # 0118 B1 — +Y into 0090 chest front
+# Distinct from retired BREAST_SIT_PROUD_OF_CHEST_FRONT_M (0091 air gap).
 # Distinct from BREAST_ATTACH_Y_SCALE (0067 T12 — lower-pole must not change Y).
 # 0050 B1/B5: neck column forward tilt about +X (tip -Y) + radius ceiling vs head.rx.
 NECK_FORWARD_TILT_DEG: Final[float] = 12.0
@@ -4620,7 +4621,7 @@ def build_blockout_recipe(
     # 0067 B4: athletic tear + sternum on dual breast_soft (before hang Z / tilt)
     _apply_breast_lower_pole_athletic(parts, report, resolved, template_applied, messages)
 
-    # 0091: sit dual breast_soft rear proud of 0090 chest front (before hang Z)
+    # 0118: sit dual breast_soft rear bury into 0090 chest front (before hang Z)
     _apply_breast_sit_on_chest(parts, messages)
 
     # 0049 B4: drop breast_soft center Z for readable hang (before 0033 tilt)
@@ -6156,12 +6157,13 @@ def _apply_breast_lower_pole_athletic(
 
 
 def _apply_breast_sit_on_chest(parts: list[RecipePart], messages: list[str]) -> None:
-    """0091: sit dual breast_soft rear proud of torso_oval_chest front (before hang Z).
+    """0118: sit dual breast_soft rear bury into torso_oval_chest front (before hang Z).
 
     Axis-aligned. Dual lock same Y. Quiet skip when <2 breasts or no chest oval.
+    Bury 0.0 is a kiss (agy m-01 / B26) — skip only non-finite bury.
     """
-    proud = BREAST_SIT_PROUD_OF_CHEST_FRONT_M
-    if not math.isfinite(proud) or abs(proud) <= 1e-15:
+    bury = BREAST_SIT_CHEST_BURY_M
+    if not math.isfinite(bury):
         return
 
     chest = next(
@@ -6208,7 +6210,7 @@ def _apply_breast_sit_on_chest(parts: list[RecipePart], messages: list[str]) -> 
         assert ry_i is not None
         rys.append(float(ry_i))
     mean_ry = sum(rys) / float(len(rys))
-    target_rear = chest_front - proud
+    target_rear = chest_front + bury
     target_cy = target_rear - mean_ry
 
     for i in idxs:
@@ -6220,7 +6222,7 @@ def _apply_breast_sit_on_chest(parts: list[RecipePart], messages: list[str]) -> 
 
     messages.append("breast_sit_on_chest_applied: true")
     messages.append(
-        f"breast sit-on chest: proud={proud} rear={target_rear} "
+        f"breast sit-on chest: bury={bury} rear={target_rear} "
         f"center_y={target_cy} chest_front={chest_front}"
     )
 
