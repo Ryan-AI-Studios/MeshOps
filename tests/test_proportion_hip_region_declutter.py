@@ -262,12 +262,12 @@ def _apply_seat(
 
 
 def test_t0_constants_frozen() -> None:
-    """T0: floor/cap freezes + hip_soft axes fence 0069."""
+    """T0: floor/cap freezes + hip_soft axes fence 0106 (was 0069 0.88/0.70)."""
     assert GLUTE_RX_LAT_FLOOR_FRAC_HIP_HW == 0.40
     assert GLUTE_RX_LAT_CAP_FRAC_HIP_HW == 0.50
     assert HIP_SOFT_RX_SCALE == 1.15
-    assert HIP_SOFT_RY_FRAC_RX == 0.88
-    assert HIP_SOFT_RZ_FRAC_RX == 0.70
+    assert HIP_SOFT_RY_FRAC_RX == 0.62
+    assert HIP_SOFT_RZ_FRAC_RX == 1.00
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
 
 

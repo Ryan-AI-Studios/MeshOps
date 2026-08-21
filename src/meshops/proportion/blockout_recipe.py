@@ -180,11 +180,15 @@ MID_BACK_BELOW_SCAP_M: Final[float] = 0.008
 # (isotropic RECIPE_prox_soft_thigh_* replaced by anisotropic RECIPE_hip_soft_*).
 THIGH_PROX_SOFT_SCALE: Final[float] = 1.18
 # 0069 B1-B6: anisotropic hip soft at joint (replaces prox_soft sphere emit)
+# 0106: leftover 0069 squat bead (ry 0.88 / rz 0.70 / drop 0.010xH) still a third
+# AP ball on the hip plate. Invert to a lateral trochanter cap (rz 1.00) +
+# flatten depth (ry 0.62) + extra Z drop (0.022xH). Fail rz>=1.18 (femur
+# sausage) / drop>=0.040 (glute swallow). Keep rx 1.15 / Y rear 0.12 / joint X.
 HIP_SOFT_RX_SCALE: Final[float] = 1.15
-HIP_SOFT_RY_FRAC_RX: Final[float] = 0.88
-HIP_SOFT_RZ_FRAC_RX: Final[float] = 0.70
+HIP_SOFT_RY_FRAC_RX: Final[float] = 0.62  # was 0.88 (0069); AP flatten
+HIP_SOFT_RZ_FRAC_RX: Final[float] = 1.00  # was 0.70 (0069 squat); vertical oval = rx
 HIP_SOFT_CENTER: Final[str] = "hip_joint"
-HIP_SOFT_Z_DROP_FRAC_H: Final[float] = 0.010
+HIP_SOFT_Z_DROP_FRAC_H: Final[float] = 0.022  # was 0.010 (0069)
 HIP_SOFT_Y_REAR_FRAC_RX: Final[float] = 0.12
 _HIP_SOFT_R_FLOOR: Final[float] = 1e-4
 # 0070 B1-B3: thigh shaft prox > distal taper (two capsules; no dual-radius schema).
@@ -3524,7 +3528,7 @@ def _append_all_hip_softs(
     height_m: float | None,
     messages: list[str],
 ) -> None:
-    """0069: one anisotropic trochanter soft per side at hip joint; past thigh cap."""
+    """0069 + 0106: anisotropic trochanter cap per side at hip joint; past thigh cap."""
     for side in ("l", "r"):
         thigh = next(
             (p for p in parts if p.name == f"RECIPE_limb_thigh_{side}"),

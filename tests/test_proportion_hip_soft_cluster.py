@@ -175,7 +175,7 @@ def test_t1_hip_soft_present_no_prox_soft() -> None:
 
 
 def test_t2_anisotropic_axes() -> None:
-    """T2: ry < rx and rz < rx (de-sphere)."""
+    """T2: ry < rx (AP flatten; rz may equal rx (0106))."""
     report = _limb_mass_report()
     pkg = build_blockout_recipe(report, limbs=True)
     by_name = {p.name: p for p in pkg.parts}
@@ -183,7 +183,6 @@ def test_t2_anisotropic_axes() -> None:
         soft = by_name[f"RECIPE_hip_soft_{side}"]
         assert soft.rx_m is not None and soft.ry_m is not None and soft.rz_m is not None
         assert float(soft.ry_m) < float(soft.rx_m)
-        assert float(soft.rz_m) < float(soft.rx_m)
         assert float(soft.ry_m) == pytest.approx(float(soft.rx_m) * HIP_SOFT_RY_FRAC_RX, abs=1e-9)
         assert float(soft.rz_m) == pytest.approx(float(soft.rx_m) * HIP_SOFT_RZ_FRAC_RX, abs=1e-9)
 
