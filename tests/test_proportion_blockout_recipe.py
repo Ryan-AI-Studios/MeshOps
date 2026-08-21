@@ -1028,11 +1028,10 @@ def test_recipe__t4_thigh_prox_soft_emit() -> None:
         if h is not None:
             expected_cz = float(thigh.p0[2]) - HIP_SOFT_Z_DROP_FRAC_H * h
             assert float(soft.center[2]) == pytest.approx(expected_cz, abs=1e-9)
-        # past-cap: soft rx > prox shaft r (anisotropic, not sphere)
+        # past-cap: soft rx > prox shaft r (AP flatten; rz may equal rx after 0106)
         assert float(soft.rx_m) > float(thigh.radius_m)
         assert soft.ry_m is not None and soft.rz_m is not None
         assert float(soft.ry_m) < float(soft.rx_m)
-        assert float(soft.rz_m) < float(soft.rx_m)
         assert any(f"hip_soft_{side}: rx=" in m for m in pkg.messages)
     assert "RECIPE_prox_soft_thigh_l" not in by_name
     assert "RECIPE_prox_soft_thigh_r" not in by_name
