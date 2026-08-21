@@ -1,7 +1,7 @@
 """Track 0101 - heel/ankle product-hw fixture hygiene.
 
 Authoring honesty only (Difficulty §12 / N6 / RECIPE_HONESTY).
-Fixture retarget is not mesh/print success. Schema 1.4.0 / MCP 46 stay.
+Fixture retarget is not mesh/print success. Schema 1.4.0 / MCP 47 stay.
 """
 
 from __future__ import annotations
@@ -127,15 +127,15 @@ def test_t5_thin_product_hw_held() -> None:
 
 
 def test_t6_0097_hierarchy_held() -> None:
-    """T6: 0097 ank 1.00 / bias 0.14 / arch 0.26 / ball 0.24 / tip 1.00 hold."""
-    assert ANK_RY_FRAC_HALF_W == 1.00
+    """T6: 0108 ank 0.78 / bias 0.14 / arch 0.18 / ball 0.16 / tip 0.78 hold."""
+    assert ANK_RY_FRAC_HALF_W == 0.78
     assert HEEL_REAR_Y_BIAS_FRAC_DEPTH == 0.14
-    assert ARCH_SOFT_RY_FRAC_HALF_DEPTH == 0.26
-    assert BALL_SOFT_RY_FRAC_HALF_DEPTH == 0.24
-    assert TOE_TIP_PAD_SCALE == 1.00
+    assert ARCH_SOFT_RY_FRAC_HALF_DEPTH == 0.18
+    assert BALL_SOFT_RY_FRAC_HALF_DEPTH == 0.16
+    assert TOE_TIP_PAD_SCALE == 0.78
 
 
 def test_t7_schema_mcp_held() -> None:
-    """T7: schema 1.4.0 / MCP 46 / no src emit change in this track."""
+    """T7: schema 1.4.0 / MCP 47 / no src emit change in this track."""
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
     assert len(TOOL_NAMES) == 47

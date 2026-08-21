@@ -1,7 +1,7 @@
 """Track 0097 — foot stack hierarchy (sole owns stack after 0080).
 
 Authoring honesty only (Difficulty §12 / N6 / RECIPE_HONESTY).
-Schema 1.4.0 / MCP 46 stay. Not mesh/print success. Not boots / 0098 scale.
+Schema 1.4.0 / MCP 47 stay. Not mesh/print success. Not boots / 0098 scale.
 """
 
 from __future__ import annotations
@@ -309,22 +309,22 @@ def _product_pkg():
 
 def test_t0_const_freezes() -> None:
     """T0: B1-B5 + B4b bands; hold 0076 floors / rz / 0072 heel_ry / overhang / contact."""
-    assert ANK_RY_FRAC_HALF_W == 1.00
+    assert ANK_RY_FRAC_HALF_W == 0.78
     assert HEEL_REAR_Y_BIAS_FRAC_DEPTH == 0.14
-    assert ARCH_SOFT_RY_FRAC_HALF_DEPTH == 0.26
-    assert BALL_SOFT_RY_FRAC_HALF_DEPTH == 0.24
-    assert _BALL_SOFT_R_FRAC_FOOT == 0.10
-    assert TOE_TIP_PAD_SCALE == 1.00
+    assert ARCH_SOFT_RY_FRAC_HALF_DEPTH == 0.18
+    assert BALL_SOFT_RY_FRAC_HALF_DEPTH == 0.16
+    assert _BALL_SOFT_R_FRAC_FOOT == 0.06
+    assert TOE_TIP_PAD_SCALE == 0.78
     assert ANK_RY_FLOOR_M == 0.030
     assert ANK_RZ_FRAC_HALF_W == 1.80
     assert HEEL_RY_MIN_FRAC_DEPTH == 0.30
     assert HEEL_REAR_OVERHANG_M == 0.012
     assert HEEL_CONTACT_OVERLAP_TARGET_M == 0.005
-    assert 0.90 <= ANK_RY_FRAC_HALF_W <= 1.08
+    assert 0.72 <= ANK_RY_FRAC_HALF_W <= 0.86
     assert 0.12 <= HEEL_REAR_Y_BIAS_FRAC_DEPTH <= 0.16
-    assert 0.22 <= ARCH_SOFT_RY_FRAC_HALF_DEPTH <= 0.30
-    assert 0.20 <= BALL_SOFT_RY_FRAC_HALF_DEPTH <= 0.28
-    assert 0.08 <= _BALL_SOFT_R_FRAC_FOOT <= 0.11
+    assert 0.14 <= ARCH_SOFT_RY_FRAC_HALF_DEPTH <= 0.20
+    assert 0.14 <= BALL_SOFT_RY_FRAC_HALF_DEPTH <= 0.18
+    assert 0.05 <= _BALL_SOFT_R_FRAC_FOOT <= 0.07
     assert ANK_RY_FRAC_HALF_W < 1.15
 
 
@@ -349,7 +349,7 @@ def test_t1_product_class_parts_present() -> None:
 
 
 def test_t2_product_hw_ank_ry_equals_rx() -> None:
-    """T2: 0098-class hw 0.04237 — ank.ry == ank.rx * 1.00 and above pea floor."""
+    """T2: 0098-class hw 0.04237 — ank.ry == ank.rx * 0.78 (0108) and above pea floor."""
     report = _product_feet_report(half_width_m=_PRODUCT_HW_0098_M)
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     for side in ("l", "r"):
@@ -381,7 +381,7 @@ def test_t3_heel_rear_past_and_dy() -> None:
 
 
 def test_t4_arch_ball_frac_wins() -> None:
-    """T4: arch.ry == 0.26*hd; B4b fl_term < 0.24*hd so ball.ry is frac; rz sole-class."""
+    """T4: arch.ry == ARCH*hd; B4b fl_term < BALL*hd so ball.ry is frac; rz sole-class."""
     report = _product_feet_report(half_width_m=_PRODUCT_HW_0098_M)
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     for side in ("l", "r"):
@@ -403,7 +403,7 @@ def test_t4_arch_ball_frac_wins() -> None:
 
 
 def test_t5_tip_pad_equals_digit() -> None:
-    """T5: tip r == digit r at scale 1.00; 0075 tip_past_ball fence holds."""
+    """T5: tip.rx == TOE_TIP_PAD_SCALE * r_i (rx only); 0075 tip_past_ball fence holds."""
     report = _product_feet_report(half_width_m=_PRODUCT_HW_0098_M)
     pkg = build_blockout_recipe(report, limbs=False, feet=True, toes="full")
     plate = _plate(pkg.parts)
@@ -447,7 +447,7 @@ def test_t6_sibling_after_both() -> None:
 
 
 def test_t7_n_parts_schema_mcp() -> None:
-    """T7: n_parts 131 via product flags; schema 1.4.0; MCP 46."""
+    """T7: n_parts 131 via product flags; schema 1.4.0; MCP 47."""
     pkg = _product_pkg()
     assert len(pkg.parts) == 131
     assert RECIPE_SCHEMA_VERSION == "1.4.0"

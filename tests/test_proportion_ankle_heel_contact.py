@@ -165,7 +165,7 @@ def _contact_overlap(pkg_parts: list, side: str = "l") -> float:
 
 def test_t0_exports_named_freezes_in_retune_bands() -> None:
     """T0: all ANK_* + HEEL_CONTACT_* exported and in plan §0 retune bands (0076)."""
-    assert 0.90 <= ANK_RY_FRAC_HALF_W <= 1.08
+    assert 0.72 <= ANK_RY_FRAC_HALF_W <= 0.86
     assert 0.028 <= ANK_RY_FLOOR_M <= 0.033
     assert 1.70 <= ANK_RZ_FRAC_HALF_W <= 1.90
     assert 0.042 <= ANK_RZ_FLOOR_M <= 0.046
@@ -173,7 +173,7 @@ def test_t0_exports_named_freezes_in_retune_bands() -> None:
     assert 0.55 <= ANK_RZ_MAX_FRAC_ANK_Z <= 0.65
     assert 0.003 <= HEEL_CONTACT_OVERLAP_TARGET_M <= 0.010
     # Exact defaults from plan freezes (0076 anti-ball / mild column)
-    assert pytest.approx(1.00) == ANK_RY_FRAC_HALF_W
+    assert pytest.approx(0.78) == ANK_RY_FRAC_HALF_W
     assert pytest.approx(0.030) == ANK_RY_FLOOR_M
     assert pytest.approx(1.80) == ANK_RZ_FRAC_HALF_W
     assert pytest.approx(0.044) == ANK_RZ_FLOOR_M
@@ -221,7 +221,7 @@ def test_t3_product_ank_ry_frac_wins() -> None:
     frac_ry = ANK_RY_FRAC_HALF_W * float(ank.rx_m)
     assert float(ank.ry_m) >= frac_ry - EPS
     assert float(ank.rx_m) == pytest.approx(0.04237, abs=1e-4)
-    assert float(ank.ry_m) == pytest.approx(0.04237, abs=1e-4)
+    assert float(ank.ry_m) == pytest.approx(0.04237 * ANK_RY_FRAC_HALF_W, abs=1e-4)
     assert frac_ry > ANK_RY_FLOOR_M
     assert float(ank.ry_m) > ANK_RY_FLOOR_M + EPS or abs(float(ank.ry_m) - frac_ry) < 1e-5
 

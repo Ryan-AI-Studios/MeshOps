@@ -1036,8 +1036,8 @@ def test_ext__build_foot_parts_existing_parts_calf_floor() -> None:
 
 
 def test_ext__t10_fence_ank_heel_overhang_contact() -> None:
-    """T10: fence ank 1.00 / heel 0.30 / overhang 0.012 / contact 0.005."""
-    assert pytest.approx(1.00) == ANK_RY_FRAC_HALF_W
+    """T10: fence ank 0.78 (0108) / heel 0.30 / overhang 0.012 / contact 0.005."""
+    assert pytest.approx(0.78) == ANK_RY_FRAC_HALF_W
     assert pytest.approx(0.30) == HEEL_RY_MIN_FRAC_DEPTH
     assert pytest.approx(0.012) == HEEL_REAR_OVERHANG_M
     assert pytest.approx(0.005) == HEEL_CONTACT_OVERLAP_TARGET_M

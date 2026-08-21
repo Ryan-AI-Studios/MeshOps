@@ -8,6 +8,8 @@ All names stay RECIPE_* (never HAND_*/FOOT_*/DIGIT_* prefixes).
 Ankle mass labels must contain ank_foot (classifier -> ankle_bridge).
 0097: ank AP flatten + heel rear seat + sole pads recede.
 0098: stature 0.150 + calf_diam 4.2 scale plus (not boots / width-frac reopen).
+0108: leftover 0097 sphere + mitt — ank column 0.78, recede arch/ball,
+nest 0.52, tip 0.78 / tip_ry 0.55 (not boots / 0098 reopen).
 """
 
 from __future__ import annotations
@@ -79,20 +81,21 @@ TOE_R_CAP_FRAC_HALF_W: Final[float] = 0.45
 TOE_BIG_SCALE: Final[float] = 1.20
 TOE_FULL_LEN_FRAC: Final[float] = 0.16  # 0072 B5 (was 0.26 stick-class)
 TOE_BASE_NEST_FRAC: Final[float] = 0.35  # 0072 B6 nest INTO plate (+Y from front)
-TOE_BALL_NEST_FRAC: Final[float] = 0.40  # 0075 B1 nest INTO ball (+Y from ball front)
+TOE_BALL_NEST_FRAC: Final[float] = 0.52  # 0108 B4 (was 0.40); fail ≤0.40 mitt
 TOE_TIP_PAST_FRAC: Final[float] = 0.55  # 0075 B3 (was 0.90 stick-class past plate)
 TOE_TIP_MAX_PAST_M: Final[float] = 0.024  # 0075 B3 plate absolute tip budget (was 0.038)
 TOE_TIP_MAX_PAST_FRAC: Final[float] = 0.12  # 0075 B3 plate proportional tip budget (was 0.15)
 TOE_TIP_MAX_PAST_BALL_M: Final[float] = 0.028  # 0075 B2 ball absolute tip budget
 TOE_TIP_MAX_PAST_BALL_FRAC: Final[float] = 0.12  # 0075 B2 ball proportional tip budget
-TOE_TIP_PAD_SCALE: Final[float] = 1.00  # 0097 B5 (was 1.15 / 0075)
+TOE_TIP_PAD_SCALE: Final[float] = 0.78  # 0108 B5 (was 1.00); fail ≥0.95 balls
+TOE_TIP_PAD_RY_FRAC: Final[float] = 0.55  # 0108 B5b AP flatten (was ry=rx); fail ≥0.80
 TOE_SPLAY_FRAC_HALF_W: Final[float] = 1.25
 TOE_MIN_CENTER_SPACING_VS_R: Final[float] = 1.0  # soft B15
 TOE_WEDGE_RZ_FRAC_SOLE: Final[float] = 0.85
-_BALL_SOFT_R_FRAC_FOOT: Final[float] = 0.10  # 0097 B4b (was 0.14); keep 1.1 so 0.24*hd wins
-BALL_SOFT_RY_FRAC_HALF_DEPTH: Final[float] = 0.24  # 0097 B4 (was 0.32 / 0072)
+_BALL_SOFT_R_FRAC_FOOT: Final[float] = 0.06  # 0108 B3b (was 0.10); keep 1.1 so 0.16*hd wins
+BALL_SOFT_RY_FRAC_HALF_DEPTH: Final[float] = 0.16  # 0108 B3 (was 0.24); fail ≥0.22
 # 0044 / 0072 arch pad (was bare half_depth * 0.38)
-ARCH_SOFT_RY_FRAC_HALF_DEPTH: Final[float] = 0.26  # 0097 B3
+ARCH_SOFT_RY_FRAC_HALF_DEPTH: Final[float] = 0.18  # 0108 B2 (was 0.26); fail ≥0.24 sphere
 # Rounded sole: ellipsoid foot_plate (not world-axis square box).
 # Heel min-floor inside max(...) — rear pad primary (0044 B6-B8), not tower.
 _HEEL_R_FRAC_FOOT: Final[float] = 0.18
@@ -114,7 +117,7 @@ HEEL_RY_MIN_FRAC_DEPTH: Final[float] = 0.30  # 0072 B1 (was 0.42)
 HEEL_RY_MIN_VS_RZ_FRAC: Final[float] = 0.70  # 0072 B1c (was bare 0.70)
 HEEL_RY_MAX_FRAC_HALF_DEPTH: Final[float] = 0.34  # 0072 B11 composition accept
 # 0056 ank/heel contact mass freezes (B1-B7, B13) + 0076 anti-ball / mild column
-ANK_RY_FRAC_HALF_W: Final[float] = 1.00  # 0097 B1 AP flatten (was 1.22 / 0076)
+ANK_RY_FRAC_HALF_W: Final[float] = 0.78  # 0108 B1 (was 1.00); fail ≥0.92 bead
 ANK_RY_FLOOR_M: Final[float] = 0.030  # 0076 B1 (was 0.036; product frac wins)
 ANK_RZ_FRAC_HALF_W: Final[float] = 1.80  # 0076 B2 mild column (was 2.00)
 ANK_RZ_FLOOR_M: Final[float] = 0.044  # 0076 B2 (was 0.048; product frac wins)
@@ -681,6 +684,12 @@ def build_foot_parts(
             f"ball={BALL_SOFT_RY_FRAC_HALF_DEPTH} "
             f"tip={TOE_TIP_PAD_SCALE}"
         )
+        msgs.append(
+            f"foot sphere stack polish: ank_ry={ANK_RY_FRAC_HALF_W} "
+            f"nest={TOE_BALL_NEST_FRAC} "
+            f"tip={TOE_TIP_PAD_SCALE} "
+            f"tip_ry={TOE_TIP_PAD_RY_FRAC}"
+        )
     # 0098 B12: sibling once after both L/R length visual floor lines (const-driven).
     if any(m.startswith("foot_l: length visual floor") for m in msgs) and any(
         m.startswith("foot_r: length visual floor") for m in msgs
@@ -1071,7 +1080,8 @@ def _build_foot_side(
         )
         # B5: tip pad mass — sole-class ellipsoid at capsule tip (no dual-radius schema)
         r_pad = TOE_TIP_PAD_SCALE * r_i
-        r_pad = min(r_pad, TOE_R_CAP_FRAC_HALF_W * half_width)  # AI2 P3-6
+        r_pad = min(r_pad, TOE_R_CAP_FRAC_HALF_W * half_width)  # AI2 P3-6; cap clamp retained
+        ry_pad = TOE_TIP_PAD_RY_FRAC * r_pad
         rz_pad = min(r_pad, max(sole_rz * 0.85, r_i))
         out.append(
             _ellipsoid(
@@ -1079,7 +1089,7 @@ def _build_foot_side(
                 "toe_soft",
                 [plate_x + dx, tip_y, tip_z],
                 r_pad,
-                r_pad,
+                ry_pad,
                 rz_pad,
                 parent_joint=pj_toe,
             )
@@ -1426,6 +1436,7 @@ __all__ = [
     "TOE_TIP_MAX_PAST_BALL_M",
     "TOE_TIP_MAX_PAST_FRAC",
     "TOE_TIP_MAX_PAST_M",
+    "TOE_TIP_PAD_RY_FRAC",
     "TOE_TIP_PAD_SCALE",
     "TOE_TIP_PAST_FRAC",
     "TOE_WEDGE_RZ_FRAC_SOLE",
