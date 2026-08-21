@@ -68,4 +68,10 @@ Remake only when emit moved. Hygiene / CLI / docs / skill tracks are tests (and 
 
 MeshOps SoT is the CLI recipe loop → `setup_blockout_recipe.py` → `meshops proportion blockout-open-setup`. build_and_render.py is work/-only — not a product verb (track 0111). Job-local `render_d7.py` is OK for isolated D7 under that remake. Do not copy `template_applied.json` into a remake so validate will run (0109 skips missing). RECIPE ≠ print success (N6).
 
+### Post-nofuse sculpt (blockout)
+
+Stop RECIPE oval thrash after form lock.
+
+Handoff is `--nofuse` lock then `--join-ready` then `blockout-fuse-plan`. Voxel remesh is opt-in authoring weld — not a repair default (N1). 1 island is not print success (N6).
+
 Blender manual epub under `docs/blender_manual_v520_en.epub` is reference only.
