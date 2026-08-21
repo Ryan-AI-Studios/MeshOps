@@ -16,6 +16,8 @@ from meshops.proportion.face_recipe import (
     JAW_X_BULGE_ALLOW_M,
     JAW_Y_BIAS_FRAC_RY,
     JAW_Z_CENTER_FRAC_H,
+    LIP_RY_FRAC_H,
+    LIP_RZ_FRAC_H,
     HeadBounds,
     build_face_parts,
 )
@@ -193,12 +195,11 @@ def test_jaw_lip_pad__t_lip_thinner() -> None:
     lip = _lip_part(parts)
     h = bounds.H
     assert lip.ry_m is not None and lip.rz_m is not None and lip.rx_m is not None
-    assert float(lip.ry_m) <= 0.025 * h + 1e-9
-    assert float(lip.rz_m) <= 0.020 * h + 1e-9
+    assert float(lip.ry_m) <= 0.032 * h + 1e-9
+    assert float(lip.rz_m) <= 0.024 * h + 1e-9
     assert float(lip.rx_m) <= 0.105 * h + 1e-9
-    # Exact freezes
-    assert float(lip.ry_m) == pytest.approx(0.022 * h, abs=1e-6)
-    assert float(lip.rz_m) == pytest.approx(0.016 * h, abs=1e-6)
+    assert float(lip.ry_m) == pytest.approx(LIP_RY_FRAC_H * h, abs=1e-6)
+    assert float(lip.rz_m) == pytest.approx(LIP_RZ_FRAC_H * h, abs=1e-6)
     assert float(lip.rx_m) == pytest.approx(0.10 * h, abs=1e-6)
 
 

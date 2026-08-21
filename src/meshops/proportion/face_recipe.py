@@ -4,6 +4,8 @@ Opt-in blockout-grade face kit parented to head/neck skeleton or Loomis placemen
 Authoring only - not identity biometrics, not print success (Difficulty §12 / N6).
 0085: orbital scale EYE_RADIUS_FRAC_H 0.11 + EYE_RZ 0.58 + lip Z 0.24 (pitch lives
 in blockout_recipe HEAD_PITCH_DEG).
+0102: leftover 0085 goggle + pin lip — EYE_RY 0.62 / lip Z 0.28 / lip 0.028/0.020
+/ cheek mix 0.30 (keep radius 0.11 / RZ 0.58 / pitch 6 / 0078 jaw).
 
 All names stay RECIPE_* (never FACE_*/HAIR_*/NECKLINE_* prefixes).
 """
@@ -35,7 +37,7 @@ FACE_KIT_SKIP_BOUNDS: Final[str] = "face kit skipped — chin/top bounds unresol
 _EYE_Z_FRAC: Final[float] = 0.50
 _BROW_Z_FRAC: Final[float] = 0.67
 _NOSE_BASE_Z_FRAC: Final[float] = 0.33
-_LIP_Z_FRAC: Final[float] = 0.24  # 0085 B3 (was 0.20) — mouth shelf above chin
+_LIP_Z_FRAC: Final[float] = 0.28  # 0102 B3 (was 0085 0.24); fail ≥0.33 nose / ≤0.24 nested
 # 0085 B1: promote private 0.08 pin-dot → public orbital pad
 EYE_RADIUS_FRAC_H: Final[float] = 0.11
 # 0055 jaw soft mass ellipsoid; 0057 chin-strap polish (public; use HeadBounds.H for Z fracs)
@@ -52,7 +54,7 @@ _JAW_FACE_Y_FRAC_RY: Final[float] = 0.40
 # Near-surface plane so eye/brow/lip/cheek read on solid workbench multi-view.
 FEATURE_FACE_Y_FRAC_RY: Final[float] = 0.90
 EYE_RX_FRAC_R: Final[float] = 1.00  # stay
-EYE_RY_FRAC_R: Final[float] = 0.95  # 0058 stay
+EYE_RY_FRAC_R: Final[float] = 0.62  # 0102 B1 AP shelf (was 0.95); fail ≥0.85 ball
 EYE_RZ_FRAC_R: Final[float] = 0.58  # 0085 B2 (was 0.45) — pad height, not slit
 
 NOSE_RX_FRAC_H: Final[float] = 0.045
@@ -64,17 +66,17 @@ NOSE_RZ_FRAC_H: Final[float] = 0.040
 NOSE_TIP_Y_FRAC_RY: Final[float] = 0.98
 
 LIP_RX_FRAC_H: Final[float] = 0.10  # was 0.12 — 0078 pad thin
-LIP_RY_FRAC_H: Final[float] = 0.022  # was 0.035 — 0078 pad thin
-LIP_RZ_FRAC_H: Final[float] = 0.016  # was 0.025 — 0078 pad thin
+LIP_RY_FRAC_H: Final[float] = 0.028  # 0102 B4 shelf (was 0.022); fail ≥0.035 sausage
+LIP_RZ_FRAC_H: Final[float] = 0.020  # 0102 B5 bar (was 0.016); fail ≥0.025 sausage
 
 BROW_R_FRAC_H: Final[float] = 0.028  # was 0.015
 BROW_HALF_LEN_FRAC_EYE_R: Final[float] = 1.1  # stay
 
 CHEEK_RX_FRAC_HEAD_RX: Final[float] = 0.28
-CHEEK_RY_FRAC_HEAD_RY: Final[float] = 0.22
-CHEEK_RZ_FRAC_H: Final[float] = 0.06
+CHEEK_RY_FRAC_HEAD_RY: Final[float] = 0.14  # 0102 B6c (was 0.22); fail ≥0.20 second ball
+CHEEK_RZ_FRAC_H: Final[float] = 0.045  # 0102 B6b (was 0.06); fail ≥0.06 second lid
 CHEEK_X_FRAC_HEAD_RX: Final[float] = 0.55
-CHEEK_Z_MIX: Final[float] = 0.50  # blend eye_z ↔ nose_base_z
+CHEEK_Z_MIX: Final[float] = 0.30  # 0102 B6 malar drop (was 0.50); fail ≥0.45 second lid
 CHEEK_Y_BIAS_FRAC_RY: Final[float] = 0.05
 _HAIR_SHORT_RZ_FRAC: Final[float] = 0.25
 _BUN_R_FRAC_H: Final[float] = 0.12
@@ -545,6 +547,11 @@ def _build_face_features(
         )
     messages.append(
         f"face: cheek soft pads present L/R rx={cheek_rx:.4f} ry={cheek_ry:.4f} rz={cheek_rz:.4f}"
+    )
+    messages.append(
+        "face orbital lip defaults: "
+        f"eye_ry={EYE_RY_FRAC_R} lip_z={_LIP_Z_FRAC} "
+        f"lip_ry={LIP_RY_FRAC_H} cheek_mix={CHEEK_Z_MIX}"
     )
 
     return parts

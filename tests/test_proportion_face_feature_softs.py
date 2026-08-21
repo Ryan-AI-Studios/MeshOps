@@ -223,7 +223,7 @@ _PUBLIC_FEATURE_CONSTS: tuple[str, ...] = (
 def test_feature_softs__t0_constants_and_all() -> None:
     """T0: Constants match freezes; all public names in face_recipe.__all__."""
     assert pytest.approx(1.00) == EYE_RX_FRAC_R
-    assert pytest.approx(0.95) == EYE_RY_FRAC_R  # B15 D7 left pad (was 0.85)
+    assert pytest.approx(0.62) == EYE_RY_FRAC_R  # 0102 B1 (was 0.95)
     assert pytest.approx(0.11) == EYE_RADIUS_FRAC_H  # 0085 B1 (was private 0.08)
     assert pytest.approx(0.58) == EYE_RZ_FRAC_R  # 0085 B2 (was 0.45)
     assert pytest.approx(0.90) == FEATURE_FACE_Y_FRAC_RY  # D7 near-surface plane
@@ -232,30 +232,34 @@ def test_feature_softs__t0_constants_and_all() -> None:
     assert pytest.approx(0.040) == NOSE_RZ_FRAC_H
     assert pytest.approx(0.98) == NOSE_TIP_Y_FRAC_RY  # surface-readable tip (was 0.15 embed)
     assert pytest.approx(0.10) == LIP_RX_FRAC_H
-    assert pytest.approx(0.022) == LIP_RY_FRAC_H
-    assert pytest.approx(0.016) == LIP_RZ_FRAC_H
+    assert pytest.approx(0.028) == LIP_RY_FRAC_H  # 0102 B4 (was 0.022)
+    assert pytest.approx(0.020) == LIP_RZ_FRAC_H  # 0102 B5 (was 0.016)
     assert pytest.approx(0.028) == BROW_R_FRAC_H
     assert pytest.approx(1.1) == BROW_HALF_LEN_FRAC_EYE_R
     assert pytest.approx(0.28) == CHEEK_RX_FRAC_HEAD_RX
-    assert pytest.approx(0.22) == CHEEK_RY_FRAC_HEAD_RY
-    assert pytest.approx(0.06) == CHEEK_RZ_FRAC_H
+    assert pytest.approx(0.14) == CHEEK_RY_FRAC_HEAD_RY  # 0102 B6c (was 0.22)
+    assert pytest.approx(0.045) == CHEEK_RZ_FRAC_H  # 0102 B6b (was 0.06)
     assert pytest.approx(0.55) == CHEEK_X_FRAC_HEAD_RX
-    assert pytest.approx(0.50) == CHEEK_Z_MIX
+    assert pytest.approx(0.30) == CHEEK_Z_MIX  # 0102 B6 (was 0.50)
     assert pytest.approx(0.05) == CHEEK_Y_BIAS_FRAC_RY
     for name in _PUBLIC_FEATURE_CONSTS:
         assert name in face_recipe_mod.__all__, f"{name} missing from __all__"
 
 
 def test_feature_softs__t1_eye_product_like_h() -> None:
-    """T1: Eye product-like H: ry ≥ rz; ry/rz ≥ 1.2."""
+    """T1: Eye product-like H: ry >= rz; ry < rx (0102 shelf)."""
     report = _full_torso_report()
     pkg = build_blockout_recipe(report, limbs=False, face=True)
     eyes = [p for p in pkg.parts if p.role == "eye_soft"]
     assert len(eyes) == 2
     for eye in eyes:
         assert eye.ry_m is not None and eye.rz_m is not None
+        assert eye.rx_m is not None
         assert float(eye.ry_m) >= float(eye.rz_m)
-        assert float(eye.ry_m) / float(eye.rz_m) >= 1.2
+        assert float(eye.ry_m) < float(eye.rx_m)
+        assert float(eye.ry_m) / float(eye.rz_m) == pytest.approx(
+            EYE_RY_FRAC_R / EYE_RZ_FRAC_R, abs=1e-6
+        )
 
 
 def test_feature_softs__t2_nose_ellipsoid() -> None:
@@ -340,11 +344,11 @@ def test_feature_softs__t6_jaw_freezes_untouched() -> None:
 
 
 def test_feature_softs__t7_loomis_z_private() -> None:
-    """T7: Loomis Z private fracs still 0.50/0.67/0.33; lip shelf 0.24 (0085)."""
+    """T7: Loomis Z private fracs still 0.50/0.67/0.33; lip shelf 0.28 (0102)."""
     assert pytest.approx(0.50) == face_recipe_mod._EYE_Z_FRAC
     assert pytest.approx(0.67) == face_recipe_mod._BROW_Z_FRAC
     assert pytest.approx(0.33) == face_recipe_mod._NOSE_BASE_Z_FRAC
-    assert pytest.approx(0.24) == face_recipe_mod._LIP_Z_FRAC
+    assert pytest.approx(0.28) == face_recipe_mod._LIP_Z_FRAC
 
 
 def test_feature_softs__t8_messages_feature_softs() -> None:
