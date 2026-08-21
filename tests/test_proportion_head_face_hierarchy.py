@@ -1,7 +1,7 @@
 """Track 0085 — head / face hierarchy (orbital scale + lip Z + pitch).
 
 Authoring honesty only (Difficulty §12 / N6 / RECIPE_HONESTY).
-Schema 1.4.0 / MCP 46 stay. Not photoreal / MediaPipe / chin_soft / 0086 nape.
+Schema 1.4.0 / MCP 47 stay. Not photoreal / MediaPipe / chin_soft / 0086 nape.
 """
 
 from __future__ import annotations
@@ -366,8 +366,8 @@ def test_t0_const_freezes() -> None:
     assert EYE_RADIUS_FRAC_H == 0.11
     assert EYE_RZ_FRAC_R == 0.58
     assert EYE_RX_FRAC_R == 1.00
-    assert EYE_RY_FRAC_R == 0.95
-    assert face_recipe_mod._LIP_Z_FRAC == 0.24
+    assert EYE_RY_FRAC_R == 0.62  # 0102 B1 (was 0.95)
+    assert face_recipe_mod._LIP_Z_FRAC == 0.28  # 0102 B3 (was 0.24)
     assert HEAD_PITCH_DEG == 6.0
     assert FEATURE_FACE_Y_FRAC_RY == 0.90
     assert JAW_RY_FRAC_HEAD_RY == 0.42
@@ -380,7 +380,7 @@ def test_t0_const_freezes() -> None:
     assert HEAD_PITCH_DEG > 0.0
     assert 0.10 <= EYE_RADIUS_FRAC_H <= 0.12
     assert 0.52 <= EYE_RZ_FRAC_R <= 0.62
-    assert 0.22 <= face_recipe_mod._LIP_Z_FRAC <= 0.26
+    assert 0.26 <= face_recipe_mod._LIP_Z_FRAC <= 0.30
     assert 4.0 <= HEAD_PITCH_DEG <= 8.0
     assert HEAD_PITCH_DEG < 12.0
 
@@ -406,7 +406,7 @@ def test_t1_product_class_parts_present() -> None:
 
 
 def test_t2_orbital_scale_and_outer() -> None:
-    """T2: eye.rx == 0.11*H; ry/rz >= 1.2; outer X inside head.rx."""
+    """T2: eye.rx == 0.11*H; ry < rx (0102 shelf); outer X inside head.rx."""
     pkg = _product_pkg()
     head = next(p for p in pkg.parts if p.name == "RECIPE_head")
     eye = next(p for p in pkg.parts if p.name == "RECIPE_eye_soft_l")
@@ -415,12 +415,15 @@ def test_t2_orbital_scale_and_outer() -> None:
     assert eye.center is not None
     h = _head_h(head)
     assert float(eye.rx_m) == pytest.approx(0.11 * h, abs=1e-4)
-    assert float(eye.ry_m) / float(eye.rz_m) >= 1.2
+    assert float(eye.ry_m) < float(eye.rx_m)
+    assert float(eye.ry_m) / float(eye.rz_m) == pytest.approx(
+        EYE_RY_FRAC_R / EYE_RZ_FRAC_R, abs=1e-6
+    )
     assert abs(float(eye.center[0])) + float(eye.rx_m) < float(head.rx_m)
 
 
 def test_t3_lip_shelf_vs_chin_and_nose() -> None:
-    """T3: lip Z = 0.24*H shelf; above leftover 0.20; below nose_base; jaw flush."""
+    """T3: lip Z = _LIP_Z_FRAC*H shelf; above leftover 0.20; below nose_base; jaw flush."""
     bounds = _product_class_bounds()
     parts = build_face_parts(_full_torso_report(), bounds, face=True, messages=[])
     lip = next(p for p in parts if p.name == "RECIPE_lip_soft")
@@ -428,14 +431,14 @@ def test_t3_lip_shelf_vs_chin_and_nose() -> None:
     assert lip.center is not None and jaw.center is not None and jaw.rz_m is not None
     h = bounds.H
     z_chin = bounds.z_chin
-    assert float(lip.center[2]) == pytest.approx(z_chin + 0.24 * h, abs=2e-3)
+    assert float(lip.center[2]) == pytest.approx(z_chin + face_recipe_mod._LIP_Z_FRAC * h, abs=2e-3)
     assert float(lip.center[2]) > z_chin + 0.20 * h
     assert float(lip.center[2]) < z_chin + 0.33 * h
     assert float(jaw.center[2]) - float(jaw.rz_m) == pytest.approx(z_chin, abs=0.002)
 
 
 def test_t3b_product_lip_shelf_survives_pitch() -> None:
-    """T3b: product emit unpitched lip Z still sits on the 0.24 shelf."""
+    """T3b: product emit unpitched lip Z still sits on the 0102 0.28 shelf."""
     pkg = _product_pkg()
     lip = next(p for p in pkg.parts if p.name == "RECIPE_lip_soft")
     jaw = next(p for p in pkg.parts if p.name == "RECIPE_jaw")
@@ -448,7 +451,7 @@ def test_t3b_product_lip_shelf_survives_pitch() -> None:
     jaw_pre = _rotate_yz_about_x(list(jaw.center), pivot, th)
     z_chin = float(jaw_pre[2]) - float(jaw.rz_m)
     h = float(jaw.rz_m) / JAW_RZ_FRAC_H
-    assert float(lip_pre[2]) == pytest.approx(z_chin + 0.24 * h, abs=2e-3)
+    assert float(lip_pre[2]) == pytest.approx(z_chin + face_recipe_mod._LIP_Z_FRAC * h, abs=2e-3)
     assert float(lip_pre[2]) > z_chin + 0.20 * h
     assert float(lip_pre[2]) < z_chin + 0.33 * h
 
@@ -532,7 +535,7 @@ def test_t7_sibling_message_once_const_driven() -> None:
 
 
 def test_t8_n_parts_schema_mcp() -> None:
-    """T8: n_parts 131; schema 1.4.0; MCP 46."""
+    """T8: n_parts 131; schema 1.4.0; MCP 47."""
     pkg = _product_pkg()
     assert len(pkg.parts) == 131
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
