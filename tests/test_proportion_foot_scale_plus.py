@@ -1,7 +1,7 @@
 """Track 0098 — foot full-figure scale plus (stature 0.150 + calf 4.2).
 
 Authoring honesty only (Difficulty §12 / N6 / RECIPE_HONESTY).
-Schema 1.4.0 / MCP 46 stay. Not mesh/print success. Not boots / 0097 reopen.
+Schema 1.4.0 / MCP 47 stay. Not mesh/print success. Not boots / 0097 reopen.
 """
 
 from __future__ import annotations
@@ -351,7 +351,7 @@ def test_t2_product_len_hw_vs_calf() -> None:
 
 
 def test_t3_hierarchy_rear_past_holds() -> None:
-    """T3 B7: heel_rear - ank_rear >= 0.012; ank.ry/rx == 1.00. Do not assert y_ov."""
+    """T3 B7: heel_rear - ank_rear >= 0.012; ank.ry/rx == 0.78 (0108). Do not assert y_ov."""
     pkg = _product_pkg()
     for side in ("l", "r"):
         ank = _ank(pkg.parts, side)
@@ -362,7 +362,7 @@ def test_t3_hierarchy_rear_past_holds() -> None:
         heel_rear = float(heel.center[1]) + float(heel.ry_m)
         ank_rear = float(ank.center[1]) + float(ank.ry_m)
         assert heel_rear - ank_rear >= _REAR_PAST_MIN_M
-        assert float(ank.ry_m) / float(ank.rx_m) == pytest.approx(1.00, abs=1e-4)
+        assert float(ank.ry_m) / float(ank.rx_m) == pytest.approx(ANK_RY_FRAC_HALF_W, abs=1e-4)
 
 
 def test_t4_unit_calf_diam_floor() -> None:
@@ -471,7 +471,7 @@ def test_t8_sibling_after_both_length_lines() -> None:
 
 
 def test_t9_n_parts_schema_mcp() -> None:
-    """T9: n_parts 131; schema 1.4.0; MCP 46."""
+    """T9: n_parts 131; schema 1.4.0; MCP 47."""
     pkg = _product_pkg()
     assert len(pkg.parts) == 131
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
@@ -517,13 +517,13 @@ def test_t10_product_path_constraints() -> None:
 
 
 def test_t11_fence_0097_0072_0056() -> None:
-    """T11: 0097 hierarchy + 0072 heel_ry/overhang + 0056 contact; ball 0.24*hd wins max()."""
-    assert ANK_RY_FRAC_HALF_W == 1.00
+    """T11: 0108 hierarchy + 0072 heel_ry/overhang + 0056 contact; ball BALL*hd wins max()."""
+    assert ANK_RY_FRAC_HALF_W == 0.78
     assert HEEL_REAR_Y_BIAS_FRAC_DEPTH == 0.14
-    assert ARCH_SOFT_RY_FRAC_HALF_DEPTH == 0.26
-    assert BALL_SOFT_RY_FRAC_HALF_DEPTH == 0.24
-    assert _BALL_SOFT_R_FRAC_FOOT == 0.10
-    assert TOE_TIP_PAD_SCALE == 1.00
+    assert ARCH_SOFT_RY_FRAC_HALF_DEPTH == 0.18
+    assert BALL_SOFT_RY_FRAC_HALF_DEPTH == 0.16
+    assert _BALL_SOFT_R_FRAC_FOOT == 0.06
+    assert TOE_TIP_PAD_SCALE == 0.78
     assert HEEL_RY_MIN_FRAC_DEPTH == 0.30
     assert HEEL_REAR_OVERHANG_M == 0.012
     assert HEEL_CONTACT_OVERLAP_TARGET_M == 0.005

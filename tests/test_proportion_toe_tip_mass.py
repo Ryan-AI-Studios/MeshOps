@@ -183,10 +183,10 @@ def _toe_wedge(pkg_parts: list[RecipePart], side: str = "l") -> RecipePart:
 
 def test_t0_public_freezes() -> None:
     """T0: 0075 freezes + retuned plate tip freezes."""
-    assert pytest.approx(0.40) == TOE_BALL_NEST_FRAC
+    assert pytest.approx(0.52) == TOE_BALL_NEST_FRAC
     assert pytest.approx(0.028) == TOE_TIP_MAX_PAST_BALL_M
     assert pytest.approx(0.12) == TOE_TIP_MAX_PAST_BALL_FRAC
-    assert pytest.approx(1.00) == TOE_TIP_PAD_SCALE
+    assert pytest.approx(0.78) == TOE_TIP_PAD_SCALE
     assert pytest.approx(0.55) == TOE_TIP_PAST_FRAC
     assert pytest.approx(0.024) == TOE_TIP_MAX_PAST_M
     assert pytest.approx(0.12) == TOE_TIP_MAX_PAST_FRAC
@@ -400,9 +400,9 @@ def test_t8_0072_heel_and_0056_ank_freezes_unchanged() -> None:
     assert pytest.approx(0.14) == HEEL_REAR_Y_BIAS_FRAC_DEPTH  # 0097 B2 (was 0.10 / 0076)
     assert pytest.approx(0.012) == HEEL_REAR_OVERHANG_M
     assert pytest.approx(0.34) == HEEL_RY_MAX_FRAC_HALF_DEPTH
-    assert pytest.approx(0.24) == BALL_SOFT_RY_FRAC_HALF_DEPTH
+    assert pytest.approx(0.16) == BALL_SOFT_RY_FRAC_HALF_DEPTH
     assert pytest.approx(0.150) == FOOT_LEN_VISUAL_MIN_FRAC_H
-    assert pytest.approx(1.00) == ANK_RY_FRAC_HALF_W  # 0097 B1 (was 1.22 / 0076)
+    assert pytest.approx(0.78) == ANK_RY_FRAC_HALF_W  # 0108 B1 (was 1.00 / 0097)
     assert pytest.approx(0.030) == ANK_RY_FLOOR_M  # 0076 B1 (was 0.036)
     assert pytest.approx(1.80) == ANK_RZ_FRAC_HALF_W  # 0076 B2 (was 2.00)
     assert pytest.approx(0.044) == ANK_RZ_FLOOR_M  # 0076 B2 (was 0.048)
