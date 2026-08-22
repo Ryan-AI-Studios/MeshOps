@@ -74,4 +74,10 @@ Stop RECIPE oval thrash after form lock.
 
 Handoff is `--nofuse` lock then `--join-ready` then `blockout-fuse-plan`. Voxel remesh is opt-in authoring weld — not a repair default (N1). 1 island is not print success (N6).
 
+### Viewport soft hide (blockout)
+
+Hide is not cull. Keep full for region polish.
+
+Overview QA hides 0082-class secondaries in Blender; `--soft-density compact` culls them from the recipe. Viewport hide is not print success (N6).
+
 Blender manual epub under `docs/blender_manual_v520_en.epub` is reference only.
