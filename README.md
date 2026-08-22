@@ -80,4 +80,10 @@ Hide is not cull. Keep full for region polish.
 
 Overview QA hides 0082-class secondaries in Blender; `--soft-density compact` culls them from the recipe. Viewport hide is not print success (N6).
 
+### One-character Loomis (blockout)
+
+One-character Loomis is not a product default. Do not promote session face tweaks.
+
+`--face` kit stays product law; polish existing RECIPE_* in Blender for this job. Loomis polish is not print success (N6).
+
 Blender manual epub under `docs/blender_manual_v520_en.epub` is reference only.
