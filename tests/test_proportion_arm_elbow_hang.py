@@ -500,10 +500,10 @@ def test_t11_fence_mass_and_palm() -> None:
     assert ELBOW_SOFT_RY_FRAC == 0.90
     assert ELBOW_SOFT_RZ_FRAC == 0.78
     assert UA_PROX_SHAFT_SCALE == 1.00
-    assert UA_DIST_SHAFT_SCALE == 0.88
+    assert UA_DIST_SHAFT_SCALE == 0.84
     assert UA_SPLIT_T == 0.50
     assert FA_PROX_SHAFT_SCALE == 1.00
-    assert FA_DIST_SHAFT_SCALE == 0.78
+    assert FA_DIST_SHAFT_SCALE == 0.70
     assert FA_SPLIT_T == 0.50
     report = _product_class_report()
     skel = build_blockout_skeleton(report)
@@ -520,7 +520,7 @@ def test_t11_fence_mass_and_palm() -> None:
     assert palm.center[1] == pytest.approx(wr, abs=1e-6)
     elbow = next(p for p in pkg.parts if p.name == "RECIPE_elbow_soft_l")
     assert elbow.rx_m is not None
-    assert float(elbow.rx_m) == pytest.approx(0.0470, abs=1e-4)
+    assert float(elbow.rx_m) == pytest.approx(0.0449, abs=1e-4)
 
 
 def test_t12_all_exports() -> None:

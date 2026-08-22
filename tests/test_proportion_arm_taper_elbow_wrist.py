@@ -163,10 +163,10 @@ def _part(
 def test_t0_const_freezes() -> None:
     """T0: scales/split; ELBOW_SOFT_SCALE==1.22; WRIST floors; bands forearm-only."""
     assert UA_PROX_SHAFT_SCALE == 1.0
-    assert UA_DIST_SHAFT_SCALE == 0.88
+    assert UA_DIST_SHAFT_SCALE == 0.84
     assert UA_SPLIT_T == 0.5
     assert FA_PROX_SHAFT_SCALE == 1.0
-    assert FA_DIST_SHAFT_SCALE == 0.78
+    assert FA_DIST_SHAFT_SCALE == 0.70
     assert FA_SPLIT_T == 0.5
     assert UA_DIST_SHAFT_SCALE < UA_PROX_SHAFT_SCALE
     assert FA_DIST_SHAFT_SCALE < FA_PROX_SHAFT_SCALE
@@ -230,8 +230,8 @@ def test_t2_radii_scales() -> None:
         )
         ua_ratio = float(ua_dist.radius_m) / float(ua.radius_m)  # type: ignore[arg-type]
         fa_ratio = float(fa_dist.radius_m) / float(fa.radius_m)  # type: ignore[arg-type]
-        assert 0.84 <= ua_ratio <= 0.92
-        assert 0.74 <= fa_ratio <= 0.82
+        assert 0.82 <= ua_ratio <= 0.88
+        assert 0.66 <= fa_ratio <= 0.74
 
 
 def test_t3_classifier() -> None:
@@ -323,8 +323,8 @@ def test_t6_wrist_soft_center_and_scale() -> None:
         fa_floor = float(fa_dist.radius_m) * WRIST_SOFT_FA_DIST_SCALE  # type: ignore[arg-type]
         expected = max(mid_emit, fa_floor)
         assert soft.rx_m == pytest.approx(expected, abs=1e-9)
-        # Product-class pin: ~0.03744 not mid*0.78 alone (0.0312)
-        assert expected == pytest.approx(0.03744, abs=1e-5)
+        # Product-class pin: FA dist * 1.20 (0.70*0.04*1.20 = 0.0336), not mid*0.78 alone (0.0312)
+        assert expected == pytest.approx(0.0336, abs=1e-5)
 
 
 def test_t7_elbow_soft_readable() -> None:
@@ -402,7 +402,7 @@ def test_t9_wrist_palm_floor() -> None:
 
 
 def test_t10_product_like_mids() -> None:
-    """T10: product-like mids 0.0438/0.0350 → dist ≈ 0.0385/0.0273; elbow ≈ 0.0470."""
+    """T10: product-like mids 0.0438/0.0350 → dist ≈ 0.0368/0.0245; elbow ≈ 0.0449."""
     ua_mid = 0.0438
     fa_mid = 0.0350
     height_m = 1.72
@@ -416,14 +416,14 @@ def test_t10_product_like_mids() -> None:
         fa_dist = by_name[f"RECIPE_arm_taper_dist_fa_{side}"]
         elbow = by_name[f"RECIPE_elbow_soft_{side}"]
         assert float(ua.radius_m) == pytest.approx(0.0438, abs=1e-5)  # type: ignore[arg-type]
-        assert float(ua_dist.radius_m) == pytest.approx(0.038544, abs=1e-5)  # type: ignore[arg-type]
+        assert float(ua_dist.radius_m) == pytest.approx(0.036792, abs=1e-5)  # type: ignore[arg-type]
         assert float(fa.radius_m) == pytest.approx(0.0350, abs=1e-5)  # type: ignore[arg-type]
-        assert float(fa_dist.radius_m) == pytest.approx(0.0273, abs=1e-5)  # type: ignore[arg-type]
-        # 1.22 * max(0.038544, 0.0350) = 0.04702368
+        assert float(fa_dist.radius_m) == pytest.approx(0.0245, abs=1e-5)  # type: ignore[arg-type]
+        # 1.22 * max(0.036792, 0.0350) = 0.04488624
         adj = max(float(ua_dist.radius_m), float(fa.radius_m))  # type: ignore[arg-type]
         expected = ELBOW_SOFT_SCALE * adj
         assert float(elbow.rx_m) == pytest.approx(expected, abs=1e-4)  # type: ignore[arg-type]
-        assert float(elbow.rx_m) == pytest.approx(0.0470, abs=1e-4)  # type: ignore[arg-type]
+        assert float(elbow.rx_m) == pytest.approx(0.0449, abs=1e-4)  # type: ignore[arg-type]
 
 
 def test_t11_messages_shaft_taper_and_elbow() -> None:
