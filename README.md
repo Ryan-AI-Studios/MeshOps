@@ -110,4 +110,10 @@ Per-job Michelin cap is not a product default. Do not promote session Michelin t
 
 `--profiles` FitIn (0119/0120) stays product law; polish existing RECIPE_deltoid_soft_* in Blender for this job. Michelin polish is not print success (N6).
 
+### Per-job hip_soft (blockout)
+
+Per-job hip_soft is not a product default. Do not promote session hip-soft tweaks.
+
+`--torso` ovals hip cluster (0106) stays product law; polish existing RECIPE_hip_soft_* in Blender for this job. Hip-soft polish is not print success (N6).
+
 Blender manual epub under `docs/blender_manual_v520_en.epub` is reference only.
