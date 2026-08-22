@@ -122,8 +122,8 @@ def test_t_elbow_past_ua_prox() -> None:
         ua = by[f"RECIPE_limb_upper_arm_{side}"]
         assert elbow.rx_m is not None and ua.radius_m is not None
         assert float(elbow.rx_m) > float(ua.radius_m)
-        # Live product pin class: ~0.0470 > ~0.0438
-        assert float(elbow.rx_m) == pytest.approx(ELBOW_SOFT_SCALE * 0.038544, abs=1e-4)
+        # Live product pin class: ~0.0449 > ~0.0438 (0107 UA dist 0.84)
+        assert float(elbow.rx_m) == pytest.approx(ELBOW_SOFT_SCALE * 0.036792, abs=1e-4)
 
 
 def test_t_elbow_aniso() -> None:
@@ -200,11 +200,11 @@ def test_t_no_new_sleeve_names() -> None:
 
 
 def test_t_fence_shafts() -> None:
-    """R6: UA/FA/thigh shaft scales stay 1.00/0.88/0.78/0.72 class."""
+    """R6: UA/FA/thigh shaft scales stay 1.00/0.84/0.70/0.72 class."""
     assert UA_PROX_SHAFT_SCALE == 1.00
-    assert UA_DIST_SHAFT_SCALE == 0.88
+    assert UA_DIST_SHAFT_SCALE == 0.84
     assert FA_PROX_SHAFT_SCALE == 1.00
-    assert FA_DIST_SHAFT_SCALE == 0.78
+    assert FA_DIST_SHAFT_SCALE == 0.70
     assert THIGH_PROX_SHAFT_SCALE == 1.00
     assert THIGH_DIST_SHAFT_SCALE == 0.72
     report = _product_class_report()

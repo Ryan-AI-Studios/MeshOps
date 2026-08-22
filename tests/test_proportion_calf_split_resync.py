@@ -310,10 +310,10 @@ def _t1_parts(*, side: str = "l") -> list[RecipePart]:
 
 
 def test_t0_const_freezes() -> None:
-    """T0: split 0.42 / belly 1.18 / dist 0.88 / lat 0.30 / rear 0.42 / a 0.88 / b 0.72."""
+    """T0: split 0.42 / belly 1.18 / dist 0.80 / lat 0.30 / rear 0.42 / a 0.88 / b 0.72."""
     assert CALF_SPLIT_T == 0.42
     assert CALF_BELLY_SCALE == 1.18
-    assert CALF_DIST_SHAFT_SCALE == 0.88
+    assert CALF_DIST_SHAFT_SCALE == 0.80
     assert CALF_BELLY_LAT_FRAC == 0.30
     assert CALF_BELLY_REAR_FRAC == 0.42
     assert CALF_PROX_END_SCALE == 0.88

@@ -457,7 +457,7 @@ def test_t11_fence_thigh_calf_hip_elbow() -> None:
         assert ratio == pytest.approx(0.72, abs=1e-6)
         assert float(calf_a.rx_m) == pytest.approx(0.0385, abs=1e-4)  # type: ignore[arg-type]
         assert float(hip.rx_m) == pytest.approx(0.0705, abs=1e-4)  # type: ignore[arg-type]
-        assert float(elbow.rx_m) == pytest.approx(0.0470, abs=1e-4)  # type: ignore[arg-type]
+        assert float(elbow.rx_m) == pytest.approx(0.0449, abs=1e-4)  # type: ignore[arg-type]
         assert float(hip.rx_m) == pytest.approx(  # type: ignore[arg-type]
             float(prox.radius_m) * HIP_SOFT_RX_SCALE,  # type: ignore[arg-type]
             abs=1e-4,

@@ -89,7 +89,7 @@ _CALF_END_R_FLOOR: Final[float] = 1e-4
 CALF_BELLY_SCALE: Final[float] = 1.18  # 0096 — was 1.08; prox shaft only
 CALF_PROX_END_SCALE: Final[float] = 0.88  # fence 0071/0095
 CALF_DIST_END_SCALE: Final[float] = 0.72  # fence 0080 calf_b
-CALF_DIST_SHAFT_SCALE: Final[float] = 0.88  # 0096 distal shaft vs mid
+CALF_DIST_SHAFT_SCALE: Final[float] = 0.80  # 0107 leftover shank; was 0.88; fail ≤0.72 / ≥1.00
 CALF_SPLIT_T: Final[float] = 0.42  # 0096 prox fraction of shank
 CALF_BELLY_LAT_FRAC: Final[float] = 0.30  # 0096 — was 0.22
 CALF_BELLY_REAR_FRAC: Final[float] = 0.42  # 0096 — was 0.28
@@ -99,10 +99,10 @@ LIMB_DISTAL_SOFT_SCALE: Final[float] = 0.78
 _LIMB_DIST_SOFT_BANDS: Final[frozenset[str]] = frozenset({"forearm_l", "forearm_r"})
 # 0062 B1-B6 / B10-B11: arm shaft taper + elbow soft + wrist palm floor.
 UA_PROX_SHAFT_SCALE: Final[float] = 1.00  # B1
-UA_DIST_SHAFT_SCALE: Final[float] = 0.88  # B2
+UA_DIST_SHAFT_SCALE: Final[float] = 0.84  # 0107 leftover pipe; was 0.88; fail <0.82 (elbow floor)
 UA_SPLIT_T: Final[float] = 0.50  # B3 / B15
 FA_PROX_SHAFT_SCALE: Final[float] = 1.00  # B4
-FA_DIST_SHAFT_SCALE: Final[float] = 0.78  # B5
+FA_DIST_SHAFT_SCALE: Final[float] = 0.70  # 0107 leftover shank; was 0.78; fail <0.64
 FA_SPLIT_T: Final[float] = 0.50  # B6 / B15
 _ARM_SHAFT_R_FLOOR: Final[float] = 1e-4
 ELBOW_SOFT_SCALE: Final[float] = 1.22  # 0081 B1 — was 1.10; must clear UA prox
@@ -3367,6 +3367,18 @@ def _build_limbs(
             f"calf shaft form: belly={CALF_BELLY_SCALE} "
             f"dist_shaft={CALF_DIST_SHAFT_SCALE} split={CALF_SPLIT_T} "
             f"lat={CALF_BELLY_LAT_FRAC} rear={CALF_BELLY_REAR_FRAC}"
+        )
+    # 0107 B12: sibling once after both arm sides and both calf sides.
+    arm_l = any(m.startswith("upper_arm_l: shaft_taper") for m in messages)
+    arm_r = any(m.startswith("upper_arm_r: shaft_taper") for m in messages)
+    fa_l = any(m.startswith("forearm_l: shaft_taper") for m in messages)
+    fa_r = any(m.startswith("forearm_r: shaft_taper") for m in messages)
+    calf_l = any(m.startswith("calf_l: belly/taper") for m in messages)
+    calf_r = any(m.startswith("calf_r: belly/taper") for m in messages)
+    if arm_l and arm_r and fa_l and fa_r and calf_l and calf_r:
+        messages.append(
+            f"limb shaft form plus: ua_dist={UA_DIST_SHAFT_SCALE} "
+            f"fa_dist={FA_DIST_SHAFT_SCALE} calf_dist={CALF_DIST_SHAFT_SCALE}"
         )
     return parts
 

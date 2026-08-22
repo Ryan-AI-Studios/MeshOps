@@ -47,7 +47,7 @@ _PRODUCT_NOFUSE = Path("work/rogue-v3/blockout/product_0096up/nofuse")
 _MID_R = 0.0613
 _CALF_HW = 0.04379
 _EXPECT_CYL_R = 0.05167
-_EXPECT_TAPER_R = 0.03853
+_EXPECT_TAPER_R = 0.03503
 _EXPECT_KNEE_RX = 0.04767
 _EXPECT_KNEE_RZ = 0.05482
 
@@ -263,16 +263,16 @@ def _template(*, taper: float = 0.22, thigh_tilt_deg: float = 10.0) -> TemplateA
 
 
 def test_t0_const_freezes() -> None:
-    """T0: belly 1.18 / dist shaft 0.88 / split 0.42 / lean 0.30/0.42; hold ends."""
+    """T0: belly 1.18 / dist shaft 0.80 / split 0.42 / lean 0.30/0.42; hold ends."""
     assert CALF_BELLY_SCALE == 1.18
-    assert CALF_DIST_SHAFT_SCALE == 0.88
+    assert CALF_DIST_SHAFT_SCALE == 0.80
     assert CALF_SPLIT_T == 0.42
     assert CALF_BELLY_LAT_FRAC == 0.30
     assert CALF_BELLY_REAR_FRAC == 0.42
     assert CALF_PROX_END_SCALE == 0.88
     assert CALF_DIST_END_SCALE == 0.72
     assert 1.14 <= CALF_BELLY_SCALE <= 1.22
-    assert 0.82 <= CALF_DIST_SHAFT_SCALE <= 0.92
+    assert 0.76 <= CALF_DIST_SHAFT_SCALE <= 0.86
     assert 0.38 <= CALF_SPLIT_T <= 0.48
     assert CALF_DIST_SHAFT_SCALE < CALF_BELLY_SCALE
     assert CALF_DIST_END_SCALE < CALF_DIST_SHAFT_SCALE
@@ -295,7 +295,7 @@ def test_t1_taper_parts_present() -> None:
 
 
 def test_t2_product_like_radii() -> None:
-    """T2: mid 0.04379 — cyl=1.18x / taper=0.88x / a=0.88x / b=0.72x."""
+    """T2: mid 0.04379 — cyl=1.18x / taper=0.80x / a=0.88x / b=0.72x."""
     mid = _CALF_HW
     report = _limb_mass_report(calf_hw=mid)
     pkg = build_blockout_recipe(report, limbs=True)
@@ -449,7 +449,7 @@ def test_t9_invert_not_0045_0071() -> None:
 
 
 def test_t10_product_like_meters() -> None:
-    """T10 B20: product-like cyl ≈ 0.05167; taper ≈ 0.03853 (not old 0.04729 pipe)."""
+    """T10 B20: product-like cyl ≈ 0.05167; taper ≈ 0.03503 (not old 0.04729 pipe)."""
     report = _limb_mass_report(calf_hw=_CALF_HW)
     pkg = build_blockout_recipe(report, limbs=True)
     by_name = {p.name: p for p in pkg.parts}
@@ -490,7 +490,7 @@ def test_t11_fence_knee_thigh_hip_elbow_foot() -> None:
         assert float(hip.rx_m) == pytest.approx(  # type: ignore[arg-type]
             _MID_R * HIP_SOFT_RX_SCALE, abs=1e-4
         )
-        assert float(elbow.rx_m) == pytest.approx(0.0470, abs=1e-4)  # type: ignore[arg-type]
+        assert float(elbow.rx_m) == pytest.approx(0.0449, abs=1e-4)  # type: ignore[arg-type]
         assert float(calf_b.rx_m) == pytest.approx(_CALF_HW * CALF_DIST_END_SCALE, abs=1e-4)  # type: ignore[arg-type]
         from_parts = _calf_distal_r_from_parts(pkg.parts, side)
         assert from_parts == pytest.approx(float(calf_b.rx_m), abs=1e-9)  # type: ignore[arg-type]
