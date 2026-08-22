@@ -104,4 +104,10 @@ Breast costume/sculpt is not a product default. Do not promote session breast tw
 
 `--breast-tilt-deg` hang/tilt/contact stay product law; polish existing RECIPE_breast_soft_* in Blender for this job. Breast costume polish is not print success (N6).
 
+### Per-job Michelin cap (blockout)
+
+Per-job Michelin cap is not a product default. Do not promote session Michelin tweaks.
+
+`--profiles` FitIn (0119/0120) stays product law; polish existing RECIPE_deltoid_soft_* in Blender for this job. Michelin polish is not print success (N6).
+
 Blender manual epub under `docs/blender_manual_v520_en.epub` is reference only.
