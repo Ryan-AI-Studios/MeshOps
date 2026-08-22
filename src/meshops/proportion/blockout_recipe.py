@@ -1225,6 +1225,26 @@ def _michelin_clamp_max(
     return None
 
 
+def _michelin_cap_aniso_axes(
+    rx: float, ry: float, rz: float, cap: float | None
+) -> tuple[float, float, float, bool]:
+    """Uniform-scale so max(rx, ry, rz) <= cap. Preserve ratios.
+
+    Michelin is a largest-axis envelope (FitIn), not per-axis min.
+    Identity when the cap does not bind. Skip None / non-finite / cap <= 0
+    before math.isfinite(cap) (B17).
+    """
+    if cap is None or not math.isfinite(cap) or cap <= 0:
+        return rx, ry, rz, False
+    if not (math.isfinite(rx) and math.isfinite(ry) and math.isfinite(rz)):
+        return rx, ry, rz, False
+    largest = max(rx, ry, rz)
+    if largest <= cap:
+        return rx, ry, rz, False
+    s = cap / largest
+    return rx * s, ry * s, rz * s, True
+
+
 def _joint_xyz(joint: SkeletonJoint | None) -> list[float] | None:
     """Return [x,y,z] when all three finite; else None."""
     if joint is None:
@@ -2197,13 +2217,14 @@ def _build_deltoids(
         if base_r is None:
             base_r = 0.08 * m.shoulder_hw if m.shoulder_hw else 0.04
         # 0046 B2: soft deltoid larger than arm half-width (DELT scale).
+        # 0119: aniso first, then uniform largest-axis Michelin (not clamp-then-aniso).
         measured = base_r * DELT_ARM_RADIUS_SCALE
-        clamped = measured
-        if measured >= clamp_max:
-            clamped = clamp_max
-            messages.append(
-                f"deltoid radius {measured:.3f}m clamped to {clamped:.3f}m (Michelin guard)"
-            )
+        rx = measured
+        ry = rx * DELT_RY_FRAC
+        rz = rx * DELT_RZ_FRAC
+        rx, ry, rz, did_clamp = _michelin_cap_aniso_axes(rx, ry, rz, clamp_max)
+        if did_clamp:
+            messages.append(f"deltoid radius {measured:.3f}m clamped to {rx:.3f}m (Michelin guard)")
         # 0083 B5: skeleton shoulder Y → landmark Y → glenoid plane (not ARM_FORWARD).
         sk_sh = skel_joints.get(lm_id)
         if sk_sh is not None and sk_sh.y_m is not None and math.isfinite(float(sk_sh.y_m)):
@@ -2222,7 +2243,7 @@ def _build_deltoids(
             placement = "full3d"
             messages.append(f"RECIPE_deltoid_soft_{side}: y_m from glenoid plane")
         center = [float(lm.x_m), y, float(lm.z_m)]
-        _apply_delt_outer_x_bias(center, side, clamped, messages)
+        _apply_delt_outer_x_bias(center, side, rx, messages)
         name = f"RECIPE_deltoid_soft_{side}"
         if _midline_blocked(center, "deltoid_soft", crotch_z):
             messages.append(f"midline below crotch skipped: {name}")
@@ -2233,9 +2254,9 @@ def _build_deltoids(
                 role="deltoid_soft",
                 kind="ellipsoid",
                 center=center,
-                rx_m=clamped,
-                ry_m=clamped * DELT_RY_FRAC,
-                rz_m=clamped * DELT_RZ_FRAC,
+                rx_m=rx,
+                ry_m=ry,
+                rz_m=rz,
                 placement=placement,
                 label=name,
             )
@@ -3813,16 +3834,12 @@ def _resolve_profile_axes(
         rz = float(rx) * DELT_RZ_FRAC
         if scale.michelin_cap_frac_h is not None:
             cap = _michelin_clamp_max(m, michelin_cap_frac_h=scale.michelin_cap_frac_h)
-            if cap is not None:
-                for axis_name, val in (("rx", rx), ("ry", ry), ("rz", rz)):
-                    if val > cap:
-                        messages.append(
-                            f"profile {axis_name} {val:.3f}m clamped to {cap:.3f}m "
-                            f"(michelin_cap_frac_h={scale.michelin_cap_frac_h})"
-                        )
-                rx = min(float(rx), cap)
-                ry = min(float(ry), cap)
-                rz = min(float(rz), cap)
+            rx, ry, rz, did_clamp = _michelin_cap_aniso_axes(rx, ry, rz, cap)
+            if did_clamp:
+                messages.append(
+                    f"profile deltoid clamped to {rx:.3f}m "
+                    f"(michelin_cap_frac_h={scale.michelin_cap_frac_h})"
+                )
         _ = template_applied
         return float(rx), float(ry), float(rz)
 
