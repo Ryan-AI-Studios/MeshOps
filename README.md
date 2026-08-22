@@ -92,4 +92,10 @@ Fist/gesture is not a product default. Do not promote session fist tweaks.
 
 `--fingers full` hang-flex stays product law; hinge existing RECIPE_* in Blender for this job. Fist polish is not print success (N6).
 
+### Per-job limb soft scale (blockout)
+
+Limb soft scale is not a product default. Do not promote session limb-scale tweaks.
+
+`--limbs` shafts+seams stay product law; scale existing RECIPE_elbow_soft_* / RECIPE_knee_soft_* in Blender for this job. Limb scale polish is not print success (N6).
+
 Blender manual epub under `docs/blender_manual_v520_en.epub` is reference only.
