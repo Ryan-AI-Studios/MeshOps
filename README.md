@@ -98,4 +98,10 @@ Limb soft scale is not a product default. Do not promote session limb-scale twea
 
 `--limbs` shafts+seams stay product law; scale existing RECIPE_elbow_soft_* / RECIPE_knee_soft_* in Blender for this job. Limb scale polish is not print success (N6).
 
+### Breast costume / sculpt (blockout)
+
+Breast costume/sculpt is not a product default. Do not promote session breast tweaks.
+
+`--breast-tilt-deg` hang/tilt/contact stay product law; polish existing RECIPE_breast_soft_* in Blender for this job. Breast costume polish is not print success (N6).
+
 Blender manual epub under `docs/blender_manual_v520_en.epub` is reference only.
