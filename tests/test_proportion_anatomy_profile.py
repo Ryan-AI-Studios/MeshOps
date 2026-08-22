@@ -17,6 +17,7 @@ from meshops.proportion.anatomy_profile import (
 from meshops.proportion.blockout_recipe import (
     _BASELINE_ROLES_NO_PROFILE,
     _MICHELIN_FRAC,
+    DELT_RZ_FRAC,
     RECIPE_SCHEMA_VERSION,
     TRAP_LAT_FRAC,
     _midpoint_of_joints,
@@ -443,8 +444,12 @@ def test_michelin_override_per_part() -> None:
     delts = [p for p in pkg.parts if p.role == "deltoid_soft"]
     assert delts
     for p in delts:
-        assert p.rx_m is not None
-        assert p.rx_m <= cap + 1e-6
+        assert p.rx_m is not None and p.ry_m is not None and p.rz_m is not None
+        rx = float(p.rx_m)
+        rz = float(p.rz_m)
+        assert rx <= cap + 1e-6
+        assert rx != rz
+        assert rz == pytest.approx(rx * DELT_RZ_FRAC, abs=1e-9)
     assert any("michelin_cap_frac_h" in m for m in pkg.messages) or all(
         (p.rx_m or 0) <= cap + 1e-6 for p in delts
     )

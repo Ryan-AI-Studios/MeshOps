@@ -13,6 +13,7 @@ from meshops.cli import app
 from meshops.proportion.blockout_recipe import (
     AXIS_NOTES,
     CROTCH_Z_FRAC_FALLBACK,
+    DELT_RZ_FRAC,
     HEAD_PITCH_DEG,
     MIDLINE_X_TOL_M,
     NECK_NAPE_SETBACK_M,
@@ -331,9 +332,15 @@ def test_recipe__deltoid_michelin() -> None:
     assert len(dels) == 2
     clamp_max = 0.45 * 0.18
     for d in dels:
-        assert d.rx_m is not None
-        assert d.rx_m <= clamp_max + 1e-9
-    assert any("Michelin guard" in m and "clamped" in m for m in pkg.messages)
+        assert d.rx_m is not None and d.ry_m is not None and d.rz_m is not None
+        rx = float(d.rx_m)
+        ry = float(d.ry_m)
+        rz = float(d.rz_m)
+        assert max(rx, ry, rz) <= clamp_max + 1e-9
+        assert rz == pytest.approx(rx * DELT_RZ_FRAC, abs=1e-9)
+        assert rx == pytest.approx(clamp_max / DELT_RZ_FRAC, abs=1e-9)
+    assert any("Michelin guard" in m and "clamped to 0.075m" in m for m in pkg.messages)
+    assert not any("clamped to 0.081m" in m for m in pkg.messages)
 
 
 def test_recipe__midline_junk_skipped() -> None:
