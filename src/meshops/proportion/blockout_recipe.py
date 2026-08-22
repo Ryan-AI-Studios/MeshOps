@@ -3901,19 +3901,15 @@ def _resolve_profile_axes(
     if rz is None:
         rz = 0.035 * (h or 1.7)
 
-    # Michelin cap when set
+    # Michelin cap when set — largest-axis envelope (FitIn), not per-axis min.
     if scale.michelin_cap_frac_h is not None:
         cap = _michelin_clamp_max(m, michelin_cap_frac_h=scale.michelin_cap_frac_h)
-        if cap is not None:
-            for axis_name, val in (("rx", rx), ("ry", ry), ("rz", rz)):
-                if val > cap:
-                    messages.append(
-                        f"profile {axis_name} {val:.3f}m clamped to {cap:.3f}m "
-                        f"(michelin_cap_frac_h={scale.michelin_cap_frac_h})"
-                    )
-            rx = min(rx, cap)
-            ry = min(ry, cap)
-            rz = min(rz, cap)
+        rx, ry, rz, did_clamp = _michelin_cap_aniso_axes(rx, ry, rz, cap)
+        if did_clamp:
+            messages.append(
+                f"profile axes clamped to {max(rx, ry, rz):.3f}m "
+                f"(michelin_cap_frac_h={scale.michelin_cap_frac_h})"
+            )
 
     _ = template_applied  # reserved for future template soft scales
     return float(rx), float(ry), float(rz)
