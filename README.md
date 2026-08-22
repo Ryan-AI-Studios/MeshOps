@@ -86,4 +86,10 @@ One-character Loomis is not a product default. Do not promote session face tweak
 
 `--face` kit stays product law; polish existing RECIPE_* in Blender for this job. Loomis polish is not print success (N6).
 
+### Fist / gesture hands (blockout)
+
+Fist/gesture is not a product default. Do not promote session fist tweaks.
+
+`--fingers full` hang-flex stays product law; hinge existing RECIPE_* in Blender for this job. Fist polish is not print success (N6).
+
 Blender manual epub under `docs/blender_manual_v520_en.epub` is reference only.
