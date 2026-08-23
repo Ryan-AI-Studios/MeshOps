@@ -37,6 +37,7 @@ ProportionErrorCode = Literal[
     "silhouette_untrusted",
     "feedback_failed",
     "face_compare_failed",
+    "torso_compare_failed",
     "template_unknown",
     "template_empty",
     "template_failed",

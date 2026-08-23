@@ -75,13 +75,14 @@ def test_tool_catalog_complete_and_no_forbidden() -> None:
             assert "mesh_proportion_blockout_feedback" in names
             assert "mesh_proportion_blockout_open_setup" in names
             assert "mesh_proportion_blockout_face_compare" in names
-            assert len(names) == 48
+            assert "mesh_proportion_blockout_torso_compare" in names
+            assert len(names) == 49
 
     _run(_body())
 
 
 def test_mcp__proportion_tools_in_catalog() -> None:
-    """Explicit 0110 catalog freeze: proportion tools + open-setup; len == 48."""
+    """Explicit 0110 catalog freeze: proportion tools + open-setup; len == 49."""
 
     async def _body() -> None:
         server = build_server()
@@ -111,29 +112,31 @@ def test_mcp__proportion_tools_in_catalog() -> None:
                 "mesh_proportion_blockout_feedback",
                 "mesh_proportion_blockout_open_setup",
                 "mesh_proportion_blockout_face_compare",
+                "mesh_proportion_blockout_torso_compare",
             ):
                 assert n in names
-            assert len(names) == 48
+            assert len(names) == 49
             assert names >= TOOL_NAMES
-            assert len(TOOL_NAMES) == 48
+            assert len(TOOL_NAMES) == 49
 
     _run(_body())
 
 
 def test_mcp__t10_t11_join_ready_and_catalog_47() -> None:
-    """T10/T11: catalog 48; emit-setup/fuse-plan/open-setup; recipe join_ready; feedback tool."""
+    """T10/T11: catalog 49; emit-setup/fuse-plan/open-setup; recipe join_ready; feedback tool."""
 
     async def _body() -> None:
         server = build_server()
         async with Client(server) as client:
             listed = await client.list_tools()
             by_name = {t.name: t for t in listed.tools}
-            assert len(by_name) == 48
+            assert len(by_name) == 49
             assert "mesh_proportion_blockout_emit_setup" in by_name
             assert "mesh_proportion_blockout_fuse_plan" in by_name
             assert "mesh_proportion_blockout_feedback" in by_name
             assert "mesh_proportion_blockout_open_setup" in by_name
             assert "mesh_proportion_blockout_face_compare" in by_name
+            assert "mesh_proportion_blockout_torso_compare" in by_name
             recipe_tool = by_name["mesh_proportion_blockout_recipe"]
             schema = (
                 getattr(recipe_tool, "input_schema", None)

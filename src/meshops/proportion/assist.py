@@ -117,6 +117,16 @@ KNOWN_LANDMARK_IDS: frozenset[str] = frozenset(
         "ear_r",
         "lip_upper",
         "lip_lower",
+        # 0125 torso/chest/back form-read (not Pose 33 / Holistic 543)
+        "sternum_mid",
+        "costal_l",
+        "costal_r",
+        "scap_inferior_l",
+        "scap_inferior_r",
+        "scap_medial_l",
+        "scap_medial_r",
+        "mid_back_l",
+        "mid_back_r",
     }
 )
 
@@ -146,6 +156,26 @@ FACE_TQ_LANDMARK_IDS: tuple[str, ...] = (
     "eye_l",
     "eye_r",
     "nose_tip",
+)
+
+# Frozen v1 torso form-read ids (0125). Existing chest/breast/hip DEPTH ids stay.
+TORSO_FRONT_LANDMARK_IDS: tuple[str, ...] = (
+    "sternum_mid",
+    "costal_l",
+    "costal_r",
+)
+TORSO_LEFT_LANDMARK_IDS: tuple[str, ...] = (
+    "sternum_mid",
+    "scap_inferior_l",
+    "mid_back_l",
+)
+TORSO_BACK_LANDMARK_IDS: tuple[str, ...] = (
+    "scap_inferior_l",
+    "scap_inferior_r",
+    "scap_medial_l",
+    "scap_medial_r",
+    "mid_back_l",
+    "mid_back_r",
 )
 
 

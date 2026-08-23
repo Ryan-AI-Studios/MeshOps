@@ -1822,6 +1822,18 @@ def _apply_shoulder_girdle_softs(
         )
 
 
+def _measured_lm_m(report: ProportionReport, lid: str, *, y: bool) -> float | None:
+    """Finite landmark y_m or z_m, else None (0125 — never invent)."""
+    lm = report.landmarks_xyz.get(lid)
+    if lm is None:
+        return None
+    raw = lm.y_m if y else lm.z_m
+    if raw is None:
+        return None
+    val = float(raw)
+    return val if math.isfinite(val) else None
+
+
 def _apply_scap_plane(
     parts: list[RecipePart],
     report: ProportionReport,
@@ -1832,8 +1844,8 @@ def _apply_scap_plane(
 
     Mutates *parts* in place. B6: role scap_soft + ellipsoid + center only.
     Quiet skip when no scap_soft (no profile / limbs-only).
+    0125: measured scap_inferior_* Y/Z overlay after abs(cy) (B32 — do not abs measured).
     """
-    _ = report  # signature parity with girdle/breast helpers
     idxs = [
         i
         for i, p in enumerate(parts)
@@ -1953,6 +1965,31 @@ def _apply_scap_plane(
         c[2] = mean_z
         p.center = c
 
+    # 0125 B32: measured Y/Z after abs + equalize; do not abs the measured value.
+    for i in idxs:
+        p = parts[i]
+        assert p.center is not None
+        name = p.name or ""
+        if name.endswith("_l"):
+            side = "l"
+        elif name.endswith("_r"):
+            side = "r"
+        else:
+            continue
+        lid = f"scap_inferior_{side}"
+        my = _measured_lm_m(report, lid, y=True)
+        mz = _measured_lm_m(report, lid, y=False)
+        if my is None and mz is None:
+            continue
+        c = list(p.center)
+        if my is not None:
+            c[1] = my
+            messages.append(f"torso: measured scap y={my:.4f} ({lid})")
+        if mz is not None:
+            c[2] = mz
+            messages.append(f"torso: measured scap z={mz:.4f} ({lid})")
+        p.center = c
+
     # B12 messages
     messages.append("scap_plane_applied: true")
     messages.append(f"scap_plane_past_m={SCAP_REAR_PAST_M}")
@@ -1994,8 +2031,8 @@ def _apply_mid_back_plane(
 
     Mutates *parts* in place. B9: role mid_back_soft + ellipsoid + center only.
     Quiet skip when no mid_back_soft (no profile / limbs-only).
+    0125: measured mid_back_* Y/Z overlay after prior (no abs — 0093 cape).
     """
-    _ = report  # signature parity with scap/girdle helpers
     idxs = [
         i
         for i, p in enumerate(parts)
@@ -2137,6 +2174,31 @@ def _apply_mid_back_plane(
         c[0] = sign * mean_abs_cx
         c[1] = mean_y
         c[2] = mean_z
+        p.center = c
+
+    # 0125: measured Y/Z after prior equalize (mid-back does not abs cy).
+    for i in idxs:
+        p = parts[i]
+        assert p.center is not None
+        name = p.name or ""
+        if name.endswith("_l"):
+            side = "l"
+        elif name.endswith("_r"):
+            side = "r"
+        else:
+            continue
+        lid = f"mid_back_{side}"
+        my = _measured_lm_m(report, lid, y=True)
+        mz = _measured_lm_m(report, lid, y=False)
+        if my is None and mz is None:
+            continue
+        c = list(p.center)
+        if my is not None:
+            c[1] = my
+            messages.append(f"torso: measured mid_back y={my:.4f} ({lid})")
+        if mz is not None:
+            c[2] = mz
+            messages.append(f"torso: measured mid_back z={mz:.4f} ({lid})")
         p.center = c
 
     # B14 messages

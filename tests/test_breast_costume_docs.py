@@ -79,7 +79,7 @@ def test_t5_breast_tear_0067_hold() -> None:
 
 def test_t6_mcp_catalog_47() -> None:
     """T6: MCP catalog stays 47."""
-    assert len(TOOL_NAMES) == 48
+    assert len(TOOL_NAMES) == 49
 
 
 def test_t7_no_breast_costume_cli_command() -> None:
