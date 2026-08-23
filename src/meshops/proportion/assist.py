@@ -156,6 +156,24 @@ KNOWN_LANDMARK_IDS: frozenset[str] = frozenset(
         "achilles_r",
         "ball_l",
         "ball_r",
+        # 0128 shoulder girdle form-read (not Pose 11-12)
+        "trap_apex_l",
+        "trap_apex_r",
+        "trap_med_l",
+        "trap_med_r",
+        "trap_lat_l",
+        "trap_lat_r",
+        "clav_med_l",
+        "clav_med_r",
+        "clav_lat_l",
+        "clav_lat_r",
+        "scm_origin_l",
+        "scm_origin_r",
+        "scm_insert_l",
+        "scm_insert_r",
+        "acromion_l",
+        "acromion_r",
+        "nape",
     }
 )
 
@@ -257,6 +275,41 @@ LEG_FOOT_BACK_LANDMARK_IDS: tuple[str, ...] = (
     "gastroc_lat_r",
     "achilles_l",
     "achilles_r",
+)
+
+# Frozen v1 shoulder girdle form-read ids (0128). Existing shoulder/neck stay.
+GIRDLE_FRONT_LANDMARK_IDS: tuple[str, ...] = (
+    "trap_apex_l",
+    "trap_apex_r",
+    "trap_med_l",
+    "trap_med_r",
+    "trap_lat_l",
+    "trap_lat_r",
+    "clav_med_l",
+    "clav_med_r",
+    "clav_lat_l",
+    "clav_lat_r",
+    "scm_origin_l",
+    "scm_origin_r",
+    "scm_insert_l",
+    "scm_insert_r",
+    "acromion_l",
+    "acromion_r",
+)
+GIRDLE_LEFT_LANDMARK_IDS: tuple[str, ...] = (
+    "trap_apex_l",
+    "clav_med_l",
+    "nape",
+    "scm_origin_l",
+)
+GIRDLE_BACK_LANDMARK_IDS: tuple[str, ...] = (
+    "trap_apex_l",
+    "trap_apex_r",
+    "trap_med_l",
+    "trap_med_r",
+    "trap_lat_l",
+    "trap_lat_r",
+    "nape",
 )
 
 

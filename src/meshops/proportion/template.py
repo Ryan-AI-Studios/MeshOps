@@ -96,6 +96,23 @@ _FRONT_LANDMARK_KEYS: tuple[str, ...] = (
     "gastroc_lat_r",
     "ball_l",
     "ball_r",
+    # 0128 shoulder girdle form-read (front)
+    "trap_apex_l",
+    "trap_apex_r",
+    "trap_med_l",
+    "trap_med_r",
+    "trap_lat_l",
+    "trap_lat_r",
+    "clav_med_l",
+    "clav_med_r",
+    "clav_lat_l",
+    "clav_lat_r",
+    "scm_origin_l",
+    "scm_origin_r",
+    "scm_insert_l",
+    "scm_insert_r",
+    "acromion_l",
+    "acromion_r",
 )
 
 # Left profile: depth pairs + optional heel/breast hang. No toe_l/r (B1 — front only).
@@ -148,6 +165,11 @@ _LEFT_LANDMARK_KEYS: tuple[str, ...] = (
     "arch_apex_l",
     "achilles_l",
     "malleolus_med_l",
+    # 0128 shoulder girdle Y / pride (never invent from front-only)
+    "trap_apex_l",
+    "clav_med_l",
+    "nape",
+    "scm_origin_l",
 )
 
 # Top-level edge_pairs stubs (sibling of views) — fill [[x0,y0],[x1,y1]].
@@ -212,6 +234,14 @@ _BACK_LANDMARK_KEYS: tuple[str, ...] = (
     "gastroc_lat_r",
     "achilles_l",
     "achilles_r",
+    # 0128 shoulder girdle form-read (back — Package A currently empty here)
+    "trap_apex_l",
+    "trap_apex_r",
+    "trap_med_l",
+    "trap_med_r",
+    "trap_lat_l",
+    "trap_lat_r",
+    "nape",
 )
 
 # Top-down plan view (0030) — breast/glute soft-spacing primary vocabulary.

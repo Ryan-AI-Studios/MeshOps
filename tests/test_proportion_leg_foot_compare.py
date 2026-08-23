@@ -716,7 +716,7 @@ def test_d11_capsule_p0_soft_adjust(tmp_path: Path) -> None:
 def test_f1_mcp_catalog_51() -> None:
     """F1: TOOL_NAMES 51 and leg-foot-compare tool present."""
     assert "mesh_proportion_blockout_leg_foot_compare" in TOOL_NAMES
-    assert len(TOOL_NAMES) == 51
+    assert len(TOOL_NAMES) == 52
 
 
 def test_f2_cli_contains_verb() -> None:
