@@ -16,6 +16,7 @@ breast_lower* used for rz in 0030; lateral fuse/diameter still 0027 (no fuse pai
 
 from __future__ import annotations
 
+from meshops.proportion.assist import FACE_LEFT_LANDMARK_IDS
 from meshops.proportion.frame import figure_span_from_landmarks
 from meshops.proportion.models import (
     CheckResult,
@@ -282,6 +283,37 @@ def fuse_xyz(
                     if x_ref is not None:
                         mid.x_m = x_ref * height_m
                 out[mid_id] = mid
+
+        # 0124: same-id left overlay for face form-read Y (not DEPTH_PAIRS).
+        for lid in FACE_LEFT_LANDMARK_IDS:
+            src_lm = left.landmarks.get(lid)
+            if src_lm is None:
+                continue
+            y_body = sign * (src_lm.x_px - torso_cx) / left_span
+            conf = min(1.0, src_lm.confidence * conf_scale * 0.9)
+            existing = out.get(lid)
+            if existing is None:
+                z_left = _z_from_view(left, src_lm, left_span)
+                item = LandmarkXYZ(
+                    id=lid,
+                    x=None,
+                    y=y_body,
+                    z=z_left,
+                    confidence=conf,
+                    sources=["left"],
+                )
+                if height_m is not None:
+                    item.y_m = y_body * height_m
+                    if z_left is not None:
+                        item.z_m = z_left * height_m
+                out[lid] = item
+            elif existing.y is None:
+                existing.y = y_body
+                if height_m is not None:
+                    existing.y_m = y_body * height_m
+                if "left" not in existing.sources:
+                    existing.sources.append("left")
+                existing.confidence = min(existing.confidence, conf)
 
     # Soft foot length from front toe/heel Z when meters present (R4).
     messages.extend(_foot_len_messages(out))

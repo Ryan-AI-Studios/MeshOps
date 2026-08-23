@@ -92,7 +92,7 @@ proportion_app = typer.Typer(
         "blockout-validate-constraints | "
         "blockout-optimize | blockout-emit-setup | blockout-open-setup | blockout-fuse-plan | "
         "skeleton-build | depth-heatmap | depth-hint | silhouette-compare | "
-        "blockout-feedback. "
+        "blockout-feedback | blockout-face-compare. "
         "Assist-first landmarks + head-unit checks + blockout-grade XYZ; "
         "schema 1.1.0 diameters (edge pairs) + left depth bands + cross-sections; "
         "scaffold creates package layout + package_checklist.json only (not mesh/print success); "
@@ -116,7 +116,9 @@ proportion_app = typer.Typer(
         "depth-heatmap glance PNG from samples/deltas (numbers SoT — N6); "
         "depth-hint external depth-channel assist hints + optional merge-into (conf floor — N6); "
         "silhouette-compare front|left same-role binary IoU/Dice QA score (authoring only — N6); "
-        "blockout-feedback sticky post-export checklist (depth+heatmap+silhouettes — N6). "
+        "blockout-feedback sticky post-export checklist (depth+heatmap+silhouettes — N6); "
+        "blockout-face-compare photo vs RECIPE vs optional scene "
+        "(0124; FACE_COMPARE_HONESTY — N6). "
         "Optional: meshops[proportion] (Pillow)."
     ),
     add_completion=False,
@@ -3283,6 +3285,70 @@ def proportion_blockout_feedback_cmd(
             typer.echo(f"  note: {msg}")
         typer.echo(f"honesty: {FEEDBACK_HONESTY}")
         typer.echo("blockout-feedback authoring QA only — not mesh or print success")
+    raise typer.Exit(0)
+
+
+@proportion_app.command("blockout-face-compare")
+def proportion_blockout_face_compare_cmd(
+    report: Path = typer.Option(
+        ...,
+        "--report",
+        help="Path to proportion_report.json (required)",
+    ),
+    recipe: Path = typer.Option(
+        ...,
+        "--recipe",
+        help="Path to blockout_recipe.json (required)",
+    ),
+    out: Path = typer.Option(
+        ...,
+        "--out",
+        help="Output directory for face_compare.json (required)",
+    ),
+    scene_dump: Path | None = typer.Option(
+        None,
+        "--scene-dump",
+        help="Optional live Blender/scene dump JSON overlay",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite existing face_compare.json",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
+) -> None:
+    """Compare Package A face landmarks vs RECIPE vs optional live scene.
+
+    Authoring QA only — not mesh or print success (FACE_COMPARE_HONESTY).
+    """
+    from meshops.proportion.errors import ProportionError
+    from meshops.proportion.face_compare import run_blockout_face_compare
+    from meshops.proportion.honesty import FACE_COMPARE_HONESTY
+
+    try:
+        payload = run_blockout_face_compare(
+            report,
+            recipe,
+            out,
+            scene_dump=scene_dump,
+            force=force,
+        )
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    if json_out:
+        _emit_json(payload)
+    else:
+        typer.echo(f"blockout-face-compare ok={payload.get('ok')} region={payload.get('region')}")
+        for msg in payload.get("messages") or []:
+            typer.echo(f"  note: {msg}")
+        pkg_path = payload.get("package_path")
+        if pkg_path:
+            typer.echo(f"  {pkg_path}")
+        typer.echo(f"honesty: {FACE_COMPARE_HONESTY}")
+        typer.echo("blockout-face-compare authoring QA only — not mesh or print success")
     raise typer.Exit(0)
 
 

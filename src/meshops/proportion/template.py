@@ -59,6 +59,21 @@ _FRONT_LANDMARK_KEYS: tuple[str, ...] = (
     "thigh_r",
     "calf_l",
     "calf_r",
+    # 0124 face form-read (front)
+    "eye_l",
+    "eye_r",
+    "brow_l",
+    "brow_r",
+    "nose_tip",
+    "mouth_corner_l",
+    "mouth_corner_r",
+    "lip_mid",
+    "cheek_l",
+    "cheek_r",
+    "ear_l",
+    "ear_r",
+    "lip_upper",
+    "lip_lower",
 )
 
 # Left profile: depth pairs + optional heel/breast hang. No toe_l/r (B1 — front only).
@@ -92,6 +107,12 @@ _LEFT_LANDMARK_KEYS: tuple[str, ...] = (
     "breast_lower_r",
     "breast_upper",
     "spine_hint",
+    # 0124 face Y / pride (never invent from front-only)
+    "eye_l",
+    "brow_l",
+    "nose_tip",
+    "lip_mid",
+    "ear_l",
 )
 
 # Top-level edge_pairs stubs (sibling of views) — fill [[x0,y0],[x1,y1]].
@@ -120,6 +141,9 @@ _TQ_LANDMARK_KEYS: tuple[str, ...] = (
     "sole",
     "shoulder_l",
     "shoulder_r",
+    "eye_l",
+    "eye_r",
+    "nose_tip",
 )
 
 _BACK_LANDMARK_KEYS: tuple[str, ...] = (

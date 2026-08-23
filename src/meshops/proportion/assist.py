@@ -102,7 +102,50 @@ KNOWN_LANDMARK_IDS: frozenset[str] = frozenset(
         "bust",
         "waist",
         "neck",
+        # 0124 face form-read (not MediaPipe 478)
+        "eye_l",
+        "eye_r",
+        "brow_l",
+        "brow_r",
+        "nose_tip",
+        "mouth_corner_l",
+        "mouth_corner_r",
+        "lip_mid",
+        "cheek_l",
+        "cheek_r",
+        "ear_l",
+        "ear_r",
+        "lip_upper",
+        "lip_lower",
     }
+)
+
+# Frozen v1 front form-read ids (0124). Optional lip_upper/lip_lower are extra.
+FACE_FRONT_LANDMARK_IDS: tuple[str, ...] = (
+    "eye_l",
+    "eye_r",
+    "brow_l",
+    "brow_r",
+    "nose_tip",
+    "mouth_corner_l",
+    "mouth_corner_r",
+    "lip_mid",
+    "cheek_l",
+    "cheek_r",
+    "ear_l",
+    "ear_r",
+)
+FACE_LEFT_LANDMARK_IDS: tuple[str, ...] = (
+    "eye_l",
+    "brow_l",
+    "nose_tip",
+    "lip_mid",
+    "ear_l",
+)
+FACE_TQ_LANDMARK_IDS: tuple[str, ...] = (
+    "eye_l",
+    "eye_r",
+    "nose_tip",
 )
 
 
