@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from meshops.proportion.assist import (
     FACE_LEFT_LANDMARK_IDS,
+    GIRDLE_BACK_LANDMARK_IDS,
+    GIRDLE_LEFT_LANDMARK_IDS,
     HIP_GLUTE_BACK_LANDMARK_IDS,
     HIP_GLUTE_LEFT_LANDMARK_IDS,
     LEG_FOOT_BACK_LANDMARK_IDS,
@@ -208,8 +210,8 @@ def fuse_xyz(
             xyz.z_m = z * height_m
         out[lid] = xyz
 
-    # 0125/0126/0127: back-view X/Z for torso + hip/glute + leg/foot form-read ids
-    # (not DEPTH_PAIRS; Y from left).
+    # 0125/0126/0127/0128: back-view X/Z for torso + hip/glute + leg/foot + girdle
+    # form-read ids (not DEPTH_PAIRS; Y from left).
     back = views.get("back")
     if back is not None and back.landmarks:
         back_span = back.figure_span_px or figure_span_from_landmarks(back)
@@ -224,6 +226,7 @@ def fuse_xyz(
             *TORSO_BACK_LANDMARK_IDS,
             *HIP_GLUTE_BACK_LANDMARK_IDS,
             *LEG_FOOT_BACK_LANDMARK_IDS,
+            *GIRDLE_BACK_LANDMARK_IDS,
         ):
             src_lm = back.landmarks.get(lid)
             if src_lm is None:
@@ -348,12 +351,13 @@ def fuse_xyz(
                         mid.x_m = x_ref * height_m
                 out[mid_id] = mid
 
-        # 0124/0125/0126/0127: same-id left overlay for face + torso + hip/glute + leg/foot Y.
+        # 0124/0125/0126/0127/0128: same-id left overlay Y.
         for lid in (
             *FACE_LEFT_LANDMARK_IDS,
             *TORSO_LEFT_LANDMARK_IDS,
             *HIP_GLUTE_LEFT_LANDMARK_IDS,
             *LEG_FOOT_LEFT_LANDMARK_IDS,
+            *GIRDLE_LEFT_LANDMARK_IDS,
         ):
             src_lm = left.landmarks.get(lid)
             if src_lm is None:

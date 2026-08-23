@@ -1834,6 +1834,35 @@ def _measured_lm_m(report: ProportionReport, lid: str, *, y: bool) -> float | No
     return val if math.isfinite(val) else None
 
 
+def _apply_measured_trap_yz(
+    parts: list[RecipePart],
+    report: ProportionReport,
+    messages: list[str],
+) -> None:
+    """0128: overlay measured trap_apex_* Y/Z onto trap_soft after 0061 rewrite.
+
+    B32: do not abs measured Y. B33: next statement after girdle call L4738.
+    """
+    by_name = {p.name: p for p in parts}
+    for side in ("l", "r"):
+        trap = by_name.get(f"RECIPE_trap_soft_{side}")
+        if trap is None or trap.center is None or len(trap.center) < 3:
+            continue
+        my = _measured_lm_m(report, f"trap_apex_{side}", y=True)
+        mz = _measured_lm_m(report, f"trap_apex_{side}", y=False)
+        if my is None and mz is None:
+            continue
+        c = list(trap.center)
+        if my is not None:
+            c[1] = my
+            messages.append(f"girdle: measured trap y={my:.4f} ({side})")
+        if mz is not None:
+            c[2] = mz
+            messages.append(f"girdle: measured trap z={mz:.4f} ({side})")
+        trap.center = c
+        trap.placement = "full3d"
+
+
 def _apply_scap_plane(
     parts: list[RecipePart],
     report: ProportionReport,
@@ -4736,6 +4765,8 @@ def build_blockout_recipe(
 
     # 0061: clavicle radius/shelf + trap floors/nape (after 0060 bury; before 0066 scap plane)
     _apply_shoulder_girdle_softs(parts, report, resolved, messages)
+    # 0128: measured trap_apex Y/Z after L1814-1815 rewrite (B32/B33 - do not abs).
+    _apply_measured_trap_yz(parts, report, messages)
 
     # 0066: scap_soft plate + rear past chest oval (after 0061 girdle; before arm muscle / breast)
     _apply_scap_plane(parts, report, resolved, messages)
@@ -7312,6 +7343,7 @@ __all__ = [
     "_apply_head_pitch",
     "_apply_join_ready_overlaps",
     "_apply_measured_calf_cyl_y",
+    "_apply_measured_trap_yz",
     "_apply_mid_back_plane",
     "_apply_neck_column_priors",
     "_apply_neck_diameter_base",

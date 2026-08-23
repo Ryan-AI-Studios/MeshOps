@@ -489,7 +489,7 @@ def test_t6_schema_catalog_n_parts() -> None:
         **_product_flags(),  # type: ignore[arg-type]
     )
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
-    assert len(TOOL_NAMES) == 51
+    assert len(TOOL_NAMES) == 52
     assert len(pkg.parts) == 131
 
 

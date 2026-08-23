@@ -194,4 +194,4 @@ def test_e_top_seam_y_both_sides() -> None:
 
 
 def test_e_mcp_catalog_50() -> None:
-    assert len(TOOL_NAMES) == 51
+    assert len(TOOL_NAMES) == 52
