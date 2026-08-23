@@ -16,7 +16,11 @@ breast_lower* used for rz in 0030; lateral fuse/diameter still 0027 (no fuse pai
 
 from __future__ import annotations
 
-from meshops.proportion.assist import FACE_LEFT_LANDMARK_IDS
+from meshops.proportion.assist import (
+    FACE_LEFT_LANDMARK_IDS,
+    TORSO_BACK_LANDMARK_IDS,
+    TORSO_LEFT_LANDMARK_IDS,
+)
 from meshops.proportion.frame import figure_span_from_landmarks
 from meshops.proportion.models import (
     CheckResult,
@@ -200,6 +204,57 @@ def fuse_xyz(
             xyz.z_m = z * height_m
         out[lid] = xyz
 
+    # 0125: back-view X/Z for torso form-read ids (not DEPTH_PAIRS; Y from left).
+    back = views.get("back")
+    if back is not None and back.landmarks:
+        back_span = back.figure_span_px or figure_span_from_landmarks(back)
+        if back_span is None or back_span <= 0:
+            back_span = figure_h
+            messages.append("back figure span unknown; using front span for torso X/Z")
+        elif back.figure_span_px is None:
+            back.figure_span_px = back_span
+        back_mid = _midline_x(back)
+        invert_x = str(back.facing_direction or "camera_back") == "camera_back"
+        for lid in TORSO_BACK_LANDMARK_IDS:
+            src_lm = back.landmarks.get(lid)
+            if src_lm is None:
+                continue
+            z_back = _z_from_view(back, src_lm, back_span)
+            x_body: float | None = None
+            if back_mid is not None and back_span > 0:
+                x_body = (src_lm.x_px - back_mid) / back_span
+                if invert_x:
+                    x_body = -x_body
+            conf = min(1.0, src_lm.confidence * conf_scale * 0.9)
+            existing = out.get(lid)
+            if existing is None:
+                item = LandmarkXYZ(
+                    id=lid,
+                    x=x_body,
+                    y=None,
+                    z=z_back,
+                    confidence=conf,
+                    sources=["back"],
+                )
+                if height_m is not None:
+                    if x_body is not None:
+                        item.x_m = x_body * height_m
+                    if z_back is not None:
+                        item.z_m = z_back * height_m
+                out[lid] = item
+            else:
+                if existing.x is None and x_body is not None:
+                    existing.x = x_body
+                    if height_m is not None:
+                        existing.x_m = x_body * height_m
+                if existing.z is None and z_back is not None:
+                    existing.z = z_back
+                    if height_m is not None:
+                        existing.z_m = z_back * height_m
+                if "back" not in existing.sources:
+                    existing.sources.append("back")
+                existing.confidence = min(existing.confidence, conf)
+
     # Depth from left view (extended pair table)
     if left is not None and left.landmarks:
         left_span = left.figure_span_px or figure_span_from_landmarks(left)
@@ -284,8 +339,8 @@ def fuse_xyz(
                         mid.x_m = x_ref * height_m
                 out[mid_id] = mid
 
-        # 0124: same-id left overlay for face form-read Y (not DEPTH_PAIRS).
-        for lid in FACE_LEFT_LANDMARK_IDS:
+        # 0124/0125: same-id left overlay for face + torso form-read Y (not DEPTH_PAIRS).
+        for lid in (*FACE_LEFT_LANDMARK_IDS, *TORSO_LEFT_LANDMARK_IDS):
             src_lm = left.landmarks.get(lid)
             if src_lm is None:
                 continue
