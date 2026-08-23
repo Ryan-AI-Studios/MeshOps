@@ -3216,6 +3216,37 @@ def _sync_calf_distal_to_ankle(
                 messages.append(f"calf_{side}: distal/cyl p1 Y synced to ank_foot ({ay:.4f})")
 
 
+def _apply_measured_calf_cyl_y(
+    parts: list[RecipePart],
+    report: ProportionReport,
+    messages: list[str],
+) -> None:
+    """0127: overlay measured gastroc_med_* Y onto calf_cyl p0 after B6, then mid."""
+    by_name = {p.name: p for p in parts}
+    for side in ("l", "r"):
+        my = _measured_lm_m(report, f"gastroc_med_{side}", y=True)
+        if my is None:
+            continue
+        cyl = by_name.get(f"RECIPE_calf_cyl_{side}")
+        if cyl is None or cyl.p0 is None or len(cyl.p0) < 3:
+            continue
+        cyl.p0 = [float(cyl.p0[0]), my, float(cyl.p0[2])]
+        cyl.placement = "full3d"
+        taper = by_name.get(f"RECIPE_calf_taper_dist_{side}")
+        dest: list[float] | None = None
+        if taper is not None and taper.p1 is not None and len(taper.p1) >= 3:
+            dest = [float(taper.p1[0]), float(taper.p1[1]), float(taper.p1[2])]
+        elif cyl.p1 is not None and len(cyl.p1) >= 3:
+            dest = [float(cyl.p1[0]), float(cyl.p1[1]), float(cyl.p1[2])]
+        if dest is not None:
+            mid = _calf_split_mid(list(cyl.p0), dest)
+            cyl.p1 = list(mid)
+            if taper is not None:
+                taper.p0 = list(mid)
+                taper.placement = "full3d"
+        messages.append(f"leg_foot: measured calf_cyl y={my:.4f} ({side})")
+
+
 def _noskel_arm_endpoint_ys(
     band_id: str,
     y0: float | None,
@@ -4671,6 +4702,8 @@ def build_blockout_recipe(
 
     # 0034 B6 / 0096: distal/taper p1 Y ← ank_foot after feet (legacy: cyl.p1)
     _sync_calf_distal_to_ankle(parts, messages)
+    # 0127: measured gastroc Y after B6 (B33 — then recompute mid; B32 — do not abs).
+    _apply_measured_calf_cyl_y(parts, report, messages)
 
     # 0027 profile emit after base (skip_roles already applied)
     if profile is not None:
@@ -7278,6 +7311,7 @@ __all__ = [
     "_apply_glute_seat_mass",
     "_apply_head_pitch",
     "_apply_join_ready_overlaps",
+    "_apply_measured_calf_cyl_y",
     "_apply_mid_back_plane",
     "_apply_neck_column_priors",
     "_apply_neck_diameter_base",

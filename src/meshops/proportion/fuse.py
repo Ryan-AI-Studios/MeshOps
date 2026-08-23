@@ -20,6 +20,8 @@ from meshops.proportion.assist import (
     FACE_LEFT_LANDMARK_IDS,
     HIP_GLUTE_BACK_LANDMARK_IDS,
     HIP_GLUTE_LEFT_LANDMARK_IDS,
+    LEG_FOOT_BACK_LANDMARK_IDS,
+    LEG_FOOT_LEFT_LANDMARK_IDS,
     TORSO_BACK_LANDMARK_IDS,
     TORSO_LEFT_LANDMARK_IDS,
 )
@@ -206,7 +208,8 @@ def fuse_xyz(
             xyz.z_m = z * height_m
         out[lid] = xyz
 
-    # 0125/0126: back-view X/Z for torso + hip/glute form-read ids (not DEPTH_PAIRS; Y from left).
+    # 0125/0126/0127: back-view X/Z for torso + hip/glute + leg/foot form-read ids
+    # (not DEPTH_PAIRS; Y from left).
     back = views.get("back")
     if back is not None and back.landmarks:
         back_span = back.figure_span_px or figure_span_from_landmarks(back)
@@ -217,7 +220,11 @@ def fuse_xyz(
             back.figure_span_px = back_span
         back_mid = _midline_x(back)
         invert_x = str(back.facing_direction or "camera_back") == "camera_back"
-        for lid in (*TORSO_BACK_LANDMARK_IDS, *HIP_GLUTE_BACK_LANDMARK_IDS):
+        for lid in (
+            *TORSO_BACK_LANDMARK_IDS,
+            *HIP_GLUTE_BACK_LANDMARK_IDS,
+            *LEG_FOOT_BACK_LANDMARK_IDS,
+        ):
             src_lm = back.landmarks.get(lid)
             if src_lm is None:
                 continue
@@ -341,11 +348,12 @@ def fuse_xyz(
                         mid.x_m = x_ref * height_m
                 out[mid_id] = mid
 
-        # 0124/0125/0126: same-id left overlay for face + torso + hip/glute Y.
+        # 0124/0125/0126/0127: same-id left overlay for face + torso + hip/glute + leg/foot Y.
         for lid in (
             *FACE_LEFT_LANDMARK_IDS,
             *TORSO_LEFT_LANDMARK_IDS,
             *HIP_GLUTE_LEFT_LANDMARK_IDS,
+            *LEG_FOOT_LEFT_LANDMARK_IDS,
         ):
             src_lm = left.landmarks.get(lid)
             if src_lm is None:

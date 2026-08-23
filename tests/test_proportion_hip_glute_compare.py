@@ -572,7 +572,7 @@ def test_d9_glute_outer_hold_priors_alias() -> None:
 def test_f1_mcp_catalog_50() -> None:
     """F1: TOOL_NAMES 50 and hip-glute-compare tool present."""
     assert "mesh_proportion_blockout_hip_glute_compare" in TOOL_NAMES
-    assert len(TOOL_NAMES) == 50
+    assert len(TOOL_NAMES) == 51
 
 
 def test_f2_cli_contains_verb() -> None:

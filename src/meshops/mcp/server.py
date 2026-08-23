@@ -74,6 +74,7 @@ TOOL_NAMES: frozenset[str] = frozenset(
         "mesh_proportion_blockout_face_compare",
         "mesh_proportion_blockout_torso_compare",
         "mesh_proportion_blockout_hip_glute_compare",
+        "mesh_proportion_blockout_leg_foot_compare",
     }
 )
 
@@ -1013,6 +1014,28 @@ def build_server(work_root: Path | None = None) -> Any:
         Not mesh or print success. Raises ProportionError on hard failures.
         """
         return T.mesh_proportion_blockout_hip_glute_compare(
+            wr,
+            report=report,
+            recipe=recipe,
+            out=out,
+            scene_dump=scene_dump,
+            force=force,
+        )
+
+    @mcp.tool()
+    def mesh_proportion_blockout_leg_foot_compare(
+        report: str,
+        recipe: str,
+        out: str,
+        scene_dump: str | None = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Compare Package A leg/foot landmarks vs RECIPE vs optional live scene dump.
+
+        Authoring QA only — proportion_leg_foot_compare_not_mesh_or_print_success.
+        Not mesh or print success. Raises ProportionError on hard failures.
+        """
+        return T.mesh_proportion_blockout_leg_foot_compare(
             wr,
             report=report,
             recipe=recipe,

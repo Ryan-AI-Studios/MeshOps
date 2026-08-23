@@ -1430,3 +1430,30 @@ def mesh_proportion_blockout_hip_glute_compare(
         scene_dump=_resolve_tool_path(scene_dump, work_root) if scene_dump else None,
         force=force,
     )
+
+
+def mesh_proportion_blockout_leg_foot_compare(
+    work_root: Path,
+    *,
+    report: str,
+    recipe: str,
+    out: str,
+    scene_dump: str | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Photo vs RECIPE vs optional scene. Authoring only — LEG_FOOT_COMPARE_HONESTY."""
+    from meshops.proportion.leg_foot_compare import run_blockout_leg_foot_compare
+
+    ends_sep = out.endswith(("/", "\\"))
+    out_base = out.rstrip("/\\") if ends_sep else out
+    out_resolved = _resolve_tool_path(out_base, work_root)
+    out_arg: str | Path = (
+        str(out_resolved) + ("\\" if ends_sep else "") if ends_sep else out_resolved
+    )
+    return run_blockout_leg_foot_compare(
+        _resolve_tool_path(report, work_root),
+        _resolve_tool_path(recipe, work_root),
+        out_arg,
+        scene_dump=_resolve_tool_path(scene_dump, work_root) if scene_dump else None,
+        force=force,
+    )
