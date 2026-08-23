@@ -1823,7 +1823,7 @@ def _apply_shoulder_girdle_softs(
 
 
 def _measured_lm_m(report: ProportionReport, lid: str, *, y: bool) -> float | None:
-    """Finite landmark y_m or z_m, else None (0125 — never invent)."""
+    """Finite landmark y_m or z_m, else None (0125/0126 — never invent)."""
     lm = report.landmarks_xyz.get(lid)
     if lm is None:
         return None
@@ -5952,6 +5952,41 @@ def _apply_glute_seat_mass(
                 if sc is not None and len(sc) >= 3:
                     p.center = [float(sc[0]), lock_y, lock_z]
             messages.append(f"glute_seat: dual lock ry={lock_ry:.4f} y={lock_y:.4f} z={lock_z:.4f}")
+
+    # 0126: measured Y/Z after dual lock (B33 — dual lock must not clobber; B32 — do not abs).
+    overlay_idxs = seated_idxs if seated_idxs else idxs
+    seam_y = _measured_lm_m(report, "glute_top_seam", y=True)
+    seam_z = _measured_lm_m(report, "glute_top_seam", y=False)
+    for i in overlay_idxs:
+        p = parts[i]
+        if p.center is None or len(p.center) < 3:
+            continue
+        name = p.name or ""
+        if name.endswith("_l"):
+            side = "l"
+        elif name.endswith("_r"):
+            side = "r"
+        else:
+            continue
+        bottom_id = f"glute_bottom_{side}"
+        my = _measured_lm_m(report, bottom_id, y=True)
+        mz = _measured_lm_m(report, bottom_id, y=False)
+        src_y = bottom_id if my is not None else "glute_top_seam"
+        src_z = bottom_id if mz is not None else "glute_top_seam"
+        if my is None:
+            my = seam_y
+        if mz is None:
+            mz = seam_z
+        if my is None and mz is None:
+            continue
+        c = list(p.center)
+        if my is not None:
+            c[1] = my
+            messages.append(f"hip_glute: measured glute y={my:.4f} ({src_y})")
+        if mz is not None:
+            c[2] = mz
+            messages.append(f"hip_glute: measured glute z={mz:.4f} ({src_z})")
+        p.center = c
 
     # 10. composition observability: glute top/bottom vs pelvis mid/top (B12/B15).
     if any_seated:

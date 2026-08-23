@@ -95,7 +95,7 @@ def test_t5_packs_cap_only_on_deltoid_soft() -> None:
 
 def test_t6_mcp_catalog_47() -> None:
     """T6: MCP catalog stays 47."""
-    assert len(TOOL_NAMES) == 49
+    assert len(TOOL_NAMES) == 50
 
 
 def test_t7_no_michelin_cli_command() -> None:

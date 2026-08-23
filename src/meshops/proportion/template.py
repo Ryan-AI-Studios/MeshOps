@@ -78,6 +78,13 @@ _FRONT_LANDMARK_KEYS: tuple[str, ...] = (
     "sternum_mid",
     "costal_l",
     "costal_r",
+    # 0126 hip/glute/groin form-read (front)
+    "asis_l",
+    "asis_r",
+    "groin_fold_l",
+    "groin_fold_r",
+    "thigh_medial_l",
+    "thigh_medial_r",
 )
 
 # Left profile: depth pairs + optional heel/breast hang. No toe_l/r (B1 — front only).
@@ -121,6 +128,10 @@ _LEFT_LANDMARK_KEYS: tuple[str, ...] = (
     "sternum_mid",
     "scap_inferior_l",
     "mid_back_l",
+    # 0126 hip/glute Y / pride (never invent from front-only)
+    "glute_bottom_l",
+    "glute_top_seam",
+    "psis_l",
 )
 
 # Top-level edge_pairs stubs (sibling of views) — fill [[x0,y0],[x1,y1]].
@@ -170,6 +181,14 @@ _BACK_LANDMARK_KEYS: tuple[str, ...] = (
     "scap_medial_r",
     "mid_back_l",
     "mid_back_r",
+    # 0126 hip/glute form-read (back — Package A currently empty here)
+    "psis_l",
+    "psis_r",
+    "glute_outer_l",
+    "glute_outer_r",
+    "glute_bottom_l",
+    "glute_bottom_r",
+    "glute_top_seam",
 )
 
 # Top-down plan view (0030) — breast/glute soft-spacing primary vocabulary.

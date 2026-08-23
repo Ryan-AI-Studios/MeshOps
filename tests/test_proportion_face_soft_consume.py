@@ -109,4 +109,4 @@ def test_e5_front_only_y_stays_feature_plane() -> None:
 
 
 def test_e_mcp_catalog_48() -> None:
-    assert len(TOOL_NAMES) == 49
+    assert len(TOOL_NAMES) == 50
