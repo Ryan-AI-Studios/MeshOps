@@ -11,7 +11,7 @@ from pathlib import Path
 
 from meshops.mcp.server import TOOL_NAMES
 from meshops.proportion.blockout_recipe import (
-    COMPACT_CULL_ROLES,
+    COMPACT_CULL_NAME_PREFIXES,
     HIP_SOFT_RX_SCALE,
     HIP_SOFT_RY_FRAC_RX,
     HIP_SOFT_RZ_FRAC_RX,
@@ -93,6 +93,6 @@ def test_t7_no_hip_cli_command() -> None:
 
 
 def test_t8_hip_structural_keep_y_rear() -> None:
-    """T8: hip_soft not in compact cull + Y rear 0.12 (not substring hip in __all__)."""
-    assert "hip_soft" not in COMPACT_CULL_ROLES
+    """T8: RECIPE_hip_soft_ not in compact name prefixes + Y rear 0.12."""
+    assert "RECIPE_hip_soft_" not in COMPACT_CULL_NAME_PREFIXES
     assert HIP_SOFT_Y_REAR_FRAC_RX == 0.12
