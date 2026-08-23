@@ -127,6 +127,20 @@ KNOWN_LANDMARK_IDS: frozenset[str] = frozenset(
         "scap_medial_r",
         "mid_back_l",
         "mid_back_r",
+        # 0126 hip/glute/groin form-read (not Pose 23-24 / genital geometry)
+        "asis_l",
+        "asis_r",
+        "psis_l",
+        "psis_r",
+        "glute_outer_l",
+        "glute_outer_r",
+        "glute_bottom_l",
+        "glute_bottom_r",
+        "glute_top_seam",
+        "groin_fold_l",
+        "groin_fold_r",
+        "thigh_medial_l",
+        "thigh_medial_r",
     }
 )
 
@@ -176,6 +190,30 @@ TORSO_BACK_LANDMARK_IDS: tuple[str, ...] = (
     "scap_medial_r",
     "mid_back_l",
     "mid_back_r",
+)
+
+# Frozen v1 hip/glute/groin form-read ids (0126). Existing hip/glute DEPTH stay.
+HIP_GLUTE_FRONT_LANDMARK_IDS: tuple[str, ...] = (
+    "asis_l",
+    "asis_r",
+    "groin_fold_l",
+    "groin_fold_r",
+    "thigh_medial_l",
+    "thigh_medial_r",
+)
+HIP_GLUTE_LEFT_LANDMARK_IDS: tuple[str, ...] = (
+    "glute_bottom_l",
+    "glute_top_seam",
+    "psis_l",
+)
+HIP_GLUTE_BACK_LANDMARK_IDS: tuple[str, ...] = (
+    "psis_l",
+    "psis_r",
+    "glute_outer_l",
+    "glute_outer_r",
+    "glute_bottom_l",
+    "glute_bottom_r",
+    "glute_top_seam",
 )
 
 

@@ -80,13 +80,14 @@ def test_t5_hip_rx_scale_hold() -> None:
 
 def test_t6_mcp_catalog_47() -> None:
     """T6: MCP catalog stays 47."""
-    assert len(TOOL_NAMES) == 49
+    assert len(TOOL_NAMES) == 50
 
 
 def test_t7_no_hip_cli_command() -> None:
-    """T7: no blockout-hip / def hip_soft_scale / def hip_scale / def hip_michelin."""
+    """T7: no hip_soft skill CLI (0126 hip-glute-compare is a different verb)."""
     cli_text = (_REPO / "src/meshops/cli.py").read_text(encoding="utf-8")
-    assert "blockout-hip" not in cli_text
+    assert "blockout-hip-soft" not in cli_text
+    assert 'command("blockout-hip")' not in cli_text
     assert "def hip_soft_scale" not in cli_text
     assert "def hip_scale" not in cli_text
     assert "def hip_michelin" not in cli_text
