@@ -71,6 +71,7 @@ TOOL_NAMES: frozenset[str] = frozenset(
         "mesh_proportion_depth_hint",
         "mesh_proportion_silhouette_compare",
         "mesh_proportion_blockout_feedback",
+        "mesh_proportion_blockout_face_compare",
     }
 )
 
@@ -949,6 +950,28 @@ def build_server(work_root: Path | None = None) -> Any:
             ref_left=ref_left,
             mesh_view_front=mesh_view_front,
             mesh_view_left=mesh_view_left,
+            force=force,
+        )
+
+    @mcp.tool()
+    def mesh_proportion_blockout_face_compare(
+        report: str,
+        recipe: str,
+        out: str,
+        scene_dump: str | None = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Compare Package A face landmarks vs RECIPE vs optional live scene dump.
+
+        Authoring QA only — proportion_face_compare_not_mesh_or_print_success.
+        Not mesh or print success. Raises ProportionError on hard failures.
+        """
+        return T.mesh_proportion_blockout_face_compare(
+            wr,
+            report=report,
+            recipe=recipe,
+            out=out,
+            scene_dump=scene_dump,
             force=force,
         )
 

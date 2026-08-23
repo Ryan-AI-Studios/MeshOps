@@ -363,11 +363,26 @@ def _capsule(
     )
 
 
+def _as_m(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    out = float(value)
+    return out if math.isfinite(out) else None
+
+
+def _lm_axis(lms: dict[str, LandmarkXYZ], lid: str, axis: str) -> float | None:
+    item = lms.get(lid)
+    if item is None:
+        return None
+    return _as_m(getattr(item, axis, None))
+
+
 def _build_face_features(
     bounds: HeadBounds,
     *,
     skeleton: BlockoutSkeleton | None,
     messages: list[str],
+    landmarks_xyz: dict[str, LandmarkXYZ] | None = None,
 ) -> list[RecipePart]:
     """Jaw + brows + eyes + nose + ears + lip (R1 / B7)."""
     h = bounds.H
@@ -376,6 +391,7 @@ def _build_face_features(
     rx = bounds.rx
     ry = bounds.ry
     placement = bounds.placement
+    lms = landmarks_xyz or {}
 
     eye_r = EYE_RADIUS_FRAC_H * h
     eye_z = z_chin + _EYE_Z_FRAC * h
@@ -385,8 +401,27 @@ def _build_face_features(
     # Jaw keeps legacy embed plane (0057 fence). Feature softs use near-surface plane (D7).
     jaw_face_y = y - _JAW_FACE_Y_FRAC_RY * ry
     feature_face_y = y - FEATURE_FACE_Y_FRAC_RY * ry
-    # Inter-eye gap ~ one eye width; half-sep = 2 * eye_r
+    # Inter-eye gap ~ one eye width; half-sep = 2 * eye_r (Loomis). Measured IPD wins.
     eye_half_sep = 2.0 * eye_r
+    xl = _lm_axis(lms, "eye_l", "x_m")
+    xr = _lm_axis(lms, "eye_r", "x_m")
+    if xl is not None and xr is not None:
+        eye_half_sep = abs(xr - xl) / 2.0
+        messages.append(f"face: measured eye half-sep={eye_half_sep:.4f}")
+    else:
+        messages.append(f"face: Loomis eye half-sep={eye_half_sep:.4f}")
+    for lid in ("eye_l", "eye_r", "brow_l", "brow_r", "nose_tip", "lip_mid"):
+        mz = _lm_axis(lms, lid, "z_m")
+        if mz is None:
+            continue
+        if lid.startswith("eye_"):
+            eye_z = mz
+        elif lid.startswith("brow_"):
+            brow_z = mz
+        elif lid == "nose_tip":
+            nose_base_z = mz
+        elif lid == "lip_mid":
+            lip_z = mz
     nose_tip_y = y - NOSE_TIP_Y_FRAC_RY * ry
 
     pj_head = _parent_joint("head", ["chin", "crown"], skeleton, role="eye_soft", messages=messages)
@@ -437,12 +472,16 @@ def _build_face_features(
     brow_r = BROW_R_FRAC_H * h
     for side, sx in (("l", -1.0), ("r", 1.0)):
         cx = sx * eye_half_sep
+        brow_y = _lm_axis(lms, f"brow_{side}", "y_m")
+        cy = brow_y if brow_y is not None else feature_face_y
+        brow_side_z = _lm_axis(lms, f"brow_{side}", "z_m")
+        cz = brow_side_z if brow_side_z is not None else brow_z
         parts.append(
             _capsule(
                 f"RECIPE_brow_soft_{side}",
                 "brow_soft",
-                [cx - brow_half_len, feature_face_y, brow_z],
-                [cx + brow_half_len, feature_face_y, brow_z],
+                [cx - brow_half_len, cy, cz],
+                [cx + brow_half_len, cy, cz],
                 brow_r,
                 placement=placement,
                 parent_joint=pj_feat,
@@ -455,11 +494,15 @@ def _build_face_features(
     eye_ry = EYE_RY_FRAC_R * eye_r
     eye_rz = EYE_RZ_FRAC_R * eye_r
     for side, sx in (("l", -1.0), ("r", 1.0)):
+        eye_y = _lm_axis(lms, f"eye_{side}", "y_m")
+        cy = eye_y if eye_y is not None else feature_face_y
+        eye_side_z = _lm_axis(lms, f"eye_{side}", "z_m")
+        cz = eye_side_z if eye_side_z is not None else eye_z
         parts.append(
             _ellipsoid(
                 f"RECIPE_eye_soft_{side}",
                 "eye_soft",
-                [sx * eye_half_sep, feature_face_y, eye_z],
+                [sx * eye_half_sep, cy, cz],
                 eye_rx,
                 eye_ry,
                 eye_rz,
@@ -473,8 +516,10 @@ def _build_face_features(
     nose_ry = NOSE_RY_FRAC_H * h
     nose_rx = NOSE_RX_FRAC_H * h
     nose_rz = NOSE_RZ_FRAC_H * h
-    nose_center_y = nose_tip_y + nose_ry
-    nose_center_z = nose_base_z - 0.01 * h
+    nose_meas_y = _lm_axis(lms, "nose_tip", "y_m")
+    nose_meas_z = _lm_axis(lms, "nose_tip", "z_m")
+    nose_center_y = nose_meas_y if nose_meas_y is not None else (nose_tip_y + nose_ry)
+    nose_center_z = nose_meas_z if nose_meas_z is not None else (nose_base_z - 0.01 * h)
     parts.append(
         _ellipsoid(
             "RECIPE_nose_soft",
@@ -495,11 +540,15 @@ def _build_face_features(
     ear_rx = 0.08 * h
     ear_ry = 0.04 * h
     for side, sx in (("l", -1.0), ("r", 1.0)):
+        ear_y = _lm_axis(lms, f"ear_{side}", "y_m")
+        cy = ear_y if ear_y is not None else y
+        ear_side_z = _lm_axis(lms, f"ear_{side}", "z_m")
+        cz = ear_side_z if ear_side_z is not None else ear_z
         parts.append(
             _ellipsoid(
                 f"RECIPE_ear_soft_{side}",
                 "ear_soft",
-                [sx * rx, y, ear_z],
+                [sx * rx, cy, cz],
                 ear_rx,
                 ear_ry,
                 ear_rz,
@@ -512,11 +561,15 @@ def _build_face_features(
     lip_rx = LIP_RX_FRAC_H * h
     lip_ry = LIP_RY_FRAC_H * h
     lip_rz = LIP_RZ_FRAC_H * h
+    lip_y = _lm_axis(lms, "lip_mid", "y_m")
+    cy = lip_y if lip_y is not None else feature_face_y
+    lip_meas_z = _lm_axis(lms, "lip_mid", "z_m")
+    cz = lip_meas_z if lip_meas_z is not None else lip_z
     parts.append(
         _ellipsoid(
             "RECIPE_lip_soft",
             "lip_soft",
-            [0.0, feature_face_y, lip_z],
+            [0.0, cy, cz],
             lip_rx,
             lip_ry,
             lip_rz,
@@ -830,9 +883,8 @@ def build_face_parts(
 ) -> list[RecipePart]:
     """Emit face/hair/neckline RECIPE parts from shared HeadBounds (B7-B15).
 
-    *report* reserved for future measured face diameters; placement uses *head_bounds*.
+    0124: measured landmarks_xyz drive placement X/Z (Y if left-finite); 0102 scale holds.
     """
-    del report  # placement is Loomis/bounds-driven in v1
     msgs = messages if messages is not None else []
     if not face and hair == "none" and neckline == "none":
         return []
@@ -843,7 +895,14 @@ def build_face_parts(
 
     parts: list[RecipePart] = []
     if face:
-        parts.extend(_build_face_features(head_bounds, skeleton=skeleton, messages=msgs))
+        parts.extend(
+            _build_face_features(
+                head_bounds,
+                skeleton=skeleton,
+                messages=msgs,
+                landmarks_xyz=report.landmarks_xyz,
+            )
+        )
         parts.extend(
             _build_scm(
                 head_bounds,

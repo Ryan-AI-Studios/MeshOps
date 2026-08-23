@@ -205,7 +205,7 @@ def test_t6_packs_cap_only_on_deltoid_soft() -> None:
 
 def test_t7_mcp47_schema_140() -> None:
     """T7: MCP catalog 47; recipe schema 1.4.0."""
-    assert len(TOOL_NAMES) == 47
+    assert len(TOOL_NAMES) == 48
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
 
 

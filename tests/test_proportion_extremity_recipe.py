@@ -608,14 +608,14 @@ def test_ext__mcp_schema_and_tool_count() -> None:
     from meshops.mcp import TOOL_NAMES
     from meshops.mcp.server import build_server
 
-    assert len(TOOL_NAMES) == 47
+    assert len(TOOL_NAMES) == 48
 
     async def _body() -> None:
         server = build_server()
         async with Client(server) as client:
             listed = await client.list_tools()
             names = {t.name for t in listed.tools}
-            assert len(names) == 47
+            assert len(names) == 48
             assert names >= TOOL_NAMES
             tool = next(t for t in listed.tools if t.name == "mesh_proportion_blockout_recipe")
             schema = getattr(tool, "input_schema", None) or getattr(tool, "inputSchema", None)
@@ -998,7 +998,7 @@ def test_ext__t8_mcp_catalog_stays_46() -> None:
     """T8: MCP catalog stays 46 (no new tool)."""
     from meshops.mcp import TOOL_NAMES
 
-    assert len(TOOL_NAMES) == 47
+    assert len(TOOL_NAMES) == 48
 
 
 def test_ext__build_foot_parts_existing_parts_calf_floor() -> None:
