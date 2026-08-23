@@ -501,7 +501,7 @@ def test_t11_n_parts_mcp_palm() -> None:
     assert len(pkg.parts) == 131
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
     assert SKELETON_SCHEMA_VERSION == "1.0.0"
-    assert len(TOOL_NAMES) == 50
+    assert len(TOOL_NAMES) == 51
 
 
 def test_t12_four_digits_curl() -> None:

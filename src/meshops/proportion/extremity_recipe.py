@@ -634,6 +634,15 @@ def finger_primary_axis(
 # ---------------------------------------------------------------------------
 
 
+def _measured_arch_z_m(report: ProportionReport, side: str) -> float | None:
+    """Finite arch_apex_{side} z_m, else None (0127 — never invent)."""
+    lm = report.landmarks_xyz.get(f"arch_apex_{side}")
+    if lm is None or lm.z_m is None:
+        return None
+    val = float(lm.z_m)
+    return val if math.isfinite(val) else None
+
+
 def build_foot_parts(
     report: ProportionReport,
     *,
@@ -973,6 +982,16 @@ def _build_foot_side(
             parent_joint=pj_ank,
         )
     )
+    # 0127: measured arch_apex Z after arch write (keep ARCH_SOFT_RY_FRAC_HALF_DEPTH).
+    arch_part = out[-1]
+    measured_z = _measured_arch_z_m(report, side)
+    if measured_z is not None and arch_part.center is not None and len(arch_part.center) >= 3:
+        arch_part.center = [
+            float(arch_part.center[0]),
+            float(arch_part.center[1]),
+            measured_z,
+        ]
+        messages.append(f"leg_foot: measured arch z={measured_z:.4f} ({side})")
 
     # ank_foot — name MUST contain ank_foot (B2)
     ank_name = f"RECIPE_ank_foot_{side}"

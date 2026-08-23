@@ -141,6 +141,21 @@ KNOWN_LANDMARK_IDS: frozenset[str] = frozenset(
         "groin_fold_r",
         "thigh_medial_l",
         "thigh_medial_r",
+        # 0127 leg/ankle/foot form-read (not Pose 25-32 / boots)
+        "gastroc_med_l",
+        "gastroc_med_r",
+        "gastroc_lat_l",
+        "gastroc_lat_r",
+        "malleolus_med_l",
+        "malleolus_med_r",
+        "malleolus_lat_l",
+        "malleolus_lat_r",
+        "arch_apex_l",
+        "arch_apex_r",
+        "achilles_l",
+        "achilles_r",
+        "ball_l",
+        "ball_r",
     }
 )
 
@@ -214,6 +229,34 @@ HIP_GLUTE_BACK_LANDMARK_IDS: tuple[str, ...] = (
     "glute_bottom_l",
     "glute_bottom_r",
     "glute_top_seam",
+)
+
+# Frozen v1 leg/ankle/foot form-read ids (0127). Existing knee/ankle/calf/heel/toe/foot stay.
+LEG_FOOT_FRONT_LANDMARK_IDS: tuple[str, ...] = (
+    "malleolus_med_l",
+    "malleolus_med_r",
+    "malleolus_lat_l",
+    "malleolus_lat_r",
+    "gastroc_med_l",
+    "gastroc_med_r",
+    "gastroc_lat_l",
+    "gastroc_lat_r",
+    "ball_l",
+    "ball_r",
+)
+LEG_FOOT_LEFT_LANDMARK_IDS: tuple[str, ...] = (
+    "gastroc_med_l",
+    "arch_apex_l",
+    "achilles_l",
+    "malleolus_med_l",
+)
+LEG_FOOT_BACK_LANDMARK_IDS: tuple[str, ...] = (
+    "gastroc_med_l",
+    "gastroc_med_r",
+    "gastroc_lat_l",
+    "gastroc_lat_r",
+    "achilles_l",
+    "achilles_r",
 )
 
 

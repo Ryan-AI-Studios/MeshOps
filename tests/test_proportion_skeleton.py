@@ -688,7 +688,7 @@ def test_skeleton__cli_depth_at_landmarks_file(tmp_path: Path) -> None:
     from meshops.mcp import TOOL_NAMES
     from meshops.mcp.tools import mesh_proportion_skeleton_build
 
-    assert len(TOOL_NAMES) == 50
+    assert len(TOOL_NAMES) == 51
     assert "mesh_proportion_skeleton_build" in TOOL_NAMES
 
     lms = {
