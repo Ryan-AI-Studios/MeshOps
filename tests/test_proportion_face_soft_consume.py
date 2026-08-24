@@ -14,6 +14,8 @@ from meshops.proportion.face_recipe import (
     EYE_RY_FRAC_R,
     EYE_RZ_FRAC_R,
     FEATURE_FACE_Y_FRAC_RY,
+    NOSE_RY_FRAC_H,
+    NOSE_TIP_Y_FRAC_RY,
     build_face_parts,
 )
 from meshops.proportion.models import LandmarkXYZ
@@ -64,11 +66,27 @@ def test_e2_absent_eyes_loomis_sep() -> None:
 
 
 def test_e3_0102_scale_hold() -> None:
-    """E3: 0102 hold — do not consume measured into scale consts."""
+    """E3 / T4: 0102 + nose frac hold — do not consume measured into scale consts."""
     assert EYE_RY_FRAC_R == 0.62
     assert EYE_RADIUS_FRAC_H == 0.11
     assert EYE_RZ_FRAC_R == 0.58
     assert face_recipe_mod._LIP_Z_FRAC == 0.28
+    assert NOSE_RY_FRAC_H == 0.055
+    assert NOSE_TIP_Y_FRAC_RY == 0.98
+
+
+def test_t1_measured_nose_tip_y_is_center_plus_ry() -> None:
+    """T1/0131: measured nose_tip Y is the tip; center = y_m + nose.ry_m."""
+    bounds = _product_class_bounds()
+    report = _full_torso_report()
+    tip_y = -0.08
+    report.landmarks_xyz["nose_tip"] = _lm("nose_tip", y_m=tip_y, z_m=1.57)
+    parts = build_face_parts(report, bounds, face=True, messages=[])
+    nose = next(p for p in parts if p.name == "RECIPE_nose_soft")
+    assert nose.center is not None and nose.ry_m is not None
+    assert float(nose.ry_m) == pytest.approx(NOSE_RY_FRAC_H * bounds.H, abs=1e-9)
+    assert float(nose.center[1]) == pytest.approx(tip_y + float(nose.ry_m), abs=1e-9)
+    assert float(nose.center[1]) - float(nose.ry_m) == pytest.approx(tip_y, abs=1e-9)
 
 
 def test_e4_no_dual_lip_product() -> None:

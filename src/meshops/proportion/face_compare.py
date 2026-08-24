@@ -349,17 +349,24 @@ def _measured_coord(lm: LandmarkXYZ | None) -> FaceCompareCoord | None:
 def _delta_mm(
     measured: FaceCompareCoord | None,
     recipe: dict[str, Any] | None,
+    role_id: str | None = None,
 ) -> FaceCompareDelta | None:
     if measured is None or recipe is None:
         return None
     center = _as_vec3(recipe.get("center"))
     if center is None:
         return None
+    # nose_tip Y is the tip; compare vs front surface when ry_m finite (0131 B3/B17).
+    recipe_y = center[1]
+    if role_id == "nose_tip":
+        ry_m = _as_float(recipe.get("ry_m"))
+        if ry_m is not None:
+            recipe_y = center[1] - ry_m
     mx = _as_float(measured.x_m)
     my = _as_float(measured.y_m)
     mz = _as_float(measured.z_m)
     dx = (mx - center[0]) * 1000.0 if mx is not None else None
-    dy = (my - center[1]) * 1000.0 if my is not None else None
+    dy = (my - recipe_y) * 1000.0 if my is not None else None
     dz = (mz - center[2]) * 1000.0 if mz is not None else None
     if dx is None and dy is None and dz is None:
         return None
@@ -515,7 +522,7 @@ def run_blockout_face_compare(
         measured = _measured_coord(lms.get(lid))
         rec = extract_recipe_face_part(parts, lid)
         live = extract_recipe_face_part(live_parts, lid) if live_parts is not None else None
-        delta = _delta_mm(measured, rec)
+        delta = _delta_mm(measured, rec, lid)
         form: list[str] = []
         if measured is None:
             form.append("missing_id")
