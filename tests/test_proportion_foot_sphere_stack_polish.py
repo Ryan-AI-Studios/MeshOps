@@ -243,7 +243,7 @@ def test_t8_n_parts_schema_mcp47() -> None:
     assert len(pkg.parts) == 131
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
     assert pkg.schema_version == "1.4.0"
-    assert len(TOOL_NAMES) == 52
+    assert len(TOOL_NAMES) == 53
 
 
 def test_t9_all_exports_tip_ry() -> None:

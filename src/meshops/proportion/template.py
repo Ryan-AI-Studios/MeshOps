@@ -113,6 +113,27 @@ _FRONT_LANDMARK_KEYS: tuple[str, ...] = (
     "scm_insert_r",
     "acromion_l",
     "acromion_r",
+    # 0129 arm/hand form-read (front)
+    "humeral_head_l",
+    "humeral_head_r",
+    "bi_belly_l",
+    "bi_belly_r",
+    "tri_belly_l",
+    "tri_belly_r",
+    "olecranon_l",
+    "olecranon_r",
+    "fa_belly_l",
+    "fa_belly_r",
+    "palm_center_l",
+    "palm_center_r",
+    "thumb_cmc_l",
+    "thumb_cmc_r",
+    "thumb_tip_l",
+    "thumb_tip_r",
+    "mcp_index_l",
+    "mcp_index_r",
+    "mcp_pinky_l",
+    "mcp_pinky_r",
 )
 
 # Left profile: depth pairs + optional heel/breast hang. No toe_l/r (B1 — front only).
@@ -170,6 +191,15 @@ _LEFT_LANDMARK_KEYS: tuple[str, ...] = (
     "clav_med_l",
     "nape",
     "scm_origin_l",
+    # 0129 arm/hand Y / pride (never invent from front-only)
+    "humeral_head_l",
+    "bi_belly_l",
+    "tri_belly_l",
+    "olecranon_l",
+    "fa_belly_l",
+    "palm_center_l",
+    "thumb_cmc_l",
+    "thumb_tip_l",
 )
 
 # Top-level edge_pairs stubs (sibling of views) — fill [[x0,y0],[x1,y1]].
@@ -242,6 +272,11 @@ _BACK_LANDMARK_KEYS: tuple[str, ...] = (
     "trap_lat_l",
     "trap_lat_r",
     "nape",
+    # 0129 arm/hand form-read (back — Package A currently empty here)
+    "tri_belly_l",
+    "tri_belly_r",
+    "olecranon_l",
+    "olecranon_r",
 )
 
 # Top-down plan view (0030) — breast/glute soft-spacing primary vocabulary.

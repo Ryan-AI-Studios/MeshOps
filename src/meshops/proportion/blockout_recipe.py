@@ -1863,6 +1863,50 @@ def _apply_measured_trap_yz(
         trap.placement = "full3d"
 
 
+def _apply_measured_bi_tri_yz(
+    parts: list[RecipePart],
+    report: ProportionReport,
+    messages: list[str],
+) -> None:
+    """0129: overlay measured bi/tri belly Y/Z onto bicep/triceps after 0063 rewrite.
+
+    B32: do not abs measured Y. B33: next statement after muscle call L4778.
+    B34: find triceps by name RECIPE_triceps_soft_{side} (role is limb_segment).
+    """
+    by_name = {p.name: p for p in parts}
+    for side in ("l", "r"):
+        bicep = by_name.get(f"RECIPE_bicep_soft_{side}")
+        if bicep is not None and bicep.center is not None and len(bicep.center) >= 3:
+            my = _measured_lm_m(report, f"bi_belly_{side}", y=True)
+            mz = _measured_lm_m(report, f"bi_belly_{side}", y=False)
+            if my is not None or mz is not None:
+                c = list(bicep.center)
+                if my is not None:
+                    c[1] = my
+                    messages.append(f"arm_hand: measured bicep y={my:.4f} ({side})")
+                if mz is not None:
+                    c[2] = mz
+                    messages.append(f"arm_hand: measured bicep z={mz:.4f} ({side})")
+                bicep.center = c
+                bicep.placement = "full3d"
+
+        # B34: name-gate — live role is limb_segment, not triceps_soft.
+        tri = by_name.get(f"RECIPE_triceps_soft_{side}")
+        if tri is not None and tri.center is not None and len(tri.center) >= 3:
+            my = _measured_lm_m(report, f"tri_belly_{side}", y=True)
+            mz = _measured_lm_m(report, f"tri_belly_{side}", y=False)
+            if my is not None or mz is not None:
+                c = list(tri.center)
+                if my is not None:
+                    c[1] = my
+                    messages.append(f"arm_hand: measured triceps y={my:.4f} ({side})")
+                if mz is not None:
+                    c[2] = mz
+                    messages.append(f"arm_hand: measured triceps z={mz:.4f} ({side})")
+                tri.center = c
+                tri.placement = "full3d"
+
+
 def _apply_scap_plane(
     parts: list[RecipePart],
     report: ProportionReport,
@@ -4776,6 +4820,8 @@ def build_blockout_recipe(
 
     # 0063: bicep + triceps (after profile + 0060/0061/0066/0074; before breast hang)
     _apply_arm_muscle_softs(parts, messages)
+    # 0129: measured bi/tri belly Y/Z after L1668 rewrite (B32/B33/B34 - do not abs).
+    _apply_measured_bi_tri_yz(parts, report, messages)
 
     # 0067 B4: athletic tear + sternum on dual breast_soft (before hang Z / tilt)
     _apply_breast_lower_pole_athletic(parts, report, resolved, template_applied, messages)
@@ -7342,6 +7388,7 @@ __all__ = [
     "_apply_glute_seat_mass",
     "_apply_head_pitch",
     "_apply_join_ready_overlaps",
+    "_apply_measured_bi_tri_yz",
     "_apply_measured_calf_cyl_y",
     "_apply_measured_trap_yz",
     "_apply_mid_back_plane",
