@@ -364,25 +364,6 @@ def build_torso_metrics(
     chest_front = _surface_y(chest, rear=False)
     chest_rear = _surface_y(chest, rear=True)
     breast_rear = _surface_y(breast, rear=True)
-    bury: float | None = None
-    if breast_rear is not None and chest_front is not None:
-        bury = breast_rear - chest_front
-
-    scap_rear = _surface_y(scap, rear=True)
-    scap_past: float | None = None
-    if scap_rear is not None and chest_rear is not None:
-        scap_past = scap_rear - chest_rear
-
-    waist_rear = _surface_y(waist, rear=True)
-    mid_rear = _surface_y(mid, rear=True)
-    mid_past: float | None = None
-    if mid_rear is not None and waist_rear is not None:
-        mid_past = mid_rear - waist_rear
-
-    clav_y = _clav_y(parts)
-    pride: float | None = None
-    if chest_front is not None and clav_y is not None:
-        pride = chest_front - clav_y
 
     lms = report.landmarks_xyz
     y_fields: dict[str, float | None] = {}
@@ -404,24 +385,48 @@ def build_torso_metrics(
         lm = lms.get(lid)
         y_fields[lid] = _as_float(lm.y_m) if lm is not None else None
 
-    measured_chest_front = y_fields.get("chest_front")
-    measured_chest_back = y_fields.get("chest_back")
-    if measured_chest_front is not None:
-        chest_front = measured_chest_front
-    if measured_chest_back is not None:
-        chest_rear = measured_chest_back
+    # B1/B21: overlay measured surface Ys before bury / pride / past (never `or`).
+    if y_fields.get("chest_front") is not None:
+        chest_front = y_fields["chest_front"]
+    if y_fields.get("chest_back") is not None:
+        chest_rear = y_fields["chest_back"]
+    if y_fields.get("breast_back") is not None:
+        breast_rear = y_fields["breast_back"]
 
+    bury: float | None = None
+    if breast_rear is not None and chest_front is not None:
+        bury = breast_rear - chest_front
+
+    clav_y = _clav_y(parts)
+    pride: float | None = None
+    if chest_front is not None and clav_y is not None:
+        pride = chest_front - clav_y
+
+    scap_rear = _surface_y(scap, rear=True)
+    scap_past: float | None = (
+        scap_rear - chest_rear if scap_rear is not None and chest_rear is not None else None
+    )
+
+    # B5/B6/B21: measured scap Y is center-class; rear = y + ry when ry finite.
     measured_scap_y = y_fields.get("scap_inferior_l")
     if measured_scap_y is None:
         measured_scap_y = y_fields.get("scap_inferior_r")
-    if measured_scap_y is not None and chest_rear is not None:
-        scap_past = measured_scap_y - chest_rear
+    ry_scap = _as_float(scap.get("ry_m")) if scap is not None else None
+    if measured_scap_y is not None and chest_rear is not None and ry_scap is not None:
+        scap_past = (measured_scap_y + ry_scap) - chest_rear
+
+    waist_rear = _surface_y(waist, rear=True)
+    mid_rear = _surface_y(mid, rear=True)
+    mid_past: float | None = (
+        mid_rear - waist_rear if mid_rear is not None and waist_rear is not None else None
+    )
 
     measured_mid_y = y_fields.get("mid_back_l")
     if measured_mid_y is None:
         measured_mid_y = y_fields.get("mid_back_r")
-    if measured_mid_y is not None and waist_rear is not None:
-        mid_past = measured_mid_y - waist_rear
+    ry_mid = _as_float(mid.get("ry_m")) if mid is not None else None
+    if measured_mid_y is not None and waist_rear is not None and ry_mid is not None:
+        mid_past = (measured_mid_y + ry_mid) - waist_rear
 
     return TorsoMetrics(
         oval_overlap_chest_waist_m=_z_overlap(chest, waist),
