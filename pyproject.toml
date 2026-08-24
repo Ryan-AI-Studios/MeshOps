@@ -60,13 +60,15 @@ packages = ["src/meshops"]
 "src/meshops/slice/profiles" = "meshops/slice/profiles"
 "src/meshops/proportion/body_templates" = "meshops/proportion/body_templates"
 "src/meshops/proportion/body_profiles" = "meshops/proportion/body_profiles"
+"src/meshops/proportion/face_landmarker_map.json" = "meshops/proportion/face_landmarker_map.json"
 
 [tool.ruff]
 target-version = "py313"
 line-length = 100
 src = ["src", "tests"]
-# Local Lab MCP clone / session junk — not MeshOps product code
-extend-exclude = ["tools", ".grok"]
+# Local Lab MCP clone / session junk — not MeshOps product code.
+# 0130 sidecar is Python 3.12 + mediapipe — do not lint/typecheck as meshops 3.13.
+extend-exclude = ["tools", ".grok", "scripts/face-landmarker"]
 
 [tool.ruff.lint]
 select = [
@@ -109,6 +111,8 @@ exclude = [
     # bpy scripts run inside Blender only — not importable in meshops venv
     "src/meshops/escalate/scripts",
     "src/meshops/organic/scripts",
+    # 0130 Face Landmarker sidecar (Python 3.12 + mediapipe)
+    "scripts/face-landmarker",
 ]
 reportMissingImports = true
 reportMissingTypeStubs = false

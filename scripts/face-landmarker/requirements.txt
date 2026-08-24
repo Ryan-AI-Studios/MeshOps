@@ -1,0 +1,3 @@
+# Isolated Python 3.12 sidecar only — never install into meshops 3.13.
+# Pin re-verified at 0130 implement (PyPI classifiers 3.9–3.12; Apache-2.0).
+mediapipe==1.0.1

@@ -1,0 +1,88 @@
+{
+  "schema_version": "1.0.0",
+  "detector": "face_landmarker",
+  "mesh_point_count": 478,
+  "honesty": "face_landmarker_sidecar_not_mesh_or_print_success",
+  "landmarks": {
+    "eye_l": {
+      "primary": 468,
+      "fallback": { "mean": [33, 133] },
+      "views": ["front", "left", "three_quarter"]
+    },
+    "eye_r": {
+      "primary": 473,
+      "fallback": { "mean": [263, 362] },
+      "views": ["front", "three_quarter"]
+    },
+    "brow_l": {
+      "primary": 105,
+      "fallback": 70,
+      "views": ["front", "left"]
+    },
+    "brow_r": {
+      "primary": 334,
+      "fallback": 300,
+      "views": ["front"]
+    },
+    "nose_tip": {
+      "primary": 1,
+      "views": ["front", "left", "three_quarter"]
+    },
+    "mouth_corner_l": {
+      "primary": 61,
+      "views": ["front"]
+    },
+    "mouth_corner_r": {
+      "primary": 291,
+      "views": ["front"]
+    },
+    "lip_mid": {
+      "primary": { "mean": [13, 14] },
+      "fallback": 0,
+      "views": ["front", "left"]
+    },
+    "cheek_l": {
+      "primary": 50,
+      "fallback": 234,
+      "views": ["front"],
+      "note": "fallback 234 == ear_l primary; confirm overlay before remapping"
+    },
+    "cheek_r": {
+      "primary": 280,
+      "fallback": 454,
+      "views": ["front"]
+    },
+    "ear_l": {
+      "primary": 234,
+      "fallback": 127,
+      "views": ["front", "left"]
+    },
+    "ear_r": {
+      "primary": 454,
+      "fallback": 356,
+      "views": ["front"]
+    },
+    "lip_upper": {
+      "primary": 13,
+      "optional": true,
+      "views": ["front"]
+    },
+    "lip_lower": {
+      "primary": 14,
+      "optional": true,
+      "views": ["front"]
+    },
+    "chin": {
+      "primary": 152,
+      "optional": true,
+      "fill_empty_only": true,
+      "views": ["front"]
+    }
+  },
+  "do_not_map": {
+    "cranial_vertex": {
+      "reason": "forehead_10_is_not_cranial_vertex",
+      "forbidden_indices": [10]
+    }
+  }
+}

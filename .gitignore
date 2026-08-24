@@ -25,6 +25,10 @@ AGENTS.md
 # Local vendor / Lab MCP clone (not published with MeshOps package)
 tools/
 
+# 0130 Face Landmarker sidecar venv + downloaded model (not published)
+scripts/face-landmarker/.venv/
+scripts/face-landmarker/models/*.task
+
 # large binaries unless LFS policy set
 # fixtures/rogue2/*.stl  # un-ignore when using LFS
 .ledgerful/
