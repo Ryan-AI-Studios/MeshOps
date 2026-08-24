@@ -524,7 +524,7 @@ def test_d8_breast_disconnected(tmp_path: Path) -> None:
 
 
 def test_f1_mcp_catalog_49() -> None:
-    """F1: TOOL_NAMES 49 and torso-compare tool present."""
+    """F1 / T7: TOOL_NAMES stay 53 and torso-compare tool present (B23)."""
     assert "mesh_proportion_blockout_torso_compare" in TOOL_NAMES
     assert len(TOOL_NAMES) == 53
 
@@ -536,12 +536,88 @@ def test_f2_cli_contains_verb() -> None:
 
 
 def test_b_measured_chest_y_in_named_metrics() -> None:
-    """Named metrics use measured chest_front y_m when left-finite."""
+    """T1: measured chest_front overlays Y and refreshes bury/pride (not stale RECIPE)."""
     report = _report({"chest_front": _lm("chest_front", x_m=0.0, y_m=-0.08, z_m=1.28)})
     metrics = build_torso_metrics(report, recipe=_productish_recipe())
     assert metrics is not None
     assert metrics.chest_front_y_m == pytest.approx(-0.08, abs=1e-9)
     assert metrics.y_m.get("chest_front") == pytest.approx(-0.08, abs=1e-9)
+    # RECIPE breast rear ≈ -0.04197; bury = breast_rear - measured chest_front
+    assert metrics.breast_rear_vs_chest_front_m == pytest.approx(0.03803, abs=1e-4)
+    # clav p1 Y ≈ -0.04597; pride = measured chest_front - clav_y
+    assert metrics.chest_clav_pride_m == pytest.approx(-0.03403, abs=1e-4)
+
+
+def test_t2_recipe_only_bury_pride_past() -> None:
+    """T2: recipe-only bury ≈ 0.004, pride ≈ 0, scap past ≈ 0.012, mid past ≈ 0.032."""
+    metrics = build_torso_metrics(_report(), recipe=_productish_recipe())
+    assert metrics.breast_rear_vs_chest_front_m == pytest.approx(0.00400, abs=1e-4)
+    assert metrics.chest_clav_pride_m == pytest.approx(0.0, abs=1e-4)
+    assert metrics.scap_rear_past_m == pytest.approx(0.01200, abs=1e-4)
+    assert metrics.mid_back_rear_past_m == pytest.approx(0.03200, abs=1e-4)
+
+
+def test_t3_measured_scap_past_uses_center_plus_ry() -> None:
+    """T3: measured scap Y is center-class → past = (y + ry) - chest_rear."""
+    report = _report({"scap_inferior_l": _lm("scap_inferior_l", x_m=-0.11, y_m=0.15, z_m=1.28)})
+    metrics = build_torso_metrics(report, recipe=_productish_recipe())
+    chest_rear = 0.04785 + 0.09382
+    expected = (0.15 + 0.02890) - chest_rear
+    assert metrics.scap_rear_past_m == pytest.approx(expected, abs=1e-5)
+    # Must not use stale center-as-past (0.15 - chest_rear ≈ 0.00833)
+    assert metrics.scap_rear_past_m != pytest.approx(0.15 - chest_rear, abs=1e-4)
+
+
+def test_t4_measured_mid_past_uses_center_plus_ry() -> None:
+    """T4: measured mid_back Y is center-class → past = (y + ry) - waist_rear."""
+    report = _report({"mid_back_l": _lm("mid_back_l", x_m=-0.12, y_m=0.16, z_m=1.10)})
+    metrics = build_torso_metrics(report, recipe=_productish_recipe())
+    waist_rear = 0.03174 + 0.07558
+    expected = (0.16 + 0.02484) - waist_rear
+    assert metrics.mid_back_rear_past_m == pytest.approx(expected, abs=1e-5)
+    assert metrics.mid_back_rear_past_m != pytest.approx(0.16 - waist_rear, abs=1e-4)
+
+
+def test_t5_missing_scap_ry_does_not_overwrite_past() -> None:
+    """T5 / B6: measured scap Y + missing ry_m → do not invent past from center alone."""
+    doc = _productish_recipe()
+    for part in doc["parts"]:
+        if str(part.get("name") or "").startswith("RECIPE_scap_soft_"):
+            part["ry_m"] = None
+    report = _report({"scap_inferior_l": _lm("scap_inferior_l", x_m=-0.11, y_m=0.15, z_m=1.28)})
+    metrics = build_torso_metrics(report, recipe=doc)
+    # RECIPE past also impossible without ry → None (not center - oval_rear)
+    assert metrics.scap_rear_past_m is None
+
+
+def test_t10_recipe_none_measured_chest_bury_none() -> None:
+    """T10 / B19: recipe=None + measured chest_front → Y measured; bury stays None."""
+    report = _report({"chest_front": _lm("chest_front", x_m=0.0, y_m=-0.08, z_m=1.28)})
+    metrics = build_torso_metrics(report, recipe=None)
+    assert metrics.chest_front_y_m == pytest.approx(-0.08, abs=1e-9)
+    assert metrics.breast_rear_vs_chest_front_m is None
+    assert metrics.chest_clav_pride_m is None
+    assert metrics.scap_rear_past_m is None
+    assert metrics.mid_back_rear_past_m is None
+
+
+def test_t11_form_read_follows_refreshed_bury_pride(tmp_path: Path) -> None:
+    """T11 / B20: form-read tokens follow bury/pride after measured chest overlay."""
+    # chest_front=0.0 → bury < 0 (breast rear ≈ -0.042) and |pride| ≥ 0.008
+    report = _write_report(
+        tmp_path / "report.json",
+        _report({"chest_front": _lm("chest_front", x_m=0.0, y_m=0.0, z_m=1.28)}),
+    )
+    recipe = _write_recipe(tmp_path / "recipe.json", _productish_recipe())
+    payload = run_blockout_torso_compare(report, recipe, tmp_path / "cmp", force=True)
+    tokens: list[str] = []
+    for role in payload["roles"]:
+        tokens.extend(role.get("form_read") or [])
+    assert "breast_disconnected" in tokens
+    assert "chest_clav_pride" in tokens
+    metrics = payload["torso_metrics"]
+    assert metrics["breast_rear_vs_chest_front_m"] < 0.0
+    assert abs(metrics["chest_clav_pride_m"]) >= 0.008
 
 
 def test_sidecar_unlinked_when_no_finite_ids(tmp_path: Path) -> None:
