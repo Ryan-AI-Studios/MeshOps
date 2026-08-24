@@ -429,6 +429,8 @@ def _parse_landmark_value(
         )
 
     if isinstance(value, dict):
+        method_raw = value.get("method")
+        method = str(method_raw) if method_raw is not None else "assist"
         if "x" in value and "y" in value:
             return point_to_landmark2d(
                 landmark_id,
@@ -437,6 +439,7 @@ def _parse_landmark_value(
                 width_px=width_px,
                 height_px=height_px,
                 confidence=float(value.get("confidence", 1.0)),
+                method=method,
             )
         if "x_px" in value and "y_px" in value:
             return point_to_landmark2d(
@@ -446,6 +449,7 @@ def _parse_landmark_value(
                 width_px=width_px,
                 height_px=height_px,
                 confidence=float(value.get("confidence", 1.0)),
+                method=method,
             )
 
     raise ProportionError(

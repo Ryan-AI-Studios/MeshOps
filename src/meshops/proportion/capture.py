@@ -165,26 +165,48 @@ def _replace_prefixed_note(notes: list[str], prefix: str, new_line: str) -> list
     return filtered
 
 
-def _coord_value(x: float, y: float, confidence: float | None) -> Any:
-    """Serialize landmark coord for assist JSON."""
-    if confidence is not None and confidence != 1.0:
-        return {"x": float(x), "y": float(y), "confidence": float(confidence)}
+def _coord_value(
+    x: float,
+    y: float,
+    confidence: float | None,
+    method: str | None = None,
+) -> Any:
+    """Serialize landmark coord for assist JSON.
+
+    Optional ``method`` (e.g. pose_model from Face Landmarker dump) is preserved
+    on dict form. Lists stay legal when method/confidence are absent.
+    """
+    use_dict = (confidence is not None and confidence != 1.0) or (
+        method is not None and method != ""
+    )
+    if use_dict:
+        out: dict[str, Any] = {"x": float(x), "y": float(y)}
+        if confidence is not None and confidence != 1.0:
+            out["confidence"] = float(confidence)
+        if method is not None and method != "":
+            out["method"] = str(method)
+        return out
     return [float(x), float(y)]
 
 
-def _parse_coord_value(value: Any) -> tuple[float, float, float | None] | None:
-    """Parse null | [x,y] | {x,y} | {x_px,y_px,confidence?} → (x,y,conf|None)."""
+def _parse_coord_value(
+    value: Any,
+) -> tuple[float, float, float | None, str | None] | None:
+    """Parse null | [x,y] | {x,y[,confidence][,method]} → (x,y,conf,method)."""
     if value is None:
         return None
     if isinstance(value, (list, tuple)) and len(value) >= 2:
-        return float(value[0]), float(value[1]), None
+        return float(value[0]), float(value[1]), None, None
     if isinstance(value, dict):
+        method_raw = value.get("method")
+        method = str(method_raw) if method_raw is not None else None
         if "x_px" in value and "y_px" in value:
             conf = value.get("confidence")
             return (
                 float(value["x_px"]),
                 float(value["y_px"]),
                 float(conf) if conf is not None else None,
+                method,
             )
         if "x" in value and "y" in value:
             conf = value.get("confidence")
@@ -192,11 +214,12 @@ def _parse_coord_value(value: Any) -> tuple[float, float, float | None] | None:
                 float(value["x"]),
                 float(value["y"]),
                 float(conf) if conf is not None else None,
+                method,
             )
     if isinstance(value, (int, float)):
         # Scalar midline-style — x only; y unknown → store as (x, 0) not ideal;
         # treat as x at y=None skipped: use as midline x with y mid later.
-        return float(value), 0.0, None
+        return float(value), 0.0, None, None
     return None
 
 
@@ -455,13 +478,18 @@ def build_assist_from_px(
             parsed = _parse_coord_value(val)
             if parsed is None:
                 continue
-            x, y, conf = parsed
+            x, y, conf, method = parsed
             c = conf if conf is not None else default_confidence
             _set_landmark(
                 doc,
                 str(vk),
                 str(lid),
-                _coord_value(x, y, c if c != 1.0 else None),
+                _coord_value(
+                    x,
+                    y,
+                    c if c != 1.0 else None,
+                    method=method,
+                ),
                 messages=messages,
             )
 
