@@ -192,6 +192,6 @@ def test_e8_measured_trap_z_after_nape() -> None:
     assert any("measured trap z=" in m for m in pkg.messages)
 
 
-def test_e_mcp_catalog_52() -> None:
-    assert len(TOOL_NAMES) == 52
+def test_e_mcp_catalog_53() -> None:
+    assert len(TOOL_NAMES) == 53
     assert "mesh_proportion_blockout_girdle_compare" in TOOL_NAMES
