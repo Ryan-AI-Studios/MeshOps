@@ -44,6 +44,19 @@ def _ps_quote(p: str) -> str:
     return "'" + p.replace("'", "''") + "'"
 
 
+def _nt_spawn_creationflags() -> int:
+    """NT creationflags for --spawn: DETACHED | NEW_GROUP | BREAKAWAY (0132).
+
+    CREATE_BREAKAWAY_FROM_JOB keeps GUI Blender out of the parent Job Object so
+    agent shells that KILL_ON_JOB_CLOSE do not tear it down. Not in __all__.
+    """
+    return (
+        int(getattr(subprocess, "DETACHED_PROCESS", 0))
+        | int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+        | int(getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000))
+    )
+
+
 def resolve_setup_script(path: Path | str) -> Path:
     """Resolve --setup to an abs setup_blockout_recipe.py (B2-B7)."""
     raw = Path(path)
@@ -160,18 +173,25 @@ def run_blockout_open_setup(
             "stderr": subprocess.DEVNULL,
         }
         if os.name == "nt":
-            kwargs["creationflags"] = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
-                subprocess, "CREATE_NEW_PROCESS_GROUP", 0
-            )
+            # DETACHED severs the console; BREAKAWAY leaves the parent Job Object
+            # so agent KILL_ON_JOB_CLOSE does not tear down GUI Blender (0132).
+            kwargs["creationflags"] = _nt_spawn_creationflags()
         else:
             kwargs["start_new_session"] = True
         try:
             subprocess.Popen(argv, **kwargs)
         except OSError as exc:
+            details: dict[str, Any] = {
+                "setup": str(setup_abs),
+                "blender": str(blender_abs),
+            }
+            winerror = getattr(exc, "winerror", None)
+            if isinstance(winerror, int):
+                details["winerror"] = winerror
             raise ProportionError(
                 f"failed to spawn Blender: {exc}",
                 code="setup_spawn_failed",
-                details={"setup": str(setup_abs), "blender": str(blender_abs)},
+                details=details,
             ) from exc
         spawned = True
     return {

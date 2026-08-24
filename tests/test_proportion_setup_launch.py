@@ -1,7 +1,8 @@
-"""Track 0110 — blockout-open-setup prints abs Blender --python.
+"""Track 0110 / 0132 — blockout-open-setup prints abs Blender --python.
 
 SETUP_LAUNCH_HONESTY / RECIPE_HONESTY / Difficulty §4 / §12 / §13 / N6.
-Print or spawn is not mesh/print success. MCP catalog 47. Schema 1.4.0 stay.
+Print or spawn is not mesh/print success. MCP catalog 53. Schema 1.4.0 stay.
+0132: NT --spawn OR CREATE_BREAKAWAY_FROM_JOB (Job Object breakaway).
 """
 
 from __future__ import annotations
@@ -20,7 +21,10 @@ from meshops.escalate.errors import EscalateError
 from meshops.mcp.server import TOOL_NAMES
 from meshops.proportion.errors import ProportionError
 from meshops.proportion.honesty import SETUP_LAUNCH_HONESTY
-from meshops.proportion.setup_launch import run_blockout_open_setup
+from meshops.proportion.setup_launch import (
+    _nt_spawn_creationflags,
+    run_blockout_open_setup,
+)
 
 _BPY = "setup_blockout_recipe.py"
 _STUB = "# setup_blockout_recipe.py — MeshOps track 0019\n"
@@ -64,6 +68,7 @@ def test_t0_hygiene() -> None:
     assert "build_and_render" in launch
     assert "emit_bpy_script" not in launch
     assert "PARTS =" not in launch
+    assert "CREATE_BREAKAWAY_FROM_JOB" in launch
     assert "mesh_proportion_blockout_open_setup" in TOOL_NAMES
     assert len(TOOL_NAMES) == 53
 
@@ -273,10 +278,12 @@ def test_t12_spawn_mocked(
     assert seen["kwargs"]["stdout"] is subprocess.DEVNULL
     assert seen["kwargs"]["stderr"] is subprocess.DEVNULL
     if os.name == "nt":
-        flags = seen["kwargs"]["creationflags"]
-        expected = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-        assert flags == expected
-        assert "CREATE_NO_WINDOW" not in str(flags)
+        flags = int(seen["kwargs"]["creationflags"])
+        assert flags == _nt_spawn_creationflags()
+        # Independent of helper (B17): BREAKAWAY bit must be set.
+        assert flags & 0x01000000
+        # Bitwise (B18) — not vacuous str(flags) name search.
+        assert flags & subprocess.CREATE_NO_WINDOW == 0
     else:
         assert seen["kwargs"].get("start_new_session") is True
 
@@ -295,6 +302,33 @@ def test_t12b_spawn_oserror(
         run_blockout_open_setup(setup_py, spawn=True)
     assert ei.value.code == "setup_spawn_failed"
     assert ei.value.details.get("setup") == str(setup_py.resolve())
+
+
+def test_t12c_breakaway_bit_getattr() -> None:
+    """T12c: getattr fallback pin equals 0x01000000 (CI-green on POSIX)."""
+    # B16: never bare subprocess.CREATE_BREAKAWAY_FROM_JOB (AttributeError on some hosts).
+    assert int(getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)) == 0x01000000
+
+
+def test_t12d_spawn_oserror_single_popen_winerror(
+    tmp_path: Path, fake_blender: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T12d: failing Popen called once (no retry); winerror on details when set."""
+    setup_py = _write_setup(tmp_path / _BPY)
+    calls = {"n": 0}
+
+    def _boom(*args: Any, **kwargs: Any) -> None:
+        calls["n"] += 1
+        err = OSError("simulated access denied")
+        err.winerror = 5  # type: ignore[attr-defined]
+        raise err
+
+    monkeypatch.setattr("meshops.proportion.setup_launch.subprocess.Popen", _boom)
+    with pytest.raises(ProportionError) as ei:
+        run_blockout_open_setup(setup_py, spawn=True)
+    assert ei.value.code == "setup_spawn_failed"
+    assert calls["n"] == 1
+    assert ei.value.details.get("winerror") == 5
 
 
 def test_t13_cli_json(tmp_path: Path, fake_blender: Path) -> None:
@@ -319,7 +353,7 @@ def test_t13_cli_json(tmp_path: Path, fake_blender: Path) -> None:
 
 
 def test_t14_mcp_catalog_47() -> None:
-    """T14: mesh_proportion_blockout_open_setup in TOOL_NAMES; len == 48."""
+    """T14: mesh_proportion_blockout_open_setup in TOOL_NAMES; len == 53."""
     assert "mesh_proportion_blockout_open_setup" in TOOL_NAMES
     assert len(TOOL_NAMES) == 53
 
