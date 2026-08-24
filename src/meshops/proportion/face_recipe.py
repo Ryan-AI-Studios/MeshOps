@@ -518,7 +518,8 @@ def _build_face_features(
     nose_rz = NOSE_RZ_FRAC_H * h
     nose_meas_y = _lm_axis(lms, "nose_tip", "y_m")
     nose_meas_z = _lm_axis(lms, "nose_tip", "z_m")
-    nose_center_y = nose_meas_y if nose_meas_y is not None else (nose_tip_y + nose_ry)
+    # Measured Y is the tip (0131); center sits nose_ry behind so front surface = tip.
+    nose_center_y = (nose_meas_y + nose_ry) if nose_meas_y is not None else (nose_tip_y + nose_ry)
     nose_center_z = nose_meas_z if nose_meas_z is not None else (nose_base_z - 0.01 * h)
     parts.append(
         _ellipsoid(

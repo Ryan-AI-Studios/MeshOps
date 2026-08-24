@@ -6,6 +6,7 @@ Authoring QA only — FACE_COMPARE_HONESTY. Not mesh or print success.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,8 @@ from meshops.proportion.face_compare import (
     FACE_COMPARE_ROLES,
     FACE_COMPARE_SCHEMA_VERSION,
     SUGGESTED_ACTIONS,
+    FaceCompareCoord,
+    _delta_mm,
     build_face_metrics,
     extract_recipe_face_part,
     run_blockout_face_compare,
@@ -432,6 +435,53 @@ def test_d3_signed_delta_mm(tmp_path: Path) -> None:
     eye_l = next(r for r in payload["roles"] if r["id"] == "eye_l")
     assert eye_l["delta_mm"] is not None
     assert eye_l["delta_mm"]["x"] == pytest.approx((-0.036 - (-0.04624)) * 1000.0, abs=1e-3)
+
+
+def test_t3_nose_tip_y_vs_front_surface(tmp_path: Path) -> None:
+    """T3/0131: nose_tip Y compares to front surface (center[1] - ry_m), not center."""
+    center_y = -0.09327
+    ry_m = 0.01156
+    tip_y = center_y - ry_m
+    report = _write_report(
+        tmp_path / "report.json",
+        _report({"nose_tip": _lm("nose_tip", y_m=tip_y, z_m=1.5686)}),
+    )
+    recipe = _write_recipe(tmp_path / "recipe.json", _productish_recipe())
+    payload = run_blockout_face_compare(report, recipe, tmp_path / "cmp", force=True)
+    nose = next(r for r in payload["roles"] if r["id"] == "nose_tip")
+    assert nose["delta_mm"] is not None
+    assert nose["delta_mm"]["y"] == pytest.approx(0.0, abs=1e-3)
+    assert abs(float(nose["delta_mm"]["y"])) < 1.0
+    assert nose["suggested"] == "hold_priors"
+    # JSON recipe.center stays the ellipsoid center (B3).
+    assert nose["recipe"]["center"][1] == pytest.approx(center_y, abs=1e-6)
+
+
+def test_t7_nose_tip_missing_ry_falls_back_to_center() -> None:
+    """T7/0131: missing / non-finite ry_m → compare Y vs center; no NaN.
+
+    load_blockout_recipe rejects ellipsoid without ry_m, so exercise _delta_mm
+    directly (same helper run_blockout_face_compare calls with role_id).
+    """
+    center_y = -0.09327
+    measured = FaceCompareCoord(y_m=center_y, z_m=1.5686, confidence=0.9, sources=["left"])
+    base = {
+        "name": "RECIPE_nose_soft",
+        "role": "nose_soft",
+        "kind": "ellipsoid",
+        "center": [0.0, center_y, 1.5686],
+        "rx_m": 0.00946,
+        "rz_m": 0.00841,
+    }
+    missing = _delta_mm(measured, {**base, "ry_m": None}, "nose_tip")
+    assert missing is not None
+    assert missing.y == pytest.approx(0.0, abs=1e-9)
+    assert missing.y is not None and math.isfinite(missing.y)
+
+    nan_ry = _delta_mm(measured, {**base, "ry_m": float("nan")}, "nose_tip")
+    assert nan_ry is not None
+    assert nan_ry.y == pytest.approx(0.0, abs=1e-9)
+    assert nan_ry.y is not None and math.isfinite(nan_ry.y)
 
 
 def test_d4_missing_id_skip_no_nan(tmp_path: Path) -> None:
