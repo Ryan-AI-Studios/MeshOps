@@ -2603,7 +2603,11 @@ def proportion_blockout_open_setup_cmd(
     spawn: bool = typer.Option(
         False,
         "--spawn",
-        help="Detach GUI Blender (do not wait). Default is print-only.",
+        help=(
+            "Detach GUI Blender (do not wait). Default is print-only. "
+            "On Windows, CREATE_BREAKAWAY_FROM_JOB so a parent Job Object "
+            "does not kill Blender."
+        ),
     ),
     background: bool = typer.Option(
         False,
