@@ -13,7 +13,11 @@ from typing import Any, Final, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from meshops.proportion.analyze import load_report
-from meshops.proportion.blockout_recipe import load_blockout_recipe
+from meshops.proportion.blockout_recipe import (
+    BICEP_ALONG_T,
+    TRICEP_ALONG_T,
+    load_blockout_recipe,
+)
 from meshops.proportion.errors import ProportionError
 from meshops.proportion.honesty import ARM_HAND_COMPARE_HONESTY
 from meshops.proportion.models import LandmarkXYZ, ProportionReport
@@ -63,6 +67,7 @@ FORM_READ_TOKENS: Final[frozenset[str]] = frozenset(
 )
 BI_FRONT_PAST_FLAG_M: Final[float] = 0.006
 TRI_REAR_PAST_FLAG_M: Final[float] = 0.006
+_CHAIN_NEAR_ZERO_LEN: Final[float] = 1e-9  # emit _NEAR_ZERO_LEN
 FA_STEPPED_RATIO_MAX: Final[float] = 0.78
 THUMB_FORWARD_Y_MAX: Final[float] = -0.40
 
@@ -357,26 +362,47 @@ def _find_part(parts: list[Any], name: str) -> dict[str, Any] | None:
     return None
 
 
-def _capsule_mid_y_r(part: dict[str, Any] | None) -> tuple[float | None, float | None]:
-    if part is None:
+def _ua_chain_mid_y_r(
+    ua: dict[str, Any] | None,
+    ua_dist: dict[str, Any] | None,
+    *,
+    along_t: float,
+) -> tuple[float | None, float | None]:
+    """0063 parity: p0=ua.p0; p1=taper.p1 else ua.p1; None if invalid / near-zero."""
+    if ua is None:
         return None, None
-    mid = _midpoint(part.get("p0"), part.get("p1"))
-    r = _as_float(part.get("radius_m"))
-    if mid is None:
-        return None, r
-    return mid[1], r
+    ua_r = _as_float(ua.get("radius_m"))
+    if ua_r is None or ua_r <= 0.0:
+        return None, None
+    p0 = _as_vec3(ua.get("p0"))
+    if p0 is None:
+        return None, None
+    p1 = _as_vec3(ua_dist.get("p1")) if ua_dist is not None else None
+    if p1 is None:
+        p1 = _as_vec3(ua.get("p1"))
+    if p1 is None:
+        return None, None
+    dx = p1[0] - p0[0]
+    dy = p1[1] - p0[1]
+    dz = p1[2] - p0[2]
+    if math.sqrt(dx * dx + dy * dy + dz * dz) <= _CHAIN_NEAR_ZERO_LEN:
+        return None, None
+    t = float(along_t)
+    mid_y = p0[1] + t * (p1[1] - p0[1])
+    return mid_y, ua_r
 
 
 def _bicep_front_past(
     bicep: dict[str, Any] | None,
     ua: dict[str, Any] | None,
+    ua_dist: dict[str, Any] | None,
 ) -> float | None:
     """B35: None unless bicep center/ry and UA r are finite."""
     if bicep is None or ua is None:
         return None
     center = _as_vec3(bicep.get("center"))
     ry = _as_float(bicep.get("ry_m"))
-    mid_y, ua_r = _capsule_mid_y_r(ua)
+    mid_y, ua_r = _ua_chain_mid_y_r(ua, ua_dist, along_t=BICEP_ALONG_T)
     if center is None or ry is None or mid_y is None or ua_r is None:
         return None
     shaft_front = mid_y - ua_r
@@ -386,12 +412,13 @@ def _bicep_front_past(
 def _triceps_rear_past(
     triceps: dict[str, Any] | None,
     ua: dict[str, Any] | None,
+    ua_dist: dict[str, Any] | None,
 ) -> float | None:
     if triceps is None or ua is None:
         return None
     center = _as_vec3(triceps.get("center"))
     ry = _as_float(triceps.get("ry_m"))
-    mid_y, ua_r = _capsule_mid_y_r(ua)
+    mid_y, ua_r = _ua_chain_mid_y_r(ua, ua_dist, along_t=TRICEP_ALONG_T)
     if center is None or ry is None or mid_y is None or ua_r is None:
         return None
     shaft_rear = mid_y + ua_r
@@ -404,19 +431,29 @@ def build_arm_hand_metrics(
 ) -> ArmHandMetrics:
     """Compute arm_hand_metrics from landmarks_xyz (+ optional RECIPE parts)."""
     parts = _recipe_parts(recipe)
-    ua = _find_part(parts, "RECIPE_limb_upper_arm_l") or _find_part(
-        parts, "RECIPE_limb_upper_arm_r"
+    side = (
+        "l"
+        if _find_part(parts, "RECIPE_limb_upper_arm_l") is not None
+        else "r"
+        if _find_part(parts, "RECIPE_limb_upper_arm_r") is not None
+        else None
     )
-    ua_dist = _find_part(parts, "RECIPE_arm_taper_dist_ua_l") or _find_part(
-        parts, "RECIPE_arm_taper_dist_ua_r"
-    )
+    ua = _find_part(parts, f"RECIPE_limb_upper_arm_{side}") if side else None
+    ua_dist = _find_part(parts, f"RECIPE_arm_taper_dist_ua_{side}") if side else None
     fa = _find_part(parts, "RECIPE_limb_forearm_l") or _find_part(parts, "RECIPE_limb_forearm_r")
     fa_dist = _find_part(parts, "RECIPE_arm_taper_dist_fa_l") or _find_part(
         parts, "RECIPE_arm_taper_dist_fa_r"
     )
-    bicep = _find_part(parts, "RECIPE_bicep_soft_l") or _find_part(parts, "RECIPE_bicep_soft_r")
-    triceps = _find_part(parts, "RECIPE_triceps_soft_l") or _find_part(
-        parts, "RECIPE_triceps_soft_r"
+    bicep = (
+        _find_part(parts, f"RECIPE_bicep_soft_{side}")
+        if side
+        else _find_part(parts, "RECIPE_bicep_soft_l") or _find_part(parts, "RECIPE_bicep_soft_r")
+    )
+    triceps = (
+        _find_part(parts, f"RECIPE_triceps_soft_{side}")
+        if side
+        else _find_part(parts, "RECIPE_triceps_soft_l")
+        or _find_part(parts, "RECIPE_triceps_soft_r")
     )
     palm = _find_part(parts, "RECIPE_palm_l") or _find_part(parts, "RECIPE_palm_r")
 
@@ -427,8 +464,8 @@ def build_arm_hand_metrics(
         y_fields[lid] = _as_float(lm.y_m) if lm is not None else None
 
     return ArmHandMetrics(
-        bicep_front_past_m=_bicep_front_past(bicep, ua),
-        triceps_rear_past_m=_triceps_rear_past(triceps, ua),
+        bicep_front_past_m=_bicep_front_past(bicep, ua, ua_dist),
+        triceps_rear_past_m=_triceps_rear_past(triceps, ua, ua_dist),
         ua_prox_r_m=_as_float(ua.get("radius_m")) if ua is not None else None,
         ua_dist_r_m=_as_float(ua_dist.get("radius_m")) if ua_dist is not None else None,
         fa_prox_r_m=_as_float(fa.get("radius_m")) if fa is not None else None,
