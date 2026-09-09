@@ -14,9 +14,20 @@ from typer.testing import CliRunner
 
 from meshops.cli import app
 from meshops.mcp.server import TOOL_NAMES
-from meshops.proportion.blockout_recipe import RECIPE_ID, RECIPE_SCHEMA_VERSION
+from meshops.proportion.blockout_recipe import (
+    GLUTE_RX_LAT_FLOOR_FRAC_HIP_HW,
+    GLUTE_SEAT_BEYOND_REF_Y,
+    GLUTE_SEAT_Y_FLOOR_M,
+    HIP_SOFT_RY_FRAC_RX,
+    HIP_SOFT_RZ_FRAC_RX,
+    HIP_SOFT_Z_DROP_FRAC_H,
+    RECIPE_ID,
+    RECIPE_SCHEMA_VERSION,
+    TORSO_OVAL_RY_HIP_FRAC,
+)
 from meshops.proportion.errors import ProportionError
 from meshops.proportion.hip_glute_compare import (
+    FORM_READ_TOKENS,
     HIP_GLUTE_COMPARE_ROLES,
     HIP_GLUTE_COMPARE_SCHEMA_VERSION,
     SUGGESTED_ACTIONS,
@@ -137,6 +148,32 @@ def _recipe_doc(*, parts: list[dict[str, Any]]) -> dict[str, Any]:
 def _write_recipe(path: Path, doc: dict[str, Any]) -> Path:
     path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
     return path
+
+
+def _form_tokens(payload: dict[str, Any]) -> list[str]:
+    tokens: list[str] = []
+    for role in payload["roles"]:
+        tokens.extend(role.get("form_read") or [])
+    return tokens
+
+
+def _set_glute_rx(doc: dict[str, Any], rx: float) -> dict[str, Any]:
+    for part in doc["parts"]:
+        if part["name"] in ("RECIPE_glute_soft_l", "RECIPE_glute_soft_r"):
+            part["rx_m"] = rx
+    return doc
+
+
+def _drop_glute(doc: dict[str, Any], name: str) -> dict[str, Any]:
+    doc["parts"] = [p for p in doc["parts"] if p["name"] != name]
+    return doc
+
+
+def _midline_message_gap(payload: dict[str, Any]) -> float | None:
+    for msg in payload.get("messages") or []:
+        if msg.startswith("glute_midline_gap_m="):
+            return float(msg.split("=", 1)[1])
+    return None
 
 
 def _productish_recipe(*, short_outer: bool = True, pelvis_behind: bool = True) -> dict[str, Any]:
@@ -569,8 +606,132 @@ def test_d9_glute_outer_hold_priors_alias() -> None:
     assert "glute_outer_l" in HIP_GLUTE_COMPARE_ROLES
 
 
+def test_t1_product_cleft_no_midline_gap(tmp_path: Path) -> None:
+    """T1: product-class dual inner 0.04175 does not fire glute_midline_gap."""
+    report = _write_report(tmp_path / "report.json", _report())
+    recipe = _write_recipe(tmp_path / "recipe.json", _productish_recipe())
+    payload = run_blockout_hip_glute_compare(report, recipe, tmp_path / "cmp", force=True)
+    assert "glute_midline_gap" not in _form_tokens(payload)
+    assert _midline_message_gap(payload) is None
+    assert not any(
+        msg == "glute_midline_gap" or msg.startswith("glute_midline_gap_m=")
+        for msg in payload.get("messages") or []
+    )
+
+
+def test_t2_wide_dual_gap_fires(tmp_path: Path) -> None:
+    """T2: dual inner >= 0.060 fires token + glute_midline_gap_m= message."""
+    doc = _set_glute_rx(_productish_recipe(), 0.070)
+    report = _write_report(tmp_path / "report.json", _report())
+    recipe = _write_recipe(tmp_path / "recipe.json", doc)
+    payload = run_blockout_hip_glute_compare(report, recipe, tmp_path / "cmp", force=True)
+    gap = _midline_message_gap(payload)
+    assert gap is not None
+    assert gap == pytest.approx(0.13075 - 0.070, abs=1e-4)
+    tokens = _form_tokens(payload)
+    assert "glute_midline_gap" in tokens
+    for lid in ("glute_cleft", "glute_peak_l", "glute_peak_r"):
+        role = next(r for r in payload["roles"] if r["id"] == lid)
+        assert "glute_midline_gap" in (role.get("form_read") or [])
+
+
+def test_t3_seam_ignore_delta_x(tmp_path: Path) -> None:
+    """T3 / B3: glute_top_seam large delta.x and dy=dz=0 → hold_priors."""
+    report = _write_report(
+        tmp_path / "report.json",
+        _report(
+            {
+                "glute_top_seam": _lm("glute_top_seam", x_m=0.0, y_m=0.045, z_m=0.84184),
+            }
+        ),
+    )
+    recipe = _write_recipe(tmp_path / "recipe.json", _productish_recipe())
+    payload = run_blockout_hip_glute_compare(report, recipe, tmp_path / "cmp", force=True)
+    seam = next(r for r in payload["roles"] if r["id"] == "glute_top_seam")
+    assert seam["delta_mm"] is not None
+    assert abs(seam["delta_mm"]["x"]) >= 1.0
+    assert seam["delta_mm"]["y"] == pytest.approx(0.0, abs=1e-6)
+    assert seam["delta_mm"]["z"] == pytest.approx(0.0, abs=1e-6)
+    assert seam["suggested"] == "hold_priors"
+
+
+def test_t4_seam_yz_soft_adjust(tmp_path: Path) -> None:
+    """T4 / B3: glute_top_seam |dy| >= 1 mm → soft_adjust (X irrelevant)."""
+    report = _write_report(
+        tmp_path / "report.json",
+        _report(
+            {
+                "glute_top_seam": _lm("glute_top_seam", x_m=0.0, y_m=0.047, z_m=0.84184),
+            }
+        ),
+    )
+    recipe = _write_recipe(tmp_path / "recipe.json", _productish_recipe())
+    payload = run_blockout_hip_glute_compare(report, recipe, tmp_path / "cmp", force=True)
+    seam = next(r for r in payload["roles"] if r["id"] == "glute_top_seam")
+    assert seam["delta_mm"] is not None
+    assert abs(seam["delta_mm"]["x"]) >= 1.0
+    assert abs(seam["delta_mm"]["y"]) >= 1.0
+    assert seam["suggested"] == "soft_adjust"
+
+
+def test_t5_bottom_ignore_delta_x(tmp_path: Path) -> None:
+    """T5 / B3: glute_bottom_l/r large delta.x and dy=dz=0 → hold_priors."""
+    report = _write_report(
+        tmp_path / "report.json",
+        _report(
+            {
+                "glute_bottom_l": _lm("glute_bottom_l", x_m=0.0, y_m=0.045, z_m=0.84184),
+                "glute_bottom_r": _lm("glute_bottom_r", x_m=0.0, y_m=0.045, z_m=0.84184),
+            }
+        ),
+    )
+    recipe = _write_recipe(tmp_path / "recipe.json", _productish_recipe())
+    payload = run_blockout_hip_glute_compare(report, recipe, tmp_path / "cmp", force=True)
+    for lid in ("glute_bottom_l", "glute_bottom_r"):
+        role = next(r for r in payload["roles"] if r["id"] == lid)
+        assert role["delta_mm"] is not None
+        assert abs(role["delta_mm"]["x"]) >= 1.0
+        assert role["delta_mm"]["y"] == pytest.approx(0.0, abs=1e-6)
+        assert role["delta_mm"]["z"] == pytest.approx(0.0, abs=1e-6)
+        assert role["suggested"] == "hold_priors"
+
+
+def test_t6_single_lobe_product_cleft_no_gap(tmp_path: Path) -> None:
+    """T6: single-lobe product inner 0.04175 does not fire midline gap."""
+    doc = _drop_glute(_productish_recipe(), "RECIPE_glute_soft_r")
+    report = _write_report(tmp_path / "report.json", _report())
+    recipe = _write_recipe(tmp_path / "recipe.json", doc)
+    payload = run_blockout_hip_glute_compare(report, recipe, tmp_path / "cmp", force=True)
+    assert "glute_midline_gap" not in _form_tokens(payload)
+    assert _midline_message_gap(payload) is None
+
+
+def test_t7_single_lobe_wide_gap_fires(tmp_path: Path) -> None:
+    """T7: single-lobe inner >= 0.060 fires midline gap."""
+    doc = _set_glute_rx(_drop_glute(_productish_recipe(), "RECIPE_glute_soft_r"), 0.070)
+    report = _write_report(tmp_path / "report.json", _report())
+    recipe = _write_recipe(tmp_path / "recipe.json", doc)
+    payload = run_blockout_hip_glute_compare(report, recipe, tmp_path / "cmp", force=True)
+    gap = _midline_message_gap(payload)
+    assert gap is not None
+    assert gap == pytest.approx(0.13075 - 0.070, abs=1e-4)
+    assert "glute_midline_gap" in _form_tokens(payload)
+
+
+def test_t8_const_hold() -> None:
+    """T8: 0106/0092/0068/0036 recipe consts hold."""
+    assert HIP_SOFT_RY_FRAC_RX == 0.62
+    assert HIP_SOFT_RZ_FRAC_RX == 1.00
+    assert HIP_SOFT_Z_DROP_FRAC_H == 0.022
+    assert TORSO_OVAL_RY_HIP_FRAC == 0.64
+    assert GLUTE_SEAT_Y_FLOOR_M == 0.045
+    assert GLUTE_SEAT_BEYOND_REF_Y == 0.035
+    assert GLUTE_RX_LAT_FLOOR_FRAC_HIP_HW == 0.40
+    assert "glute_midline_gap" in FORM_READ_TOKENS
+
+
 def test_f1_mcp_catalog_50() -> None:
-    """F1: TOOL_NAMES 50 and hip-glute-compare tool present."""
+    """F1 / T9: TOOL_NAMES stay 53 and hip-glute-compare tool present."""
     assert "mesh_proportion_blockout_hip_glute_compare" in TOOL_NAMES
     assert len(TOOL_NAMES) == 53
 
