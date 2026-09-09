@@ -5,8 +5,12 @@ No live mediapipe / no network. Authoring aid only — LANDMARKER_HONESTY.
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
+import types
 from pathlib import Path
+from typing import Any
 
 from meshops.mcp.server import TOOL_NAMES
 from meshops.proportion.assist import (
@@ -225,6 +229,77 @@ def test_t9_mcp_catalog_stays_53() -> None:
     assert len(TOOL_NAMES) == 53
 
 
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def _sidecar_run_py() -> Path:
+    return _repo_root() / "scripts" / "face-landmarker" / "run.py"
+
+
+def _load_run_py() -> Any:
+    path = _sidecar_run_py()
+    spec = importlib.util.spec_from_file_location("face_landmarker_run_0137", path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _dummy_sidecar_paths(tmp_path: Path) -> tuple[Path, Path, Path]:
+    image = tmp_path / "face.png"
+    image.write_bytes(b"png")
+    model = tmp_path / "face_landmarker.task"
+    model.write_bytes(b"task")
+    out = tmp_path / "dump.json"
+    return image, model, out
+
+
+class _FakeImage:
+    def numpy_view(self) -> Any:
+        return types.SimpleNamespace(shape=(8, 8, 3))
+
+
+class _FakeLandmarker:
+    def __init__(self, faces: list[Any]) -> None:
+        self._faces = faces
+
+    def __enter__(self) -> _FakeLandmarker:
+        return self
+
+    def __exit__(self, *_exc: object) -> bool:
+        return False
+
+    def detect(self, _image: object) -> Any:
+        return types.SimpleNamespace(face_landmarks=self._faces)
+
+
+def _install_fake_mediapipe(monkeypatch: Any, faces: list[Any]) -> None:
+    landmarker = _FakeLandmarker(faces)
+
+    def create_from_options(_options: object) -> _FakeLandmarker:
+        return landmarker
+
+    def create_from_file(_path: object) -> _FakeImage:
+        return _FakeImage()
+
+    mp: Any = types.ModuleType("mediapipe")
+    mp.tasks = types.SimpleNamespace(
+        BaseOptions=lambda **kw: types.SimpleNamespace(**kw),
+        vision=types.SimpleNamespace(
+            FaceLandmarker=types.SimpleNamespace(create_from_options=create_from_options),
+            FaceLandmarkerOptions=lambda **kw: types.SimpleNamespace(**kw),
+            RunningMode=types.SimpleNamespace(IMAGE="IMAGE"),
+        ),
+    )
+    mp.Image = types.SimpleNamespace(create_from_file=create_from_file)
+    monkeypatch.setitem(sys.modules, "mediapipe", mp)
+
+
+def _dummy_face(n: int = MESH_POINT_COUNT) -> list[Any]:
+    return [types.SimpleNamespace(x=0.5, y=0.5) for _ in range(n)]
+
+
 def test_t10_honesty_in_sidecar_readme_and_commands() -> None:
     repo = Path(__file__).resolve().parents[1]
     readme = repo / "scripts" / "face-landmarker" / "README.md"
@@ -233,6 +308,8 @@ def test_t10_honesty_in_sidecar_readme_and_commands() -> None:
     assert LANDMARKER_HONESTY in text
     assert "--prefer-merge" in text
     assert "run.ps1" in text
+    assert "num_faces=2" in text
+    assert "num_faces=1" not in text
     assert "Difficulty §N6" not in text
     # Local skill how-to (may be gitignored from publish — still present on this machine)
     commands = repo / ".agents" / "skills" / "meshops" / "references" / "commands.md"
@@ -254,3 +331,58 @@ def test_left_view_only_left_ids() -> None:
     assert "mouth_corner_r" not in mapped
     assert "eye_l" in mapped
     assert "nose_tip" in mapped
+
+
+def test_t11_run_py_num_faces_static() -> None:
+    text = _sidecar_run_py().read_text(encoding="utf-8")
+    assert "NUM_FACES: Final[int] = 2" in text
+    assert "num_faces=NUM_FACES" in text
+    assert "num_faces=1" not in text
+
+
+def test_t12_run_py_multi_face_synthetic(tmp_path: Path, monkeypatch: Any) -> None:
+    _install_fake_mediapipe(monkeypatch, [_dummy_face(), _dummy_face()])
+    run = _load_run_py()
+    image, model, out = _dummy_sidecar_paths(tmp_path)
+    rc = run.main(
+        ["--image", str(image), "--view", "front", "--out", str(out), "--model", str(model)]
+    )
+    assert rc == 2
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload == {
+        "ok": False,
+        "skip": "multi_face",
+        "honesty": "face_landmarker_sidecar_not_mesh_or_print_success",
+        "n_faces": 2,
+        "multi_figure": True,
+    }
+    assert "views" not in payload
+    assert "landmarks" not in payload
+
+
+def test_t13_run_py_no_face_synthetic(tmp_path: Path, monkeypatch: Any) -> None:
+    _install_fake_mediapipe(monkeypatch, [])
+    run = _load_run_py()
+    image, model, out = _dummy_sidecar_paths(tmp_path)
+    rc = run.main(
+        ["--image", str(image), "--view", "front", "--out", str(out), "--model", str(model)]
+    )
+    assert rc == 2
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["ok"] is False
+    assert payload["skip"] == "no_face"
+    assert payload["n_faces"] == 0
+
+
+def test_t14_run_py_one_face_synthetic(tmp_path: Path, monkeypatch: Any) -> None:
+    _install_fake_mediapipe(monkeypatch, [_dummy_face()])
+    run = _load_run_py()
+    image, model, out = _dummy_sidecar_paths(tmp_path)
+    rc = run.main(
+        ["--image", str(image), "--view", "front", "--out", str(out), "--model", str(model)]
+    )
+    assert rc == 0
+    dump = json.loads(out.read_text(encoding="utf-8"))
+    assert dump["kind"] == "assist_pixel_capture"
+    assert "front" in dump["views"]
+    assert dump["views"]["front"]["landmarks"]

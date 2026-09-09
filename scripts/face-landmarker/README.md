@@ -77,7 +77,7 @@ Compare remains **0124** `blockout-face-compare` (photo vs RECIPE vs optional sc
 Exit **2** with JSON `{ok:false, skip:…}` for `tool_missing` / `model_missing` /
 `no_face` / `multi_face` / `bad_image`. Exit **0** when one face maps.
 
-`num_faces=1` — two-or-more faces are treated as skip (§1); do not pick a primary.
+`num_faces=2` — detector cap is a max; if it returns 2+ faces, skip (`multi_face`) and do not pick a primary (§1). A second face below detection confidence can still yield n=1.
 
 ## Map SoT
 
