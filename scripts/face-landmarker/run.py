@@ -16,9 +16,10 @@ import math
 import os
 import sys
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Final, Mapping, Sequence
 
 HONESTY = "face_landmarker_sidecar_not_mesh_or_print_success"
+NUM_FACES: Final[int] = 2
 CAPTURE_HONESTY = "proportion_capture_not_mesh_or_print_success"
 EXIT_OK = 0
 EXIT_SKIP = 2
@@ -236,7 +237,7 @@ def main(argv: list[str] | None = None) -> int:
         options = FaceLandmarkerOptions(
             base_options=BaseOptions(model_asset_path=str(model_path)),
             running_mode=VisionRunningMode.IMAGE,
-            num_faces=1,
+            num_faces=NUM_FACES,
             output_face_blendshapes=False,
             output_facial_transformation_matrixes=False,
         )
