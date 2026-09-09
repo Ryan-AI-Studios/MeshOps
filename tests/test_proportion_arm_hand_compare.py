@@ -17,12 +17,22 @@ from meshops.mcp.server import TOOL_NAMES
 from meshops.proportion.arm_hand_compare import (
     ARM_HAND_COMPARE_ROLES,
     ARM_HAND_COMPARE_SCHEMA_VERSION,
+    BI_FRONT_PAST_FLAG_M,
     SUGGESTED_ACTIONS,
+    TRI_REAR_PAST_FLAG_M,
     build_arm_hand_metrics,
     extract_recipe_arm_hand_part,
     run_blockout_arm_hand_compare,
 )
-from meshops.proportion.blockout_recipe import RECIPE_ID, RECIPE_SCHEMA_VERSION
+from meshops.proportion.blockout_recipe import (
+    BICEP_ALONG_T,
+    BICEP_FRONT_PAST_M,
+    RECIPE_ID,
+    RECIPE_SCHEMA_VERSION,
+    TRICEP_ALONG_T,
+    TRICEP_REAR_PAST_M,
+    build_blockout_recipe,
+)
 from meshops.proportion.errors import ProportionError
 from meshops.proportion.honesty import ARM_HAND_COMPARE_HONESTY, PROPORTION_HONESTY
 from meshops.proportion.models import (
@@ -30,6 +40,12 @@ from meshops.proportion.models import (
     LandmarkXYZ,
     ProportionReport,
     QualityFlags,
+)
+from meshops.proportion.skeleton import build_blockout_skeleton
+from test_proportion_torso_anti_tire_plus import (
+    _product_class_report,
+    _product_flags,
+    _template,
 )
 
 runner = CliRunner()
@@ -150,13 +166,15 @@ def _productish_recipe(
     ua_mid_y = 0.0
     bi_ry = 0.03074
     bi_past = 0.003 if bi_past_small else 0.010
-    bi_cy = ua_mid_y - ua_r - bi_past + bi_ry
     tri_ry = 0.02945
     tri_past = 0.003 if bi_past_small else 0.010
-    tri_cy = ua_mid_y + ua_r + tri_past - tri_ry
 
     ua_p0 = [-0.2575, ua_mid_y, 1.3802]
     ua_p1 = [-0.3275, ua_mid_y, 1.2593]
+    dist_p1 = [-0.3976, -0.0147, 1.1385]
+    chain_mid_y = ua_p0[1] + BICEP_ALONG_T * (dist_p1[1] - ua_p0[1])
+    bi_cy = chain_mid_y - ua_r - bi_past + bi_ry
+    tri_cy = chain_mid_y + ua_r + tri_past - tri_ry
 
     thumb_p0 = [-0.45, -0.05, 0.95]
     thumb_p1 = [-0.46, -0.12, 0.90] if thumb_forward else [-0.46, 0.02, 0.90]
@@ -173,7 +191,7 @@ def _productish_recipe(
             "RECIPE_arm_taper_dist_ua_l",
             "limb_segment",
             [-0.3275, 0.0, 1.2593],
-            [-0.3976, -0.0147, 1.1385],
+            dist_p1,
             0.03678,
         ),
         _capsule(
@@ -270,6 +288,216 @@ def _productish_recipe(
     if not include_ua_r:
         parts[0]["radius_m"] = None
     return _recipe_doc(parts=parts)
+
+
+def _emit_product(report, **flag_overrides: object):
+    skel = build_blockout_skeleton(report)
+    return build_blockout_recipe(
+        report,
+        skeleton=skel,
+        template_applied=_template(),
+        **_product_flags(**flag_overrides),  # type: ignore[arg-type]
+    )
+
+
+def test_t2_hanging_ua_chain_mid_vs_prox_mid() -> None:
+    """T2: hanging UA — prox mid ≠ chain mid; past stays 0.010 on chain-placed bi/tri."""
+    ua_r = 0.04379
+    bi_ry = 0.03074
+    tri_ry = 0.02945
+    past = 0.010
+    ua_p0 = [-0.2575, 0.05, 1.3802]
+    ua_p1 = [-0.3275, 0.05, 1.2593]
+    dist_p1 = [-0.3976, -0.05, 1.1385]
+    prox_mid_y = (ua_p0[1] + ua_p1[1]) / 2.0
+    chain_mid_y = ua_p0[1] + BICEP_ALONG_T * (dist_p1[1] - ua_p0[1])
+    assert prox_mid_y != pytest.approx(chain_mid_y, abs=1e-4)
+    bi_cy = chain_mid_y - ua_r - past + bi_ry
+    tri_cy = chain_mid_y + ua_r + past - tri_ry
+    recipe = _recipe_doc(
+        parts=[
+            _capsule("RECIPE_limb_upper_arm_l", "limb_segment", ua_p0, ua_p1, ua_r),
+            _capsule(
+                "RECIPE_arm_taper_dist_ua_l",
+                "limb_segment",
+                ua_p1,
+                dist_p1,
+                0.03678,
+            ),
+            _ellipsoid(
+                "RECIPE_bicep_soft_l",
+                "bicep_soft",
+                [-0.3275, bi_cy, 1.2593],
+                0.03415,
+                bi_ry,
+                0.03245,
+            ),
+            _ellipsoid(
+                "RECIPE_triceps_soft_l",
+                "limb_segment",
+                [-0.3275, tri_cy, 1.2593],
+                0.03591,
+                tri_ry,
+                0.03411,
+            ),
+        ]
+    )
+    metrics = build_arm_hand_metrics(_report(), recipe=recipe)
+    assert metrics.bicep_front_past_m == pytest.approx(0.010, abs=1e-4)
+    assert metrics.triceps_rear_past_m == pytest.approx(0.010, abs=1e-4)
+    prox_bi_past = (prox_mid_y - ua_r) - (bi_cy - bi_ry)
+    assert abs(prox_bi_past - 0.010) >= 0.005
+
+
+def test_t3_no_same_side_taper_ignores_contralateral() -> None:
+    """T3: missing same-side taper falls back to limb.p1; contralateral taper ignored."""
+    ua_r = 0.04379
+    bi_ry = 0.03074
+    tri_ry = 0.02945
+    past = 0.010
+    ua_p0 = [-0.2575, 0.0, 1.3802]
+    ua_p1 = [-0.3275, 0.0, 1.2593]
+    limb_mid_y = (ua_p0[1] + ua_p1[1]) / 2.0
+    bi_cy = limb_mid_y - ua_r - past + bi_ry
+    tri_cy = limb_mid_y + ua_r + past - tri_ry
+    recipe = _recipe_doc(
+        parts=[
+            _capsule("RECIPE_limb_upper_arm_l", "limb_segment", ua_p0, ua_p1, ua_r),
+            _capsule(
+                "RECIPE_arm_taper_dist_ua_r",
+                "limb_segment",
+                [0.3275, 0.0, 1.2593],
+                [0.3976, -0.10, 1.1385],
+                0.03678,
+            ),
+            _ellipsoid(
+                "RECIPE_bicep_soft_l",
+                "bicep_soft",
+                [-0.3275, bi_cy, 1.2593],
+                0.03415,
+                bi_ry,
+                0.03245,
+            ),
+            _ellipsoid(
+                "RECIPE_triceps_soft_l",
+                "limb_segment",
+                [-0.3275, tri_cy, 1.2593],
+                0.03591,
+                tri_ry,
+                0.03411,
+            ),
+        ]
+    )
+    metrics = build_arm_hand_metrics(_report(), recipe=recipe)
+    assert metrics.bicep_front_past_m == pytest.approx(0.010, abs=1e-4)
+    assert metrics.triceps_rear_past_m == pytest.approx(0.010, abs=1e-4)
+
+
+def test_t4_malformed_dist_p1_falls_back_to_limb() -> None:
+    """T4: same-side taper with missing p1 falls back to limb.p1."""
+    ua_r = 0.04379
+    bi_ry = 0.03074
+    tri_ry = 0.02945
+    past = 0.010
+    ua_p0 = [-0.2575, 0.0, 1.3802]
+    ua_p1 = [-0.3275, 0.0, 1.2593]
+    limb_mid_y = (ua_p0[1] + ua_p1[1]) / 2.0
+    bi_cy = limb_mid_y - ua_r - past + bi_ry
+    tri_cy = limb_mid_y + ua_r + past - tri_ry
+    taper = _capsule(
+        "RECIPE_arm_taper_dist_ua_l",
+        "limb_segment",
+        ua_p1,
+        [-0.3976, -0.10, 1.1385],
+        0.03678,
+    )
+    taper["p1"] = None
+    recipe = _recipe_doc(
+        parts=[
+            _capsule("RECIPE_limb_upper_arm_l", "limb_segment", ua_p0, ua_p1, ua_r),
+            taper,
+            _ellipsoid(
+                "RECIPE_bicep_soft_l",
+                "bicep_soft",
+                [-0.3275, bi_cy, 1.2593],
+                0.03415,
+                bi_ry,
+                0.03245,
+            ),
+            _ellipsoid(
+                "RECIPE_triceps_soft_l",
+                "limb_segment",
+                [-0.3275, tri_cy, 1.2593],
+                0.03591,
+                tri_ry,
+                0.03411,
+            ),
+        ]
+    )
+    metrics = build_arm_hand_metrics(_report(), recipe=recipe)
+    assert metrics.bicep_front_past_m == pytest.approx(0.010, abs=1e-4)
+    assert metrics.triceps_rear_past_m == pytest.approx(0.010, abs=1e-4)
+
+
+def test_t5_product_emit_past_matches_0063(tmp_path: Path) -> None:
+    """T5: product-class emit pasts ≈0.010; no bi_front_past / tri_rear_past tokens."""
+    report = _product_class_report()
+    pkg = _emit_product(report)
+    metrics = build_arm_hand_metrics(report, recipe=pkg)
+    assert metrics.bicep_front_past_m == pytest.approx(0.010, abs=1.5e-3)
+    assert metrics.triceps_rear_past_m == pytest.approx(0.010, abs=1.5e-3)
+    recipe = _write_recipe(tmp_path / "recipe.json", pkg.model_dump(mode="json"))
+    payload = run_blockout_arm_hand_compare(
+        _write_report(tmp_path / "report.json", report),
+        recipe,
+        tmp_path / "cmp",
+        force=True,
+    )
+    tokens: list[str] = []
+    for role in payload["roles"]:
+        tokens.extend(role.get("form_read") or [])
+    assert "bi_front_past" not in tokens
+    assert "tri_rear_past" not in tokens
+
+
+def test_t6_degenerate_ua_past_none() -> None:
+    """T6: near-zero UA segment → pasts None (never invent)."""
+    ua_r = 0.04379
+    p = [-0.2575, 0.0, 1.3802]
+    recipe = _recipe_doc(
+        parts=[
+            _capsule("RECIPE_limb_upper_arm_l", "limb_segment", p, list(p), ua_r),
+            _ellipsoid(
+                "RECIPE_bicep_soft_l",
+                "bicep_soft",
+                [-0.3275, -0.02, 1.2593],
+                0.03415,
+                0.03074,
+                0.03245,
+            ),
+            _ellipsoid(
+                "RECIPE_triceps_soft_l",
+                "limb_segment",
+                [-0.3275, 0.02, 1.2593],
+                0.03591,
+                0.02945,
+                0.03411,
+            ),
+        ]
+    )
+    metrics = build_arm_hand_metrics(_report(), recipe=recipe)
+    assert metrics.bicep_front_past_m is None
+    assert metrics.triceps_rear_past_m is None
+
+
+def test_t9_const_hold() -> None:
+    """T9: 0063 past consts / along_t / compare flags hold."""
+    assert BICEP_FRONT_PAST_M == 0.010
+    assert TRICEP_REAR_PAST_M == 0.010
+    assert BICEP_ALONG_T == 0.50
+    assert TRICEP_ALONG_T == 0.50
+    assert BI_FRONT_PAST_FLAG_M == 0.006
+    assert TRI_REAR_PAST_FLAG_M == 0.006
 
 
 def test_b1_bicep_front_past_when_recipe() -> None:
