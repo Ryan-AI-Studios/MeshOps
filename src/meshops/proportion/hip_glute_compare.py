@@ -62,6 +62,7 @@ GLUTE_SHORT_OF_HIP_SOFT_M: Final[float] = 0.040
 PELVIS_BEHIND_GLUTE_M: Final[float] = 0.010
 THIGH_GAP_WIDE_M: Final[float] = 0.070
 GROIN_DISCONNECT_M: Final[float] = 0.040
+GLUTE_MIDLINE_GAP_M: Final[float] = 0.060
 
 _ROLE_PART: dict[str, str] = {
     "asis_l": "RECIPE_pelvis_oval",
@@ -481,7 +482,8 @@ def _suggest(
         return "hold_priors"
     if delta is None:
         return "hold_priors"
-    vals = [abs(v) for v in (delta.x, delta.y, delta.z) if v is not None]
+    # B36 analog (0127): Y/Z-only consume — ignore delta.x.
+    vals = [abs(v) for v in (delta.y, delta.z) if v is not None]
     if not vals:
         return "hold_priors"
     if max(vals) < 1.0:
@@ -596,15 +598,16 @@ def run_blockout_hip_glute_compare(
     glute_r = _find_part(parts, "RECIPE_glute_soft_r")
     inner_l = _inner_x(glute_l)
     inner_r = _inner_x(glute_r)
-    midline_gap = False
+    gap: float | None = None
     if inner_l is not None and inner_r is not None:
-        midline_gap = min(inner_l, inner_r) > 0.0
+        gap = min(inner_l, inner_r)
     elif inner_l is not None:
-        midline_gap = inner_l > 0.0
+        gap = inner_l
     elif inner_r is not None:
-        midline_gap = inner_r > 0.0
+        gap = inner_r
+    midline_gap = gap is not None and gap >= GLUTE_MIDLINE_GAP_M
     if midline_gap:
-        messages.append("glute_midline_gap")
+        messages.append(f"glute_midline_gap_m={gap:.4f}")
 
     lms = rep.landmarks_xyz
     crotch = lms.get("crotch_pubic")
