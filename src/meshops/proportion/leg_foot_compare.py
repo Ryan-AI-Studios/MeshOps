@@ -107,6 +107,13 @@ _SOFT_ADJUST_IDS: Final[frozenset[str]] = frozenset(
         "arch_apex_r",
     }
 )
+# 0135: score only the consumed axis (gastroc Y / arch Z). Ignore X (B36).
+_SOFT_ADJUST_AXES: Final[dict[str, Literal["y", "z"]]] = {
+    "gastroc_med_l": "y",
+    "gastroc_med_r": "y",
+    "arch_apex_l": "z",
+    "arch_apex_r": "z",
+}
 _CAPSULE_ROLES: Final[frozenset[str]] = frozenset(
     {
         "gastroc_med_l",
@@ -531,11 +538,14 @@ def _suggest(
         return "hold_priors"
     if delta is None:
         return "hold_priors"
-    # B36: Y/Z-only consume — ignore delta.x.
-    vals = [abs(v) for v in (delta.y, delta.z) if v is not None]
-    if not vals:
+    # 0135 / B36: score only the consumed axis — ignore delta.x and unused Y/Z.
+    axis = _SOFT_ADJUST_AXES.get(role_id)
+    if axis is None:
         return "hold_priors"
-    if max(vals) < 1.0:
+    v = getattr(delta, axis)
+    if v is None:
+        return "hold_priors"
+    if abs(v) < 1.0:
         return "hold_priors"
     return "soft_adjust"
 

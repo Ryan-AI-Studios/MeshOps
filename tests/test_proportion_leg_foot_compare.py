@@ -18,6 +18,7 @@ from meshops.proportion.blockout_recipe import RECIPE_ID, RECIPE_SCHEMA_VERSION
 from meshops.proportion.errors import ProportionError
 from meshops.proportion.honesty import LEG_FOOT_COMPARE_HONESTY, PROPORTION_HONESTY
 from meshops.proportion.leg_foot_compare import (
+    _SOFT_ADJUST_AXES,
     LEG_FOOT_COMPARE_ROLES,
     LEG_FOOT_COMPARE_SCHEMA_VERSION,
     SUGGESTED_ACTIONS,
@@ -695,6 +696,112 @@ def test_d10_gastroc_ignore_delta_x(tmp_path: Path) -> None:
     assert gastroc["suggested"] == "hold_priors"
 
 
+def test_t0_soft_adjust_axes_table() -> None:
+    """T0 / B1: module Final maps all four soft-adjust ids to the consumed axis."""
+    assert _SOFT_ADJUST_AXES == {
+        "gastroc_med_l": "y",
+        "gastroc_med_r": "y",
+        "arch_apex_l": "z",
+        "arch_apex_r": "z",
+    }
+
+
+def test_t1_gastroc_l_unused_z_hold_priors(tmp_path: Path) -> None:
+    """T1: gastroc_med_l |dz| ≥ 1 mm and dy = 0 → hold_priors (Y-only consume)."""
+    report = _write_report(
+        tmp_path / "report.json",
+        _report(
+            {
+                "gastroc_med_l": _lm("gastroc_med_l", x_m=-0.0976, y_m=0.0217, z_m=0.40),
+            }
+        ),
+    )
+    recipe = _write_recipe(tmp_path / "recipe.json", _productish_recipe())
+    payload = run_blockout_leg_foot_compare(report, recipe, tmp_path / "cmp", force=True)
+    gastroc = next(r for r in payload["roles"] if r["id"] == "gastroc_med_l")
+    assert gastroc["delta_mm"] is not None
+    assert gastroc["delta_mm"]["y"] == pytest.approx(0.0, abs=1e-6)
+    assert abs(gastroc["delta_mm"]["z"]) >= 1.0
+    assert gastroc["suggested"] == "hold_priors"
+
+
+def test_t2_gastroc_r_y_soft_adjust(tmp_path: Path) -> None:
+    """T2: gastroc_med_r |dy| ≥ 1 mm (Z large OK) → soft_adjust."""
+    report = _write_report(
+        tmp_path / "report.json",
+        _report(
+            {
+                "gastroc_med_r": _lm("gastroc_med_r", x_m=0.0976, y_m=0.08, z_m=0.40),
+            }
+        ),
+    )
+    recipe = _write_recipe(tmp_path / "recipe.json", _productish_recipe())
+    payload = run_blockout_leg_foot_compare(report, recipe, tmp_path / "cmp", force=True)
+    gastroc = next(r for r in payload["roles"] if r["id"] == "gastroc_med_r")
+    assert gastroc["delta_mm"] is not None
+    assert abs(gastroc["delta_mm"]["y"]) >= 1.0
+    assert abs(gastroc["delta_mm"]["z"]) >= 1.0
+    assert gastroc["suggested"] == "soft_adjust"
+
+
+def test_t3_arch_l_unused_y_hold_priors(tmp_path: Path) -> None:
+    """T3: arch_apex_l |dy| ≥ 1 mm and dz = 0 → hold_priors (Z-only consume)."""
+    report = _write_report(
+        tmp_path / "report.json",
+        _report(
+            {
+                "arch_apex_l": _lm("arch_apex_l", x_m=-0.0911, y_m=0.10, z_m=0.0376),
+            }
+        ),
+    )
+    recipe = _write_recipe(tmp_path / "recipe.json", _productish_recipe())
+    payload = run_blockout_leg_foot_compare(report, recipe, tmp_path / "cmp", force=True)
+    arch = next(r for r in payload["roles"] if r["id"] == "arch_apex_l")
+    assert arch["delta_mm"] is not None
+    assert abs(arch["delta_mm"]["y"]) >= 1.0
+    assert arch["delta_mm"]["z"] == pytest.approx(0.0, abs=1e-6)
+    assert arch["suggested"] == "hold_priors"
+
+
+def test_t4_arch_r_z_soft_adjust(tmp_path: Path) -> None:
+    """T4: arch_apex_r |dz| ≥ 1 mm (Y large OK) → soft_adjust."""
+    report = _write_report(
+        tmp_path / "report.json",
+        _report(
+            {
+                "arch_apex_r": _lm("arch_apex_r", x_m=0.0911, y_m=0.10, z_m=0.20),
+            }
+        ),
+    )
+    recipe = _write_recipe(tmp_path / "recipe.json", _productish_recipe())
+    payload = run_blockout_leg_foot_compare(report, recipe, tmp_path / "cmp", force=True)
+    arch = next(r for r in payload["roles"] if r["id"] == "arch_apex_r")
+    assert arch["delta_mm"] is not None
+    assert abs(arch["delta_mm"]["y"]) >= 1.0
+    assert abs(arch["delta_mm"]["z"]) >= 1.0
+    assert arch["suggested"] == "soft_adjust"
+
+
+def test_t5_consumed_axis_none_hold_priors(tmp_path: Path) -> None:
+    """T5: gastroc consumed Y omitted (Z far) → hold_priors."""
+    report = _write_report(
+        tmp_path / "report.json",
+        _report(
+            {
+                "gastroc_med_l": _lm("gastroc_med_l", x_m=-0.0976, z_m=0.40),
+            }
+        ),
+    )
+    recipe = _write_recipe(tmp_path / "recipe.json", _productish_recipe())
+    payload = run_blockout_leg_foot_compare(report, recipe, tmp_path / "cmp", force=True)
+    gastroc = next(r for r in payload["roles"] if r["id"] == "gastroc_med_l")
+    assert gastroc["measured"] is not None
+    assert gastroc["delta_mm"] is not None
+    assert gastroc["delta_mm"]["y"] is None
+    assert abs(gastroc["delta_mm"]["z"]) >= 1.0
+    assert gastroc["suggested"] == "hold_priors"
+
+
 def test_d11_capsule_p0_soft_adjust(tmp_path: Path) -> None:
     """D11 / B39: capsule center=null + measured Y Δ ≥1 mm → soft_adjust (not skip)."""
     report = _write_report(
@@ -714,7 +821,7 @@ def test_d11_capsule_p0_soft_adjust(tmp_path: Path) -> None:
 
 
 def test_f1_mcp_catalog_51() -> None:
-    """F1: TOOL_NAMES 51 and leg-foot-compare tool present."""
+    """F1 / T9: TOOL_NAMES stay 53 and leg-foot-compare tool present."""
     assert "mesh_proportion_blockout_leg_foot_compare" in TOOL_NAMES
     assert len(TOOL_NAMES) == 53
 

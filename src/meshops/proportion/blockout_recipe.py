@@ -3306,17 +3306,13 @@ def _apply_measured_calf_cyl_y(
         cyl.p0 = [float(cyl.p0[0]), my, float(cyl.p0[2])]
         cyl.placement = "full3d"
         taper = by_name.get(f"RECIPE_calf_taper_dist_{side}")
-        dest: list[float] | None = None
         if taper is not None and taper.p1 is not None and len(taper.p1) >= 3:
             dest = [float(taper.p1[0]), float(taper.p1[1]), float(taper.p1[2])]
-        elif cyl.p1 is not None and len(cyl.p1) >= 3:
-            dest = [float(cyl.p1[0]), float(cyl.p1[1]), float(cyl.p1[2])]
-        if dest is not None:
             mid = _calf_split_mid(list(cyl.p0), dest)
             cyl.p1 = list(mid)
-            if taper is not None:
-                taper.p0 = list(mid)
-                taper.placement = "full3d"
+            taper.p0 = list(mid)
+            taper.placement = "full3d"
+        # no-taper: p0 already updated; p1 stays (B6 ankle Y)
         messages.append(f"leg_foot: measured calf_cyl y={my:.4f} ({side})")
 
 

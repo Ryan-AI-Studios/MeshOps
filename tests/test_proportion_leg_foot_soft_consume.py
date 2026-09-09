@@ -15,6 +15,7 @@ from meshops.proportion.blockout_recipe import (
     CALF_BELLY_SCALE,
     CALF_DIST_SHAFT_SCALE,
     CALF_SPLIT_T,
+    _apply_measured_calf_cyl_y,
     build_blockout_recipe,
 )
 from meshops.proportion.extremity_recipe import (
@@ -52,6 +53,31 @@ def _emit(report, **flag_overrides: object):
         template_applied=_template(),
         **_product_flags(**flag_overrides),  # type: ignore[arg-type]
     )
+
+
+def test_t6_no_taper_measured_y_keeps_p1_ankle() -> None:
+    """T6 / B3: no-taper measured Y updates p0 only; p1 stays ankle, not 42% stub."""
+    report = _product_class_report()
+    pkg = _emit(report)
+    taper = next(p for p in pkg.parts if p.name == "RECIPE_calf_taper_dist_l")
+    assert taper.p1 is not None
+    ank_y = float(taper.p1[1])
+    parts = [p for p in pkg.parts if not p.name.startswith("RECIPE_calf_taper_dist_")]
+    cyl = next(p for p in parts if p.name == "RECIPE_calf_cyl_l")
+    assert cyl.p0 is not None and cyl.p1 is not None
+    cyl.p1 = [float(cyl.p1[0]), ank_y, float(cyl.p1[2])]
+    measured_y = -0.04
+    report.landmarks_xyz["gastroc_med_l"] = _lm(
+        "gastroc_med_l", x_m=-0.10, y_m=measured_y, z_m=0.57
+    )
+    messages: list[str] = []
+    _apply_measured_calf_cyl_y(parts, report, messages)
+    assert float(cyl.p0[1]) == pytest.approx(measured_y, abs=1e-6)
+    assert float(cyl.p0[1]) < 0.0
+    assert float(cyl.p1[1]) == pytest.approx(ank_y, abs=1e-6)
+    stub_y = measured_y + CALF_SPLIT_T * (ank_y - measured_y)
+    assert float(cyl.p1[1]) != pytest.approx(stub_y, abs=1e-4)
+    assert any("measured calf_cyl y=" in m for m in messages)
 
 
 def test_e1_measured_gastroc_y_after_b6() -> None:
