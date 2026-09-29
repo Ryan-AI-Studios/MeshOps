@@ -193,5 +193,5 @@ def test_e8_measured_trap_z_after_nape() -> None:
 
 
 def test_e_mcp_catalog_53() -> None:
-    assert len(TOOL_NAMES) == 53
+    assert len(TOOL_NAMES) == 54
     assert "mesh_proportion_blockout_girdle_compare" in TOOL_NAMES

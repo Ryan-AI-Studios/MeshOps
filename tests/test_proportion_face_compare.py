@@ -564,7 +564,7 @@ def test_d7_stdout_honesty(tmp_path: Path) -> None:
 def test_f1_mcp_catalog_48() -> None:
     """F1: TOOL_NAMES 48 and face-compare tool present."""
     assert "mesh_proportion_blockout_face_compare" in TOOL_NAMES
-    assert len(TOOL_NAMES) == 53
+    assert len(TOOL_NAMES) == 54
 
 
 def test_f2_cli_contains_verb() -> None:

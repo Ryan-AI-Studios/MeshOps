@@ -81,7 +81,7 @@ def test_t5_r_scales_0088_hold() -> None:
 
 def test_t6_mcp_catalog_47() -> None:
     """T6: MCP catalog stays 47."""
-    assert len(TOOL_NAMES) == 53
+    assert len(TOOL_NAMES) == 54
 
 
 def test_t7_no_fist_cli_command() -> None:

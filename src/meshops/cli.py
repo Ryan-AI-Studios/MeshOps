@@ -92,7 +92,8 @@ proportion_app = typer.Typer(
         "blockout-validate-constraints | "
         "blockout-optimize | blockout-emit-setup | blockout-open-setup | blockout-fuse-plan | "
         "skeleton-build | depth-heatmap | depth-hint | silhouette-compare | "
-        "blockout-feedback | blockout-face-compare | blockout-torso-compare. "
+        "benchmark-multiview | blockout-feedback | blockout-face-compare | "
+        "blockout-torso-compare. "
         "Assist-first landmarks + head-unit checks + blockout-grade XYZ; "
         "schema 1.1.0 diameters (edge pairs) + left depth bands + cross-sections; "
         "scaffold creates package layout + package_checklist.json only (not mesh/print success); "
@@ -116,6 +117,8 @@ proportion_app = typer.Typer(
         "depth-heatmap glance PNG from samples/deltas (numbers SoT — N6); "
         "depth-hint external depth-channel assist hints + optional merge-into (conf floor — N6); "
         "silhouette-compare front|left same-role binary IoU/Dice QA score (authoring only — N6); "
+        "benchmark-multiview four-view Package A vs MeshOps recipe vs Meshy GLB "
+        "(0138; MULTIVIEW_BENCHMARK_HONESTY — N6); "
         "blockout-feedback sticky post-export checklist (depth+heatmap+silhouettes — N6); "
         "blockout-face-compare photo vs RECIPE vs optional scene "
         "(0124; FACE_COMPARE_HONESTY — N6); "
@@ -3202,6 +3205,113 @@ def proportion_silhouette_compare_cmd(
         typer.echo("silhouette-compare authoring QA only — not mesh or print success")
         if not trusted:
             typer.echo("Do not thrash mesh geometry to chase an untrusted silhouette score")
+    raise typer.Exit(0)
+
+
+@proportion_app.command("benchmark-multiview")
+def proportion_benchmark_multiview_cmd(
+    reference: Path = typer.Option(
+        ...,
+        "--reference",
+        help="Directory with front/left/three_quarter/back.png and package_checklist.json",
+    ),
+    out: Path = typer.Option(..., "--out", help="Bundle directory (required)"),
+    meshops_setup: Path | None = typer.Option(
+        None,
+        "--meshops-setup",
+        help="Frozen setup_blockout_recipe.py (required unless --meshops-views)",
+    ),
+    meshy_glb: Path | None = typer.Option(
+        None,
+        "--meshy-glb",
+        help="Meshy GLB to bake and normalize (required unless --meshy-views)",
+    ),
+    meshops_views: Path | None = typer.Option(
+        None,
+        "--meshops-views",
+        help="Pre-rendered MeshOps role PNGs (skips Blender for this candidate)",
+    ),
+    meshy_views: Path | None = typer.Option(
+        None,
+        "--meshy-views",
+        help="Pre-rendered Meshy role PNGs (skips Blender for this candidate)",
+    ),
+    verdict: str | None = typer.Option(
+        None,
+        "--verdict",
+        help="accept|reject. Omitted keeps ok false / verdict_pending",
+    ),
+    figure: str | None = typer.Option(
+        None,
+        "--figure",
+        help="Required only when the checklist is multi-figure",
+    ),
+    yaw_deg: float = typer.Option(
+        0.0,
+        "--yaw-deg",
+        help="Right-handed yaw about +Z after grounding",
+    ),
+    appearance: bool = typer.Option(
+        False,
+        "--appearance",
+        help="Also write an untextured-off GLB preview. Never feeds IoU or ok",
+    ),
+    meshy_sibling_stl: Path | None = typer.Option(
+        None,
+        "--meshy-sibling-stl",
+        help="Hash only. Not rendered",
+    ),
+    meshops_blend: Path | None = typer.Option(
+        None,
+        "--meshops-blend",
+        help="Hash only. Not opened",
+    ),
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing bundle JSON"),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
+    require_verdict: bool = typer.Option(
+        False,
+        "--require-verdict",
+        help="Exit 2 unless status is accepted (bundle is still written)",
+    ),
+) -> None:
+    """Four-view authoring QA (0138). Not mesh or print success (N6)."""
+    from meshops.proportion.benchmark_multiview import run_benchmark_multiview
+    from meshops.proportion.errors import ProportionError
+    from meshops.proportion.honesty import MULTIVIEW_BENCHMARK_HONESTY
+
+    try:
+        payload = run_benchmark_multiview(
+            reference,
+            out,
+            meshops_setup=meshops_setup,
+            meshy_glb=meshy_glb,
+            meshops_views=meshops_views,
+            meshy_views=meshy_views,
+            verdict=verdict,
+            figure=figure,
+            yaw_deg=yaw_deg,
+            appearance=appearance,
+            meshy_sibling_stl=meshy_sibling_stl,
+            meshops_blend=meshops_blend,
+            force=force,
+        )
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    if json_out:
+        _emit_json(payload)
+    else:
+        typer.echo(f"benchmark-multiview status={payload.get('status')} ok={payload.get('ok')}")
+        for path_item in payload.get("paths") or []:
+            typer.echo(f"  {path_item}")
+        for msg in payload.get("messages") or []:
+            typer.echo(f"  note: {msg}")
+        typer.echo(f"honesty: {MULTIVIEW_BENCHMARK_HONESTY}")
+        typer.echo("benchmark-multiview authoring QA only — not mesh or print success")
+    if require_verdict and payload.get("status") != "accepted":
+        raise typer.Exit(2)
     raise typer.Exit(0)
 
 
