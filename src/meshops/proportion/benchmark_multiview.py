@@ -16,7 +16,6 @@ from typing import Any, Literal
 
 import numpy as np
 import trimesh
-from PIL import Image  # type: ignore[import-untyped,import-not-found]
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from meshops.escalate.discover import find_blender
@@ -455,13 +454,26 @@ def _copy_roles(source: Path, dest: Path) -> None:
         shutil.copy2(src, dst)
 
 
+def _pillow_image() -> Any:
+    """Pillow ``Image`` class. The proportion extra is optional on the design job."""
+    try:
+        from PIL import Image  # type: ignore[import-untyped,import-not-found]
+    except ImportError as exc:
+        raise ProportionError(
+            "Pillow is required to write benchmark images; install meshops[proportion]",
+            code="benchmark_failed",
+        ) from exc
+    return Image
+
+
 def _write_residual(path: Path, ref_grid: np.ndarray | None, cand_grid: np.ndarray | None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    image_cls = _pillow_image()
     if ref_grid is None or cand_grid is None:
-        image = Image.new("L", (GRID_PX, GRID_PX), 0)
+        image = image_cls.new("L", (GRID_PX, GRID_PX), 0)
     else:
         diff = np.abs(ref_grid.astype(np.float64) - cand_grid.astype(np.float64))
-        image = Image.fromarray((diff * 255.0).astype(np.uint8), mode="L")
+        image = image_cls.fromarray((diff * 255.0).astype(np.uint8), mode="L")
     image.save(path)
 
 
@@ -669,7 +681,7 @@ def _crop_subject(
         box = crop_box_px(content_bbox, fractions)
         dest = out / "crops" / role / name / f"{subject}.png"
         dest.parent.mkdir(parents=True, exist_ok=True)
-        with Image.open(image_path) as image:
+        with _pillow_image().open(image_path) as image:
             px0, py0, px1, py1 = box
             image.crop((px0, py0, px1 + 1, py1 + 1)).save(dest)
         png_rel = dest.resolve().relative_to(out.resolve()).as_posix()

@@ -8,11 +8,11 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
 import trimesh
-from PIL import Image, ImageDraw  # type: ignore[import-untyped,import-not-found]
 from pydantic import ValidationError
 from typer.testing import CliRunner
 
@@ -43,9 +43,18 @@ _REPO = Path(__file__).resolve().parents[1]
 _RUNNER = CliRunner()
 
 
+def _pillow() -> tuple[Any, Any]:
+    """Image and ImageDraw. Design CI collects this module without Pillow."""
+    pytest.importorskip("PIL")
+    from PIL import Image, ImageDraw  # type: ignore[import-untyped,import-not-found]
+
+    return Image, ImageDraw
+
+
 def _write_gray_pixels(path: Path, pixels: list[tuple[int, int]]) -> None:
-    image = Image.new("RGB", (80, 120), (180, 180, 180))
-    draw = ImageDraw.Draw(image)
+    image_cls, draw_cls = _pillow()
+    image = image_cls.new("RGB", (80, 120), (180, 180, 180))
+    draw = draw_cls.Draw(image)
     for x, y in pixels:
         draw.point((x, y), fill=(20, 20, 20))
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -53,10 +62,11 @@ def _write_gray_pixels(path: Path, pixels: list[tuple[int, int]]) -> None:
 
 
 def _write_png(path: Path, *, foreground: bool) -> None:
+    image_cls, draw_cls = _pillow()
     path.parent.mkdir(parents=True, exist_ok=True)
-    image = Image.new("RGB", (80, 120), (255, 255, 255))
+    image = image_cls.new("RGB", (80, 120), (255, 255, 255))
     if foreground:
-        draw = ImageDraw.Draw(image)
+        draw = draw_cls.Draw(image)
         draw.rectangle((24, 16, 56, 100), fill=(30, 30, 30))
     image.save(path)
 
@@ -530,5 +540,6 @@ def test_blender_two_primitives_render_four_views(tmp_path: Path) -> None:
         for role in ROLES:
             png = out / "views" / candidate / f"{role}.png"
             assert png.is_file()
-            with Image.open(png) as image:
+            image_cls, _draw_cls = _pillow()
+            with image_cls.open(png) as image:
                 assert image.size == (960, 1280)
