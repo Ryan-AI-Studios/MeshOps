@@ -526,7 +526,7 @@ def test_d8_breast_disconnected(tmp_path: Path) -> None:
 def test_f1_mcp_catalog_49() -> None:
     """F1 / T7: TOOL_NAMES stay 53 and torso-compare tool present (B23)."""
     assert "mesh_proportion_blockout_torso_compare" in TOOL_NAMES
-    assert len(TOOL_NAMES) == 54
+    assert len(TOOL_NAMES) == 55
 
 
 def test_f2_cli_contains_verb() -> None:
