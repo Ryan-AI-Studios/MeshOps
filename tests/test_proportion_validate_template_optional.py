@@ -443,7 +443,7 @@ def test_t9_optimize_shares_helper(tmp_path: Path) -> None:
 
 def test_t10_mcp_catalog_hold() -> None:
     """T10: MCP catalog 47 after 0110."""
-    assert len(TOOL_NAMES) == 53
+    assert len(TOOL_NAMES) == 54
 
 
 def test_t11_cli_help_skip_and_parent() -> None:

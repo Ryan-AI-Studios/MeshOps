@@ -705,7 +705,7 @@ def test_d13_scm_and_nape_mapped_endpoints(tmp_path: Path) -> None:
 def test_f1_mcp_catalog_53() -> None:
     """F1: TOOL_NAMES 53 and girdle-compare tool present."""
     assert "mesh_proportion_blockout_girdle_compare" in TOOL_NAMES
-    assert len(TOOL_NAMES) == 53
+    assert len(TOOL_NAMES) == 54
 
 
 def test_f2_cli_contains_verb() -> None:

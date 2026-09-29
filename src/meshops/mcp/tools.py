@@ -1511,3 +1511,43 @@ def mesh_proportion_blockout_arm_hand_compare(
         scene_dump=_resolve_tool_path(scene_dump, work_root) if scene_dump else None,
         force=force,
     )
+
+
+def mesh_proportion_benchmark_multiview(
+    work_root: Path,
+    *,
+    reference: str,
+    out: str,
+    meshops_setup: str | None = None,
+    meshy_glb: str | None = None,
+    meshops_views: str | None = None,
+    meshy_views: str | None = None,
+    verdict: str | None = None,
+    figure: str | None = None,
+    yaw_deg: float = 0.0,
+    appearance: bool = False,
+    meshy_sibling_stl: str | None = None,
+    meshops_blend: str | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Four-view authoring QA. MULTIVIEW_BENCHMARK_HONESTY — not mesh or print success."""
+    from meshops.proportion.benchmark_multiview import run_benchmark_multiview
+
+    def _opt(path: str | None) -> Path | None:
+        return _resolve_tool_path(path, work_root) if path else None
+
+    return run_benchmark_multiview(
+        _resolve_tool_path(reference, work_root),
+        _resolve_tool_path(out, work_root),
+        meshops_setup=_opt(meshops_setup),
+        meshy_glb=_opt(meshy_glb),
+        meshops_views=_opt(meshops_views),
+        meshy_views=_opt(meshy_views),
+        verdict=verdict,
+        figure=figure,
+        yaw_deg=yaw_deg,
+        appearance=appearance,
+        meshy_sibling_stl=_opt(meshy_sibling_stl),
+        meshops_blend=_opt(meshops_blend),
+        force=force,
+    )

@@ -208,7 +208,7 @@ def test_t6_schema_catalog() -> None:
     """T6: skeleton 1.0.0; recipe 1.4.0; MCP catalog 47."""
     assert SKELETON_SCHEMA_VERSION == "1.0.0"
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
-    assert len(TOOL_NAMES) == 53
+    assert len(TOOL_NAMES) == 54
 
 
 def test_t7_all_hold_no_new_name() -> None:

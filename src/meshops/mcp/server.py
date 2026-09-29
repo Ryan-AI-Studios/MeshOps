@@ -77,6 +77,7 @@ TOOL_NAMES: frozenset[str] = frozenset(
         "mesh_proportion_blockout_leg_foot_compare",
         "mesh_proportion_blockout_girdle_compare",
         "mesh_proportion_blockout_arm_hand_compare",
+        "mesh_proportion_benchmark_multiview",
     }
 )
 
@@ -1087,6 +1088,43 @@ def build_server(work_root: Path | None = None) -> Any:
             recipe=recipe,
             out=out,
             scene_dump=scene_dump,
+            force=force,
+        )
+
+    @mcp.tool()
+    def mesh_proportion_benchmark_multiview(
+        reference: str,
+        out: str,
+        meshops_setup: str | None = None,
+        meshy_glb: str | None = None,
+        meshops_views: str | None = None,
+        meshy_views: str | None = None,
+        verdict: str | None = None,
+        figure: str | None = None,
+        yaw_deg: float = 0.0,
+        appearance: bool = False,
+        meshy_sibling_stl: str | None = None,
+        meshops_blend: str | None = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Four-view authoring QA. proportion_multiview_benchmark_not_mesh_or_print_success.
+
+        Not mesh or print success. Rank stays null. Raises ProportionError on hard failures.
+        """
+        return T.mesh_proportion_benchmark_multiview(
+            wr,
+            reference=reference,
+            out=out,
+            meshops_setup=meshops_setup,
+            meshy_glb=meshy_glb,
+            meshops_views=meshops_views,
+            meshy_views=meshy_views,
+            verdict=verdict,
+            figure=figure,
+            yaw_deg=yaw_deg,
+            appearance=appearance,
+            meshy_sibling_stl=meshy_sibling_stl,
+            meshops_blend=meshops_blend,
             force=force,
         )
 

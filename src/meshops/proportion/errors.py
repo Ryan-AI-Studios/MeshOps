@@ -52,6 +52,8 @@ ProportionErrorCode = Literal[
     "setup_cwd_unsafe",
     "setup_spawn_failed",
     "blender_missing",
+    "benchmark_failed",
+    "benchmark_render_unavailable",
     "unknown",
 ]
 
