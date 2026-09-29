@@ -16,7 +16,7 @@ from typing import Any, Literal
 
 import numpy as np
 import trimesh
-from PIL import Image
+from PIL import Image  # type: ignore[import-untyped,import-not-found]
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from meshops.escalate.discover import find_blender

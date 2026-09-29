@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import trimesh
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw  # type: ignore[import-untyped,import-not-found]
 from pydantic import ValidationError
 from typer.testing import CliRunner
 
