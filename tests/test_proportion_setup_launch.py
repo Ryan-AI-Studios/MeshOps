@@ -63,14 +63,14 @@ def test_t0_hygiene() -> None:
     server = (_REPO / "src/meshops/mcp/server.py").read_text(encoding="utf-8")
     assert "mesh_proportion_blockout_open_setup" in server
     mcp_test = (_REPO / "tests/test_mcp_server.py").read_text(encoding="utf-8")
-    assert "len(TOOL_NAMES) == 54" in mcp_test
+    assert "len(TOOL_NAMES) == 55" in mcp_test
     launch = (_REPO / "src/meshops/proportion/setup_launch.py").read_text(encoding="utf-8")
     assert "build_and_render" in launch
     assert "emit_bpy_script" not in launch
     assert "PARTS =" not in launch
     assert "CREATE_BREAKAWAY_FROM_JOB" in launch
     assert "mesh_proportion_blockout_open_setup" in TOOL_NAMES
-    assert len(TOOL_NAMES) == 54
+    assert len(TOOL_NAMES) == 55
 
 
 def test_t1_file_abs_print(tmp_path: Path, fake_blender: Path) -> None:
@@ -355,7 +355,7 @@ def test_t13_cli_json(tmp_path: Path, fake_blender: Path) -> None:
 def test_t14_mcp_catalog_47() -> None:
     """T14: mesh_proportion_blockout_open_setup in TOOL_NAMES; len == 53."""
     assert "mesh_proportion_blockout_open_setup" in TOOL_NAMES
-    assert len(TOOL_NAMES) == 54
+    assert len(TOOL_NAMES) == 55
 
 
 def test_t14b_mcp_wrapper(tmp_path: Path, fake_blender: Path) -> None:

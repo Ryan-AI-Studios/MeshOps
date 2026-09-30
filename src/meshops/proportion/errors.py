@@ -54,6 +54,8 @@ ProportionErrorCode = Literal[
     "blender_missing",
     "benchmark_failed",
     "benchmark_render_unavailable",
+    "surface_failed",
+    "surface_weld_unavailable",
     "unknown",
 ]
 

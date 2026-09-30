@@ -92,7 +92,7 @@ proportion_app = typer.Typer(
         "blockout-validate-constraints | "
         "blockout-optimize | blockout-emit-setup | blockout-open-setup | blockout-fuse-plan | "
         "skeleton-build | depth-heatmap | depth-hint | silhouette-compare | "
-        "benchmark-multiview | blockout-feedback | blockout-face-compare | "
+        "benchmark-multiview | blockout-surface | blockout-feedback | blockout-face-compare | "
         "blockout-torso-compare. "
         "Assist-first landmarks + head-unit checks + blockout-grade XYZ; "
         "schema 1.1.0 diameters (edge pairs) + left depth bands + cross-sections; "
@@ -119,6 +119,8 @@ proportion_app = typer.Typer(
         "silhouette-compare front|left same-role binary IoU/Dice QA score (authoring only — N6); "
         "benchmark-multiview four-view Package A vs MeshOps recipe vs Meshy GLB "
         "(0138; MULTIVIEW_BENCHMARK_HONESTY — N6); "
+        "blockout-surface welds one named junction "
+        "(0139; SURFACE_HONESTY — N6); "
         "blockout-feedback sticky post-export checklist (depth+heatmap+silhouettes — N6); "
         "blockout-face-compare photo vs RECIPE vs optional scene "
         "(0124; FACE_COMPARE_HONESTY — N6); "
@@ -3310,6 +3312,83 @@ def proportion_benchmark_multiview_cmd(
             typer.echo(f"  note: {msg}")
         typer.echo(f"honesty: {MULTIVIEW_BENCHMARK_HONESTY}")
         typer.echo("benchmark-multiview authoring QA only — not mesh or print success")
+    if require_verdict and payload.get("status") != "accepted":
+        raise typer.Exit(2)
+    raise typer.Exit(0)
+
+
+@proportion_app.command("blockout-surface")
+def proportion_blockout_surface_cmd(
+    recipe: Path = typer.Option(..., "--recipe", help="blockout_recipe.json"),
+    out: Path = typer.Option(..., "--out", help="Bundle directory (required)"),
+    benchmark: Path | None = typer.Option(
+        None,
+        "--benchmark",
+        help="Optional 0138 multiview_benchmark.json. Its ok bit is not success",
+    ),
+    cluster: str | None = typer.Option(
+        None,
+        "--cluster",
+        help="One anatomical cluster id. Required with --apply",
+    ),
+    apply: bool = typer.Option(
+        False,
+        "--apply",
+        help="Weld one cluster. Requires --allow-region-weld",
+    ),
+    allow_region_weld: bool = typer.Option(
+        False,
+        "--allow-region-weld",
+        help="Opt in to welding one named junction",
+    ),
+    figure: str | None = typer.Option(
+        None,
+        "--figure",
+        help="Required only when the benchmark lists two or more figures",
+    ),
+    verdict: str | None = typer.Option(
+        None,
+        "--verdict",
+        help="accept|reject. Omitted keeps ok false / verdict_pending",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
+    require_verdict: bool = typer.Option(
+        False,
+        "--require-verdict",
+        help="Exit 2 unless status is accepted (bundle is still written)",
+    ),
+) -> None:
+    """One named junction weld plan (0139). Not mesh or print success (N6)."""
+    from meshops.proportion.errors import ProportionError
+    from meshops.proportion.honesty import SURFACE_HONESTY
+    from meshops.proportion.surface_plan import run_surface_plan
+
+    try:
+        payload = run_surface_plan(
+            recipe,
+            out,
+            benchmark=benchmark,
+            cluster=cluster,
+            apply=apply,
+            allow_region_weld=allow_region_weld,
+            figure=figure,
+            verdict=verdict,
+        )
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    if json_out:
+        _emit_json(payload)
+    else:
+        typer.echo(f"blockout-surface status={payload.get('status')} ok={payload.get('ok')}")
+        for path_item in payload.get("paths") or []:
+            typer.echo(f"  {path_item}")
+        for msg in payload.get("messages") or []:
+            typer.echo(f"  note: {msg}")
+        typer.echo(f"honesty: {SURFACE_HONESTY}")
+        typer.echo("blockout-surface authoring weld only - not mesh or print success")
     if require_verdict and payload.get("status") != "accepted":
         raise typer.Exit(2)
     raise typer.Exit(0)

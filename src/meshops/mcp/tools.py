@@ -1551,3 +1551,30 @@ def mesh_proportion_benchmark_multiview(
         meshops_blend=_opt(meshops_blend),
         force=force,
     )
+
+
+def mesh_proportion_blockout_surface(
+    work_root: Path,
+    *,
+    recipe: str,
+    out: str,
+    benchmark: str | None = None,
+    cluster: str | None = None,
+    apply: bool = False,
+    allow_region_weld: bool = False,
+    figure: str | None = None,
+    verdict: str | None = None,
+) -> dict[str, Any]:
+    """One named junction weld plan. SURFACE_HONESTY — not mesh or print success."""
+    from meshops.proportion.surface_plan import run_surface_plan
+
+    return run_surface_plan(
+        _resolve_tool_path(recipe, work_root),
+        _resolve_tool_path(out, work_root),
+        benchmark=_resolve_tool_path(benchmark, work_root) if benchmark else None,
+        cluster=cluster,
+        apply=apply,
+        allow_region_weld=allow_region_weld,
+        figure=figure,
+        verdict=verdict,
+    )

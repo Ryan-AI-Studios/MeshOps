@@ -87,7 +87,7 @@ def test_t5_lip_cheek_0102_hold() -> None:
 
 def test_t6_mcp_catalog_47() -> None:
     """T6: MCP catalog stays 47."""
-    assert len(TOOL_NAMES) == 54
+    assert len(TOOL_NAMES) == 55
 
 
 def test_t7_no_loomis_cli_command() -> None:

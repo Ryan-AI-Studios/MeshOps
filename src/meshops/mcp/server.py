@@ -78,6 +78,7 @@ TOOL_NAMES: frozenset[str] = frozenset(
         "mesh_proportion_blockout_girdle_compare",
         "mesh_proportion_blockout_arm_hand_compare",
         "mesh_proportion_benchmark_multiview",
+        "mesh_proportion_blockout_surface",
     }
 )
 
@@ -1126,6 +1127,33 @@ def build_server(work_root: Path | None = None) -> Any:
             meshy_sibling_stl=meshy_sibling_stl,
             meshops_blend=meshops_blend,
             force=force,
+        )
+
+    @mcp.tool()
+    def mesh_proportion_blockout_surface(
+        recipe: str,
+        out: str,
+        benchmark: str | None = None,
+        cluster: str | None = None,
+        apply: bool = False,
+        allow_region_weld: bool = False,
+        figure: str | None = None,
+        verdict: str | None = None,
+    ) -> dict[str, Any]:
+        """One named junction weld plan. proportion_continuous_surface_not_mesh_or_print_success.
+
+        Not mesh or print success. Rank stays null. Raises ProportionError on hard failures.
+        """
+        return T.mesh_proportion_blockout_surface(
+            wr,
+            recipe=recipe,
+            out=out,
+            benchmark=benchmark,
+            cluster=cluster,
+            apply=apply,
+            allow_region_weld=allow_region_weld,
+            figure=figure,
+            verdict=verdict,
         )
 
     return mcp

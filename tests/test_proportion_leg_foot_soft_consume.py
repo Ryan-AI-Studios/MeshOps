@@ -216,5 +216,5 @@ def test_e8_measured_arch_z_after_append() -> None:
 
 
 def test_e_mcp_catalog_51() -> None:
-    assert len(TOOL_NAMES) == 54
+    assert len(TOOL_NAMES) == 55
     assert "mesh_proportion_blockout_leg_foot_compare" in TOOL_NAMES

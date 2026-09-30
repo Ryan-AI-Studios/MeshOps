@@ -93,6 +93,8 @@ known-first-party = ["meshops"]
 "src/meshops/organic/scripts/*.py" = ["F401", "F821", "I001", "E402", "E501", "RUF003"]
 # 0138 Blender driver. bpy exists only inside the Blender process.
 "src/meshops/proportion/benchmark_multiview_bpy.py" = ["F401", "F821", "I001", "E402"]
+# 0139 Blender driver. bpy exists only inside the Blender process.
+"src/meshops/proportion/surface_weld_bpy.py" = ["F401", "F821", "I001", "E402"]
 
 
 [tool.ruff.format]
@@ -114,6 +116,7 @@ exclude = [
     "src/meshops/escalate/scripts",
     "src/meshops/organic/scripts",
     "src/meshops/proportion/benchmark_multiview_bpy.py",
+    "src/meshops/proportion/surface_weld_bpy.py",
     # 0130 Face Landmarker sidecar (Python 3.12 + mediapipe)
     "scripts/face-landmarker",
 ]
