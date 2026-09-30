@@ -213,7 +213,7 @@ def _load_checked(path: Path) -> MultiviewBenchmark:
 
 def _material_names(glb_path: Path) -> list[str]:
     try:
-        loaded = trimesh.load(str(glb_path), force="scene")
+        loaded = trimesh.load(str(glb_path), file_type="glb", force="scene")
     except HostedError:
         raise
     except Exception as exc:
