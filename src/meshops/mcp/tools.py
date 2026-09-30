@@ -1578,3 +1578,29 @@ def mesh_proportion_blockout_surface(
         figure=figure,
         verdict=verdict,
     )
+
+
+def mesh_proportion_character_detail(
+    work_root: Path,
+    *,
+    benchmark: str,
+    out: str,
+    surface: str | None = None,
+    after: str | None = None,
+    figure: str | None = None,
+    verdict: str | None = None,
+) -> dict[str, Any]:
+    """Rank five crop regions. DETAIL_HONESTY — not mesh or print success."""
+    from meshops.proportion.character_detail import run_character_detail
+
+    def _opt(path: str | None) -> Path | None:
+        return _resolve_tool_path(path, work_root) if path else None
+
+    return run_character_detail(
+        _resolve_tool_path(benchmark, work_root),
+        _resolve_tool_path(out, work_root),
+        surface=_opt(surface),
+        after=_opt(after),
+        figure=figure,
+        verdict=verdict,
+    )

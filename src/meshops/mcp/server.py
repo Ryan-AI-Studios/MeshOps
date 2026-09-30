@@ -79,6 +79,7 @@ TOOL_NAMES: frozenset[str] = frozenset(
         "mesh_proportion_blockout_arm_hand_compare",
         "mesh_proportion_benchmark_multiview",
         "mesh_proportion_blockout_surface",
+        "mesh_proportion_character_detail",
     }
 )
 
@@ -1152,6 +1153,29 @@ def build_server(work_root: Path | None = None) -> Any:
             cluster=cluster,
             apply=apply,
             allow_region_weld=allow_region_weld,
+            figure=figure,
+            verdict=verdict,
+        )
+
+    @mcp.tool()
+    def mesh_proportion_character_detail(
+        benchmark: str,
+        out: str,
+        surface: str | None = None,
+        after: str | None = None,
+        figure: str | None = None,
+        verdict: str | None = None,
+    ) -> dict[str, Any]:
+        """Rank five 0138 crop regions. proportion_character_detail_not_mesh_or_print_success.
+
+        Not mesh or print success. Rank stays null. Raises ProportionError on hard failures.
+        """
+        return T.mesh_proportion_character_detail(
+            wr,
+            benchmark=benchmark,
+            out=out,
+            surface=surface,
+            after=after,
             figure=figure,
             verdict=verdict,
         )

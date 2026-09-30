@@ -56,6 +56,7 @@ ProportionErrorCode = Literal[
     "benchmark_render_unavailable",
     "surface_failed",
     "surface_weld_unavailable",
+    "detail_failed",
     "unknown",
 ]
 

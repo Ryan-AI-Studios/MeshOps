@@ -92,7 +92,8 @@ proportion_app = typer.Typer(
         "blockout-validate-constraints | "
         "blockout-optimize | blockout-emit-setup | blockout-open-setup | blockout-fuse-plan | "
         "skeleton-build | depth-heatmap | depth-hint | silhouette-compare | "
-        "benchmark-multiview | blockout-surface | blockout-feedback | blockout-face-compare | "
+        "benchmark-multiview | blockout-surface | character-detail | blockout-feedback | "
+        "blockout-face-compare | "
         "blockout-torso-compare. "
         "Assist-first landmarks + head-unit checks + blockout-grade XYZ; "
         "schema 1.1.0 diameters (edge pairs) + left depth bands + cross-sections; "
@@ -121,6 +122,8 @@ proportion_app = typer.Typer(
         "(0138; MULTIVIEW_BENCHMARK_HONESTY — N6); "
         "blockout-surface welds one named junction "
         "(0139; SURFACE_HONESTY — N6); "
+        "character-detail ranks five 0138 crop regions "
+        "(0140; DETAIL_HONESTY — N6); "
         "blockout-feedback sticky post-export checklist (depth+heatmap+silhouettes — N6); "
         "blockout-face-compare photo vs RECIPE vs optional scene "
         "(0124; FACE_COMPARE_HONESTY — N6); "
@@ -3389,6 +3392,71 @@ def proportion_blockout_surface_cmd(
             typer.echo(f"  note: {msg}")
         typer.echo(f"honesty: {SURFACE_HONESTY}")
         typer.echo("blockout-surface authoring weld only - not mesh or print success")
+    if require_verdict and payload.get("status") != "accepted":
+        raise typer.Exit(2)
+    raise typer.Exit(0)
+
+
+@proportion_app.command("character-detail")
+def proportion_character_detail_cmd(
+    benchmark: Path = typer.Option(..., "--benchmark", help="0138 multiview_benchmark.json"),
+    out: Path = typer.Option(..., "--out", help="Bundle directory (required)"),
+    surface: Path | None = typer.Option(
+        None,
+        "--surface",
+        help="Optional 0139 surface_plan.json. Provenance only",
+    ),
+    after: Path | None = typer.Option(
+        None,
+        "--after",
+        help="Optional second 0138 bundle. Omitted keeps baseline_only",
+    ),
+    figure: str | None = typer.Option(
+        None,
+        "--figure",
+        help="Required only when the benchmark lists two or more figures",
+    ),
+    verdict: str | None = typer.Option(
+        None,
+        "--verdict",
+        help="accept|reject. Omitted keeps ok false / verdict_pending",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
+    require_verdict: bool = typer.Option(
+        False,
+        "--require-verdict",
+        help="Exit 2 unless status is accepted (bundle is still written)",
+    ),
+) -> None:
+    """Rank five 0138 crop regions (0140). Not mesh or print success (N6)."""
+    from meshops.proportion.character_detail import run_character_detail
+    from meshops.proportion.errors import ProportionError
+    from meshops.proportion.honesty import DETAIL_HONESTY
+
+    try:
+        payload = run_character_detail(
+            benchmark,
+            out,
+            surface=surface,
+            after=after,
+            figure=figure,
+            verdict=verdict,
+        )
+    except ProportionError as exc:
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(exc, json_mode=json_out)
+
+    if json_out:
+        _emit_json(payload)
+    else:
+        typer.echo(f"character-detail status={payload.get('status')} ok={payload.get('ok')}")
+        for path_item in payload.get("paths") or []:
+            typer.echo(f"  {path_item}")
+        for msg in payload.get("messages") or []:
+            typer.echo(f"  note: {msg}")
+        typer.echo(f"honesty: {DETAIL_HONESTY}")
+        typer.echo("character-detail authoring report only - not mesh or print success")
     if require_verdict and payload.get("status") != "accepted":
         raise typer.Exit(2)
     raise typer.Exit(0)

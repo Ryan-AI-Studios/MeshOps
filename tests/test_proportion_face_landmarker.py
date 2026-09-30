@@ -226,7 +226,7 @@ def test_t8_missing_sidecar_skip_ok_and_no_meshops_pin() -> None:
 
 
 def test_t9_mcp_catalog_stays_53() -> None:
-    assert len(TOOL_NAMES) == 55
+    assert len(TOOL_NAMES) == 56
 
 
 def _repo_root() -> Path:
