@@ -475,7 +475,7 @@ def test_t9_product_n_parts_131_schema_mcp47() -> None:
     assert len(pkg.parts) == 131
     assert RECIPE_SCHEMA_VERSION == "1.4.0"
     assert pkg.schema_version == "1.4.0"
-    assert len(TOOL_NAMES) == 56
+    assert len(TOOL_NAMES) == 57
     result = validate_constraints(pkg, report=report)
     by_id = {r.id: r for r in result.rules}
     assert "C_palm_ellipsoid" in by_id

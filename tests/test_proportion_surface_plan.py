@@ -443,12 +443,12 @@ def test_t12_sculpt_guard_and_islands_do_not_accept() -> None:
 
 def test_t13_catalog_is_55() -> None:
     """T13: live catalog length and the setup-launch source pin are 55."""
-    assert len(TOOL_NAMES) == 56
+    assert len(TOOL_NAMES) == 57
     assert "mesh_proportion_blockout_surface" in TOOL_NAMES
     mcp_test = (_REPO / "tests/test_mcp_server.py").read_text(encoding="utf-8")
     launch = (_REPO / "tests/test_proportion_setup_launch.py").read_text(encoding="utf-8")
-    assert "len(TOOL_NAMES) == 56" in mcp_test
-    assert "len(TOOL_NAMES) == 56" in launch
+    assert "len(TOOL_NAMES) == 57" in mcp_test
+    assert "len(TOOL_NAMES) == 57" in launch
     assert "len(TOOL_NAMES) == 53" not in mcp_test
     assert "len(TOOL_NAMES) == 53" not in launch
 

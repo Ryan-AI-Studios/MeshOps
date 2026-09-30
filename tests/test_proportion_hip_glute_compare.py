@@ -733,7 +733,7 @@ def test_t8_const_hold() -> None:
 def test_f1_mcp_catalog_50() -> None:
     """F1 / T9: TOOL_NAMES stay 53 and hip-glute-compare tool present."""
     assert "mesh_proportion_blockout_hip_glute_compare" in TOOL_NAMES
-    assert len(TOOL_NAMES) == 56
+    assert len(TOOL_NAMES) == 57
 
 
 def test_f2_cli_contains_verb() -> None:

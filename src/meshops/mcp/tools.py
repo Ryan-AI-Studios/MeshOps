@@ -1604,3 +1604,33 @@ def mesh_proportion_character_detail(
         figure=figure,
         verdict=verdict,
     )
+
+
+def mesh_hosted_qualify(
+    work_root: Path,
+    *,
+    out: str,
+    glb: str | None = None,
+    stl: str | None = None,
+    benchmark: str | None = None,
+    qualify_slice: bool = False,
+    print_height_mm: float | None = None,
+    figure: str | None = None,
+    verdict: str | None = None,
+) -> dict[str, Any]:
+    """Archive a GLB or STL and write a qualification report. Not print success."""
+    from meshops.hosted.qualify import run_hosted_qualify
+
+    def _opt(path: str | None) -> Path | None:
+        return _resolve_tool_path(path, work_root) if path else None
+
+    return run_hosted_qualify(
+        out=_resolve_tool_path(out, work_root),
+        glb=_opt(glb),
+        stl=_opt(stl),
+        benchmark=_opt(benchmark),
+        qualify_slice=qualify_slice,
+        print_height_mm=print_height_mm,
+        figure=figure,
+        verdict=verdict,
+    )

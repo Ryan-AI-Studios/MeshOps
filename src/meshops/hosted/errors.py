@@ -17,6 +17,7 @@ HostedErrorCode = Literal[
     "download_failed",
     "convert_failed",
     "ingest_failed",
+    "qualify_failed",
 ]
 
 

@@ -178,5 +178,5 @@ def test_e9_no_shoulder_ball_emit() -> None:
 
 
 def test_e_mcp_catalog_53() -> None:
-    assert len(TOOL_NAMES) == 56
+    assert len(TOOL_NAMES) == 57
     assert "mesh_proportion_blockout_arm_hand_compare" in TOOL_NAMES
