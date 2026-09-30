@@ -635,7 +635,7 @@ def _mock_blender(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _solid_png(path: Path, rgb: tuple[int, int, int]) -> None:
     pytest.importorskip("PIL")
-    from PIL import Image
+    from PIL import Image  # type: ignore[import-untyped,import-not-found]
 
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (8, 8), rgb).save(path)
