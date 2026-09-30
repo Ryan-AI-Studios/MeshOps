@@ -21,7 +21,7 @@ app = typer.Typer(
         "MeshOps — triage + guarded T1/T2 repair + T7 design + T3 escalate + T6 organic + "
         "hosted multi-view fallback + Orca slice + doctor + bench + proportion "
         "(ingest / triage / render / report / repair / export / diff / accept / design / "
-        "escalate / organic / hosted / slice / doctor / bench / proportion)."
+        "escalate / organic / hosted / qualify / slice / doctor / bench / proportion)."
     ),
     add_completion=False,
     no_args_is_help=True,
@@ -1423,6 +1423,99 @@ def hosted_run_cmd(
         )
     if not result.ok:
         raise typer.Exit(1)
+
+
+@hosted_app.command(
+    "qualify",
+    help=(
+        "hosted qualify archives a GLB or STL and writes a print-qualification report "
+        "(0141; QUALIFY_HONESTY — N6)."
+    ),
+)
+def hosted_qualify_cmd(
+    out: Path = typer.Option(..., "--out", help="Bundle directory (required)"),
+    glb: Path | None = typer.Option(None, "--glb", help="GLB to archive under --out"),
+    stl: Path | None = typer.Option(None, "--stl", help="STL to archive under --out"),
+    benchmark: Path | None = typer.Option(
+        None,
+        "--benchmark",
+        help="Optional 0138 multiview_benchmark.json",
+    ),
+    qualify_slice: bool = typer.Option(
+        False,
+        "--slice",
+        help="Scale a copy and run the existing slice oracle",
+    ),
+    print_height_mm: float | None = typer.Option(
+        None,
+        "--print-height-mm",
+        help="Longest-axis target in millimetres (required with --slice)",
+    ),
+    figure: str | None = typer.Option(
+        None,
+        "--figure",
+        help="Figure id when the benchmark lists two or more figures",
+    ),
+    verdict: str | None = typer.Option(
+        None,
+        "--verdict",
+        help="accept|reject. Omitted keeps ok false / verdict_pending",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine result JSON"),
+    require_verdict: bool = typer.Option(
+        False,
+        "--require-verdict",
+        help="Exit 2 unless status is accepted (bundle is still written)",
+    ),
+) -> None:
+    """Archive a GLB or STL and write a print-qualification report (0141)."""
+    from meshops.hosted.errors import HostedError
+    from meshops.hosted.honesty import QUALIFY_HONESTY
+    from meshops.hosted.qualify import run_hosted_qualify
+
+    try:
+        payload = run_hosted_qualify(
+            out=out,
+            glb=glb,
+            stl=stl,
+            benchmark=benchmark,
+            qualify_slice=qualify_slice,
+            print_height_mm=print_height_mm,
+            figure=figure,
+            verdict=verdict,
+        )
+    except HostedError as exc:
+        if exc.code != "qualify_failed":
+            exc = HostedError(
+                str(exc),
+                code="qualify_failed",
+                details={"cause": exc.code, **exc.details},
+            )
+        _emit_error(exc, json_mode=json_out, code=1)
+    except Exception as exc:
+        _emit_error(
+            HostedError(
+                str(exc),
+                code="qualify_failed",
+                details={"cause": type(exc).__name__},
+            ),
+            json_mode=json_out,
+            code=1,
+        )
+
+    if json_out:
+        _emit_json(payload)
+    else:
+        typer.echo(f"hosted qualify status={payload.get('status')} ok={payload.get('ok')}")
+        for path_item in payload.get("paths") or []:
+            typer.echo(f"  {path_item}")
+        for msg in payload.get("messages") or []:
+            typer.echo(f"  note: {msg}")
+        typer.echo(f"honesty: {QUALIFY_HONESTY}")
+        typer.echo("hosted qualify report only - not print success")
+    if require_verdict and payload.get("status") != "accepted":
+        raise typer.Exit(2)
+    raise typer.Exit(0)
 
 
 @hosted_app.command("status")

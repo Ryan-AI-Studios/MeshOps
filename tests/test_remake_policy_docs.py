@@ -99,7 +99,7 @@ def test_t5_refuse_build_and_render(tmp_path: Path, fake_blender: Path) -> None:
 
 def test_t6_mcp_catalog_47() -> None:
     """T6: MCP catalog stays 47."""
-    assert len(TOOL_NAMES) == 56
+    assert len(TOOL_NAMES) == 57
 
 
 def test_t7_no_remake_cli_command() -> None:

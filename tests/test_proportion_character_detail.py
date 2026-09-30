@@ -414,12 +414,12 @@ def test_t12_opposite_sign_deltas_set_view_conflict(tmp_path: Path) -> None:
 
 def test_t13_catalog_is_56() -> None:
     """T13: live catalog length and the setup-launch source pin are 56."""
-    assert len(TOOL_NAMES) == 56
+    assert len(TOOL_NAMES) == 57
     assert "mesh_proportion_character_detail" in TOOL_NAMES
     mcp_test = (_REPO / "tests/test_mcp_server.py").read_text(encoding="utf-8")
     launch = (_REPO / "tests/test_proportion_setup_launch.py").read_text(encoding="utf-8")
-    assert "len(TOOL_NAMES) == 56" in mcp_test
-    assert "len(TOOL_NAMES) == 56" in launch
+    assert "len(TOOL_NAMES) == 57" in mcp_test
+    assert "len(TOOL_NAMES) == 57" in launch
     assert "len(TOOL_NAMES) == 53" not in mcp_test
     assert "len(TOOL_NAMES) == 53" not in launch
 

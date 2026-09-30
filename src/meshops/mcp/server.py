@@ -80,6 +80,7 @@ TOOL_NAMES: frozenset[str] = frozenset(
         "mesh_proportion_benchmark_multiview",
         "mesh_proportion_blockout_surface",
         "mesh_proportion_character_detail",
+        "mesh_hosted_qualify",
     }
 )
 
@@ -1176,6 +1177,34 @@ def build_server(work_root: Path | None = None) -> Any:
             out=out,
             surface=surface,
             after=after,
+            figure=figure,
+            verdict=verdict,
+        )
+
+    @mcp.tool()
+    def mesh_hosted_qualify(
+        out: str,
+        glb: str | None = None,
+        stl: str | None = None,
+        benchmark: str | None = None,
+        qualify_slice: bool = False,
+        print_height_mm: float | None = None,
+        figure: str | None = None,
+        verdict: str | None = None,
+    ) -> dict[str, Any]:
+        """Archive a GLB or STL and write a print-qualification report.
+
+        hosted_mesh_qualification_not_print_success. Does not repair.
+        Rank stays null. Raises HostedError on hard failures.
+        """
+        return T.mesh_hosted_qualify(
+            wr,
+            out=out,
+            glb=glb,
+            stl=stl,
+            benchmark=benchmark,
+            qualify_slice=qualify_slice,
+            print_height_mm=print_height_mm,
             figure=figure,
             verdict=verdict,
         )

@@ -8,3 +8,5 @@ HOSTED_HONESTY = (
     "Ingested as untrusted mesh; triage + job views required. "
     "Verify provider ToS before commercial print."
 )
+
+QUALIFY_HONESTY = "hosted_mesh_qualification_not_print_success"

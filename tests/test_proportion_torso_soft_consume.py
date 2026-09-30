@@ -135,4 +135,4 @@ def test_e_left_y_consumed_on_mid_back() -> None:
 
 
 def test_e_mcp_catalog_49() -> None:
-    assert len(TOOL_NAMES) == 56
+    assert len(TOOL_NAMES) == 57

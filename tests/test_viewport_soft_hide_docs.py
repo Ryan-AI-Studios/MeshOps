@@ -90,7 +90,7 @@ def test_t5_compact_cull_name_sets_hold() -> None:
 
 def test_t6_mcp_catalog_47() -> None:
     """T6: MCP catalog stays 47."""
-    assert len(TOOL_NAMES) == 56
+    assert len(TOOL_NAMES) == 57
 
 
 def test_t7_no_hide_cli_command() -> None:

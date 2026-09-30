@@ -342,11 +342,11 @@ def test_t11_require_verdict_exits_2_after_write(tmp_path: Path) -> None:
 
 def test_t12_catalog_is_54() -> None:
     """T12: live catalog length and the setup-launch source pin are 54."""
-    assert len(TOOL_NAMES) == 56
+    assert len(TOOL_NAMES) == 57
     mcp_test = (_REPO / "tests/test_mcp_server.py").read_text(encoding="utf-8")
     launch = (_REPO / "tests/test_proportion_setup_launch.py").read_text(encoding="utf-8")
-    assert "len(TOOL_NAMES) == 56" in mcp_test
-    assert "len(TOOL_NAMES) == 56" in launch
+    assert "len(TOOL_NAMES) == 57" in mcp_test
+    assert "len(TOOL_NAMES) == 57" in launch
     assert "len(TOOL_NAMES) == 53" not in mcp_test
     assert "len(TOOL_NAMES) == 53" not in launch
 
